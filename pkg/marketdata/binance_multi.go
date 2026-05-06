@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"strings"
 	"sync"
@@ -111,6 +112,39 @@ func NewBinanceFuturesMulti(wsURL, restURL string, symbols []string, backfillHou
 		restURL:       restURL,
 		symbols:       append([]string(nil), symbols...),
 		backfillHours: backfillHours,
+	}
+}
+
+// backfillAll runs backfill sequentially for each symbol. Sequential rather
+// than parallel to avoid the 48,000-weight burst that triggered the
+// 2026-05-06 IP ban (32 engines × 1500-kline backfill simultaneously).
+//
+// At ~300ms per symbol × 16 symbols = ~5 seconds total. Acceptable startup cost.
+// Backfill failure for one symbol is logged but does not abort — that symbol
+// runs blind for ~24h until DailyLevels populates from live ticks.
+func (b *BinanceFuturesMulti) backfillAll(ctx context.Context, channels map[string]chan models.Tick) {
+	for _, sym := range b.symbols {
+		ch, ok := channels[sym]
+		if !ok {
+			continue
+		}
+		// Reuse the single-symbol backfill from binance.go via a temporary
+		// BinanceFutures instance. Avoids duplicating REST-kline logic.
+		single := &BinanceFutures{
+			restURL:       b.restURL,
+			symbol:        sym,
+			backfillHours: b.backfillHours,
+		}
+		if err := single.backfill(ctx, ch); err != nil {
+			slog.Warn("multi: backfill failed for symbol — proceeding without history",
+				"symbol", sym, "err", err)
+		}
+		// Yield between symbols so any 429 has time to clear.
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(50 * time.Millisecond):
+		}
 	}
 }
 
