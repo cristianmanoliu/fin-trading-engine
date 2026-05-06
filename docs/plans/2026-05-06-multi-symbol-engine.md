@@ -38,6 +38,25 @@
 
 **Goal of task:** Define the wire types Binance sends on the combined-streams endpoint. These are pure data structures with no behavior — first task to ground subsequent code.
 
+- [ ] **Step 0: Fix a latent JSON-collision bug in `aggTradeMsg`**
+
+The existing `aggTradeMsg` in `pkg/marketdata/binance.go` lines 182-188 has tag `json:"e"` for `EventType string`. Binance aggTrade payloads include BOTH `"e":"aggTrade"` AND `"E":1748128765432` (event time). Go's `encoding/json` falls back to case-insensitive matching when an exact match isn't found — it tries to assign the number `1748128765432` from `"E"` into the `string` field tagged `e`, returning a non-nil error from `Unmarshal`. The struct gets partially populated, but the error causes `binance.go:253-256` to `continue` and drop the tick. Discovered while writing Task 1's test — same JSON shape fails identically.
+
+Fix: add the missing field so the exact-match path succeeds. In `pkg/marketdata/binance.go`:
+
+```go
+// aggTradeMsg is the Binance aggTrade WebSocket message shape.
+type aggTradeMsg struct {
+	EventType string `json:"e"`
+	EventTime int64  `json:"E"` // ← NEW: fixes case-insensitive collision with `e`
+	TradeTime int64  `json:"T"`
+	Price     string `json:"p"`
+	Qty       string `json:"q"`
+}
+```
+
+This is a non-breaking change (struct grows; existing field reads unchanged). It silently fixes the single-symbol live engine's WS path AND lets Task 1's test pass with realistic Binance JSON.
+
 - [ ] **Step 1: Write the failing test for envelope unmarshalling**
 
 Create `pkg/marketdata/binance_multi_test.go`:
