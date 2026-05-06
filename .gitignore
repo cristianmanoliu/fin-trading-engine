@@ -4,6 +4,10 @@ data/*.csv
 # Build artifacts
 bin/
 *.exe
+*.exe~
+*.dll
+*.so
+*.dylib
 
 # Local logs (paper-live engine output, not source)
 logs/
@@ -25,11 +29,21 @@ journal/
 __pycache__/
 *.pyc
 
-# Go test/profile outputs
+# Go test/coverage/profile outputs
 *.test
 *.prof
 *.out
-coverage.txt
+coverage.*
+*.coverprofile
+profile.cov
+
+# Go workspace
+go.work
+go.work.sum
+
+# Secrets
+.env
+*.env.local
 
 # Temporary
 /tmp/
