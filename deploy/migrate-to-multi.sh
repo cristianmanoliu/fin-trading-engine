@@ -66,8 +66,13 @@ ssh "$HOST" '
 '
 
 echo ""
-echo "=== 8. Re-enable watchdog/digest timers (point them at multi log) ==="
-ssh "$HOST" 'systemctl enable --now paper-live-watchdog.timer paper-live-digest.timer || true'
-
+echo "=== 8. Watchdog/digest timers — DELIBERATELY LEFT DISABLED ==="
+echo "The watchdog and digest scripts still parse per-symbol log paths"
+echo "(/var/log/paper-live/{SYMBOL}.log) rather than the unified multi.log."
+echo "Re-enabling them now would either spam false alerts (no per-symbol logs)"
+echo "or silently miss real stalls. Update the watchdog scripts to read"
+echo "/var/log/paper-live/multi.log first, then re-enable manually:"
 echo ""
-echo "Migration complete."
+echo "  ssh $HOST 'systemctl enable --now paper-live-watchdog.timer paper-live-digest.timer'"
+echo ""
+echo "Migration complete (watchdog/digest deferred — see note above)."
