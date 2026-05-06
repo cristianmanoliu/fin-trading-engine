@@ -1,0 +1,53 @@
+
+==================================================================================
+  TRAIN-ONLY SHORTLIST DIAGNOSTIC  (P4-Combined, signal_tf=4H, target_rr=6)
+  Train: 2020-01..2022-12   Test: 2023-01..2025-04
+  Costs: --fee-bps=10  --stop-slippage-bps=25  --funding=CSV
+==================================================================================
+
+  Cohort                                        n    train_NET     test_NET
+  ------------------------------------------ ---- ------------ ------------
+  all-57            (control)                  57 $   +210,849 $   +192,910
+  deployed-32       (LOOK-AHEAD filter)        23 $   +438,620 $   +301,367
+  train-positive    (honest, n=var)            32 $   +557,307 $   +177,520
+  top-32-by-train   (honest, n=32)             32 $   +557,307 $   +177,520
+
+  Look-ahead inflation in deployed-32 test_NET
+  ----------------------------------------------------------------------------------
+    vs train-positive  (n=32): $  +123,847  (+69.8% inflation)
+    vs top-32-by-train (n=32): $  +123,847  (+69.8% inflation)
+
+  Swap accounting: deployed-32 vs top-32-by-train
+  ----------------------------------------------------------------------------------
+    Removed from top-32-by-train (looked-ahead-out): ['AXSUSDT', 'BCHUSDT', 'DOGEUSDT', 'DYDXUSDT', 'ICPUSDT', 'IMXUSDT', 'INJUSDT', 'MANAUSDT', 'XLMUSDT']
+      Their train_NET sum: $  +118,687
+      Their test_NET  sum: $  -123,847
+    Added by deployed (looked-ahead-in):             []
+      Their train_NET sum: $        +0
+      Their test_NET  sum: $        +0
+
+  Cohort composition
+  ----------------------------------------------------------------------------------
+    Persistent winners (deployed-32):  23 symbols
+    Train-WIN, Test-LOSS (regime flip): ['AXSUSDT', 'BCHUSDT', 'DOGEUSDT', 'DYDXUSDT', 'ICPUSDT', 'IMXUSDT', 'INJUSDT', 'MANAUSDT', 'XLMUSDT']
+      Test contribution: $  -123,847
+    Train-LOSS, Test-WIN (recoveries — INVISIBLE to honest filter):
+      Symbols: ['ARBUSDT', 'ETHUSDT', 'GMXUSDT', 'HBARUSDT', 'IOTAUSDT', 'LDOUSDT', 'LINKUSDT', 'OPUSDT', 'PYTHUSDT', 'SEIUSDT', 'SUIUSDT', 'TIAUSDT', 'VETUSDT', 'WLDUSDT']
+      Test contribution: $  +207,110
+    Persistent losers (drop): ['ATOMUSDT', 'BLURUSDT', 'BNBUSDT', 'BTCUSDT', 'CHZUSDT', 'LTCUSDT', 'SANDUSDT', 'TRXUSDT', 'UNIUSDT', 'XRPUSDT', 'ZILUSDT']
+      Test contribution: $  -191,720
+
+  Annualised test PnL (period = 2.33 years, slip=25bp)
+  ----------------------------------------------------------------------------------
+    all-57            (control)                $    +82,676/yr
+    deployed-32       (LOOK-AHEAD filter)      $   +129,157/yr
+    train-positive    (honest, n=var)          $    +76,080/yr
+    top-32-by-train   (honest, n=32)           $    +76,080/yr
+
+  Verdict
+  ----------------------------------------------------------------------------------
+    PASS: strategy is positive on test under BOTH honest selection rules.
+    Look-ahead bias inflated deployed-32 test by +70% vs same-size honest top-32-by-train,
+    but did NOT flip the sign. Honest annualised test ≈ $76,080/yr at slip=25bp.
+    The strategy survives the diagnostic with a haircut.
+

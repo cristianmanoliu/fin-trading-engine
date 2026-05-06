@@ -1,0 +1,18 @@
+symbol: GMXUSDT
+
+exchange:
+  ws_url: wss://fstream.binance.com
+
+strategy:
+  proximity_pct: 0.001
+  wick_ratio: 2.0
+  breakout_body_ratio: 0.6
+  absorption_candles: 2
+  stop_buffer_pct: 0.001
+  min_rr: 1.0          # global setting: most consistent across all instruments
+  stake_usd: 1000
+
+backtest:
+  csv_path: ./data/GMXUSDT-1m-2024-01.csv
+
+zones: []

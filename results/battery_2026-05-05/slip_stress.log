@@ -1,0 +1,557 @@
+=== Slippage stress battery started 2026-05-05T19:28:01Z ===
+>>> 19:28:01 starting combined_slip15
+
+════════════════════════════════════════════════════════════════════════════════════════
+  P4 variant: combined_slip15
+  Args:  --signal-tf 4H  --target_rr=6.0  --side-filter short --max-hold-hours 336
+  Costs: fee=10bp slip=15bp funding=0bp/day tax=0%
+════════════════════════════════════════════════════════════════════════════════════════
+
+TOTAL  57 sym  7772 trades  20.64% WR
+  Gross +1643447  Fees 421151  Funding 0  →  NET +710280  | 42/57 profitable
+  Long_NET +0   Short_NET +710280
+
+Top 15 by NET:
+  MKRUSDT              149 trades    39 wins  net    +73486  long       +0  short   +73486
+  GRTUSDT              140 trades    37 wins  net    +64197  long       +0  short   +64197
+  ROSEUSDT             117 trades    31 wins  net    +61912  long       +0  short   +61912
+  AVAXUSDT             132 trades    34 wins  net    +53290  long       +0  short   +53290
+  ENSUSDT              122 trades    31 wins  net    +53142  long       +0  short   +53142
+  CRVUSDT              158 trades    35 wins  net    +47136  long       +0  short   +47136
+  ADAUSDT              187 trades    43 wins  net    +40600  long       +0  short   +40600
+  ARBUSDT               74 trades    19 wins  net    +40470  long       +0  short   +40470
+  KAVAUSDT             154 trades    34 wins  net    +39941  long       +0  short   +39941
+  NEARUSDT             151 trades    33 wins  net    +37775  long       +0  short   +37775
+  1INCHUSDT            139 trades    34 wins  net    +37529  long       +0  short   +37529
+  FTMUSDT              138 trades    34 wins  net    +36959  long       +0  short   +36959
+  SOLUSDT              141 trades    34 wins  net    +36390  long       +0  short   +36390
+  DOTUSDT              169 trades    36 wins  net    +35033  long       +0  short   +35033
+  1000SHIBUSDT         122 trades    28 wins  net    +29986  long       +0  short   +29986
+
+Bottom 5 by NET:
+  BTCUSDT              163 trades    22 wins  net    -82470  long       +0  short   -82470
+  TRXUSDT              189 trades    26 wins  net    -75864  long       +0  short   -75864
+  XRPUSDT              177 trades    30 wins  net    -48490  long       +0  short   -48490
+  SANDUSDT             134 trades    21 wins  net    -41563  long       +0  short   -41563
+  ATOMUSDT             179 trades    30 wins  net    -36241  long       +0  short   -36241
+→ Output: results/battery_2026-05-05/combined_slip15.txt
+>>> 19:28:31 finished combined_slip15
+>>> 19:28:31 starting maxhold_only_slip15
+
+════════════════════════════════════════════════════════════════════════════════════════
+  P4 variant: maxhold_only_slip15
+  Args:  --signal-tf 4H  --target_rr=6.0  --max-hold-hours 336
+  Costs: fee=10bp slip=15bp funding=0bp/day tax=0%
+════════════════════════════════════════════════════════════════════════════════════════
+
+TOTAL  57 sym  13369 trades  18.96% WR
+  Gross +2040181  Fees 728329  Funding 0  →  NET +413307  | 33/57 profitable
+  Long_NET -174809   Short_NET +588115
+
+Top 15 by NET:
+  SOLUSDT              239 trades    61 wins  net    +81967  long   +45119  short   +36847
+  GRTUSDT              250 trades    56 wins  net    +77145  long    -8722  short   +85867
+  AVAXUSDT             234 trades    56 wins  net    +77041  long   +27517  short   +49524
+  1INCHUSDT            238 trades    56 wins  net    +64050  long   +25267  short   +38782
+  MKRUSDT              278 trades    59 wins  net    +58601  long    -8279  short   +66880
+  FTMUSDT              239 trades    54 wins  net    +57018  long   +31151  short   +25866
+  XLMUSDT              304 trades    66 wins  net    +52995  long   +24611  short   +28384
+  KAVAUSDT             277 trades    55 wins  net    +52000  long   +11100  short   +40899
+  RUNEUSDT             266 trades    55 wins  net    +47009  long   +37922  short    +9086
+  MANAUSDT             227 trades    49 wins  net    +46708  long   +39328  short    +7380
+  ARBUSDT              121 trades    28 wins  net    +39549  long     +180  short   +39368
+  VETUSDT              278 trades    58 wins  net    +38862  long   +15356  short   +23506
+  NEARUSDT             257 trades    54 wins  net    +38125  long   +13282  short   +24842
+  OPUSDT               165 trades    35 wins  net    +35989  long   +39782  short    -3793
+  DOTUSDT              273 trades    54 wins  net    +29643  long     -217  short   +29861
+
+Bottom 5 by NET:
+  XRPUSDT              321 trades    51 wins  net    -82980  long   -30798  short   -52181
+  BTCUSDT              274 trades    46 wins  net    -72130  long    -2233  short   -69896
+  ZILUSDT              247 trades    44 wins  net    -49796  long   -14760  short   -35035
+  UNIUSDT              277 trades    47 wins  net    -46432  long   -24961  short   -21471
+  LTCUSDT              357 trades    57 wins  net    -43628  long    -2743  short   -40884
+→ Output: results/battery_2026-05-05/maxhold_only_slip15.txt
+>>> 19:29:01 finished maxhold_only_slip15
+>>> 19:29:01 starting shorts_only_slip15
+
+════════════════════════════════════════════════════════════════════════════════════════
+  P4 variant: shorts_only_slip15
+  Args:  --signal-tf 4H  --target_rr=6.0  --side-filter short
+  Costs: fee=10bp slip=15bp funding=0bp/day tax=0%
+════════════════════════════════════════════════════════════════════════════════════════
+
+TOTAL  57 sym  5809 trades  16.70% WR
+  Gross +1082819  Fees 297800  Funding 0  →  NET +414798  | 39/57 profitable
+  Long_NET +0   Short_NET +414798
+
+Top 15 by NET:
+  AVAXUSDT             120 trades    27 wins  net    +58302  long       +0  short   +58302
+  MKRUSDT              122 trades    27 wins  net    +53319  long       +0  short   +53319
+  GRTUSDT              112 trades    24 wins  net    +47495  long       +0  short   +47495
+  ADAUSDT              172 trades    34 wins  net    +45803  long       +0  short   +45803
+  ENSUSDT               47 trades    13 wins  net    +41920  long       +0  short   +41920
+  VETUSDT              141 trades    28 wins  net    +40975  long       +0  short   +40975
+  ARBUSDT               70 trades    17 wins  net    +40120  long       +0  short   +40120
+  1INCHUSDT             44 trades    11 wins  net    +34850  long       +0  short   +34850
+  FTMUSDT              117 trades    23 wins  net    +34493  long       +0  short   +34493
+  DOTUSDT              104 trades    21 wins  net    +34489  long       +0  short   +34489
+  1000SHIBUSDT         106 trades    22 wins  net    +34171  long       +0  short   +34171
+  GALAUSDT             115 trades    22 wins  net    +27031  long       +0  short   +27031
+  ROSEUSDT             104 trades    20 wins  net    +25647  long       +0  short   +25647
+  XLMUSDT              150 trades    27 wins  net    +24877  long       +0  short   +24877
+  CRVUSDT              139 trades    25 wins  net    +24848  long       +0  short   +24848
+
+Bottom 5 by NET:
+  BTCUSDT              143 trades    12 wins  net    -89848  long       +0  short   -89848
+  TRXUSDT              167 trades    19 wins  net    -66287  long       +0  short   -66287
+  SANDUSDT             104 trades    11 wins  net    -35811  long       +0  short   -35811
+  RUNEUSDT              93 trades    10 wins  net    -31586  long       +0  short   -31586
+  ATOMUSDT             149 trades    20 wins  net    -25549  long       +0  short   -25549
+→ Output: results/battery_2026-05-05/shorts_only_slip15.txt
+>>> 19:29:31 finished shorts_only_slip15
+>>> 19:29:31 starting longs_combined_slip15
+
+════════════════════════════════════════════════════════════════════════════════════════
+  P4 variant: longs_combined_slip15
+  Args:  --signal-tf 4H  --target_rr=6.0  --side-filter long --max-hold-hours 336
+  Costs: fee=10bp slip=15bp funding=0bp/day tax=0%
+════════════════════════════════════════════════════════════════════════════════════════
+
+TOTAL  57 sym  8163 trades  16.97% WR
+  Gross +698607  Fees 470819  Funding 0  →  NET -363801  | 25/57 profitable
+  Long_NET -363801   Short_NET +0
+
+Top 15 by NET:
+  TRXUSDT              193 trades    43 wins  net    +48725  long   +48725  short       +0
+  RUNEUSDT             165 trades    35 wins  net    +45772  long   +45772  short       +0
+  SANDUSDT             138 trades    30 wins  net    +45697  long   +45697  short       +0
+  OPUSDT               106 trades    24 wins  net    +40810  long   +40810  short       +0
+  LTCUSDT              211 trades    42 wins  net    +35132  long   +35132  short       +0
+  CHZUSDT              145 trades    28 wins  net    +30786  long   +30786  short       +0
+  SOLUSDT              148 trades    33 wins  net    +28888  long   +28888  short       +0
+  DOTUSDT              162 trades    32 wins  net    +22647  long   +22647  short       +0
+  MANAUSDT             138 trades    27 wins  net    +19851  long   +19851  short       +0
+  1INCHUSDT            162 trades    32 wins  net    +19397  long   +19397  short       +0
+  ETHUSDT              185 trades    35 wins  net    +16568  long   +16568  short       +0
+  WLDUSDT               62 trades    13 wins  net    +14149  long   +14149  short       +0
+  FTMUSDT              148 trades    29 wins  net    +12927  long   +12927  short       +0
+  SEIUSDT               51 trades    10 wins  net    +12636  long   +12636  short       +0
+  NEARUSDT             161 trades    31 wins  net    +11003  long   +11003  short       +0
+
+Bottom 5 by NET:
+  ADAUSDT              184 trades    24 wins  net    -63326  long   -63326  short       +0
+  DYDXUSDT             132 trades    13 wins  net    -60747  long   -60747  short       +0
+  FILUSDT              155 trades    17 wins  net    -56190  long   -56190  short       +0
+  UNIUSDT              172 trades    24 wins  net    -53669  long   -53669  short       +0
+  BNBUSDT              178 trades    27 wins  net    -49927  long   -49927  short       +0
+→ Output: results/battery_2026-05-05/longs_combined_slip15.txt
+>>> 19:30:00 finished longs_combined_slip15
+>>> 19:30:00 starting combined_slip25
+
+════════════════════════════════════════════════════════════════════════════════════════
+  P4 variant: combined_slip25
+  Args:  --signal-tf 4H  --target_rr=6.0  --side-filter short --max-hold-hours 336
+  Costs: fee=10bp slip=25bp funding=0bp/day tax=0%
+════════════════════════════════════════════════════════════════════════════════════════
+
+TOTAL  57 sym  7772 trades  20.64% WR
+  Gross +1643447  Fees 421151  Funding 0  →  NET +368936  | 41/57 profitable
+  Long_NET +0   Short_NET +368936
+
+Top 15 by NET:
+  MKRUSDT              149 trades    39 wins  net    +67501  long       +0  short   +67501
+  GRTUSDT              140 trades    37 wins  net    +59299  long       +0  short   +59299
+  ROSEUSDT             117 trades    31 wins  net    +57445  long       +0  short   +57445
+  AVAXUSDT             132 trades    34 wins  net    +48571  long       +0  short   +48571
+  ENSUSDT              122 trades    31 wins  net    +48102  long       +0  short   +48102
+  CRVUSDT              158 trades    35 wins  net    +42303  long       +0  short   +42303
+  ARBUSDT               74 trades    19 wins  net    +36600  long       +0  short   +36600
+  KAVAUSDT             154 trades    34 wins  net    +34331  long       +0  short   +34331
+  1INCHUSDT            139 trades    34 wins  net    +32472  long       +0  short   +32472
+  NEARUSDT             151 trades    33 wins  net    +32460  long       +0  short   +32460
+  FTMUSDT              138 trades    34 wins  net    +32308  long       +0  short   +32308
+  ADAUSDT              187 trades    43 wins  net    +31684  long       +0  short   +31684
+  SOLUSDT              141 trades    34 wins  net    +31431  long       +0  short   +31431
+  DOTUSDT              169 trades    36 wins  net    +27746  long       +0  short   +27746
+  1000SHIBUSDT         122 trades    28 wins  net    +23965  long       +0  short   +23965
+
+Bottom 5 by NET:
+  BTCUSDT              163 trades    22 wins  net    -95736  long       +0  short   -95736
+  TRXUSDT              189 trades    26 wins  net    -89776  long       +0  short   -89776
+  XRPUSDT              177 trades    30 wins  net    -58935  long       +0  short   -58935
+  SANDUSDT             134 trades    21 wins  net    -47320  long       +0  short   -47320
+  ATOMUSDT             179 trades    30 wins  net    -44157  long       +0  short   -44157
+→ Output: results/battery_2026-05-05/combined_slip25.txt
+>>> 19:30:29 finished combined_slip25
+>>> 19:30:29 starting maxhold_only_slip25
+
+════════════════════════════════════════════════════════════════════════════════════════
+  P4 variant: maxhold_only_slip25
+  Args:  --signal-tf 4H  --target_rr=6.0  --max-hold-hours 336
+  Costs: fee=10bp slip=25bp funding=0bp/day tax=0%
+════════════════════════════════════════════════════════════════════════════════════════
+
+TOTAL  57 sym  13369 trades  18.96% WR
+  Gross +2040181  Fees 728329  Funding 0  →  NET -185724  | 27/57 profitable
+  Long_NET -481575   Short_NET +295851
+
+Top 15 by NET:
+  SOLUSDT              239 trades    61 wins  net    +73331  long   +40823  short   +32508
+  GRTUSDT              250 trades    56 wins  net    +67940  long   -13697  short   +81637
+  AVAXUSDT             234 trades    56 wins  net    +67914  long   +22140  short   +45773
+  1INCHUSDT            238 trades    56 wins  net    +54461  long   +20011  short   +34450
+  FTMUSDT              239 trades    54 wins  net    +49060  long   +27615  short   +21444
+  MKRUSDT              278 trades    59 wins  net    +47053  long   -14493  short   +61547
+  KAVAUSDT             277 trades    55 wins  net    +41670  long    +5870  short   +35800
+  RUNEUSDT             266 trades    55 wins  net    +38274  long   +33265  short    +5008
+  XLMUSDT              304 trades    66 wins  net    +37804  long   +16228  short   +21575
+  MANAUSDT             227 trades    49 wins  net    +36996  long   +34691  short    +2305
+  ARBUSDT              121 trades    28 wins  net    +33414  long    -2832  short   +36246
+  NEARUSDT             257 trades    54 wins  net    +29554  long    +8890  short   +20663
+  OPUSDT               165 trades    35 wins  net    +29553  long   +36792  short    -7239
+  VETUSDT              278 trades    58 wins  net    +27663  long    +9272  short   +18390
+  APEUSDT              182 trades    38 wins  net    +21256  long     +105  short   +21150
+
+Bottom 5 by NET:
+  XRPUSDT              321 trades    51 wins  net   -100909  long   -39549  short   -61359
+  BTCUSDT              274 trades    46 wins  net    -93307  long   -12672  short   -80634
+  LTCUSDT              357 trades    57 wins  net    -62896  long   -12484  short   -50411
+  ZILUSDT              247 trades    44 wins  net    -60351  long   -19981  short   -40370
+  UNIUSDT              277 trades    47 wins  net    -57221  long   -30565  short   -26655
+→ Output: results/battery_2026-05-05/maxhold_only_slip25.txt
+>>> 19:30:59 finished maxhold_only_slip25
+>>> 19:30:59 starting shorts_only_slip25
+
+════════════════════════════════════════════════════════════════════════════════════════
+  P4 variant: shorts_only_slip25
+  Args:  --signal-tf 4H  --target_rr=6.0  --side-filter short
+  Costs: fee=10bp slip=25bp funding=0bp/day tax=0%
+════════════════════════════════════════════════════════════════════════════════════════
+
+TOTAL  57 sym  5809 trades  16.70% WR
+  Gross +1082819  Fees 297800  Funding 0  →  NET +167984  | 34/57 profitable
+  Long_NET +0   Short_NET +167984
+
+Top 15 by NET:
+  AVAXUSDT             120 trades    27 wins  net    +53931  long       +0  short   +53931
+  MKRUSDT              122 trades    27 wins  net    +48640  long       +0  short   +48640
+  GRTUSDT              112 trades    24 wins  net    +43642  long       +0  short   +43642
+  ENSUSDT               47 trades    13 wins  net    +40497  long       +0  short   +40497
+  ADAUSDT              172 trades    34 wins  net    +37746  long       +0  short   +37746
+  ARBUSDT               70 trades    17 wins  net    +36396  long       +0  short   +36396
+  VETUSDT              141 trades    28 wins  net    +35680  long       +0  short   +35680
+  1INCHUSDT             44 trades    11 wins  net    +33785  long       +0  short   +33785
+  DOTUSDT              104 trades    21 wins  net    +30846  long       +0  short   +30846
+  FTMUSDT              117 trades    23 wins  net    +30653  long       +0  short   +30653
+  1000SHIBUSDT         106 trades    22 wins  net    +28999  long       +0  short   +28999
+  PYTHUSDT              40 trades     9 wins  net    +22657  long       +0  short   +22657
+  GALAUSDT             115 trades    22 wins  net    +22367  long       +0  short   +22367
+  ROSEUSDT             104 trades    20 wins  net    +21908  long       +0  short   +21908
+  CRVUSDT              139 trades    25 wins  net    +20760  long       +0  short   +20760
+
+Bottom 5 by NET:
+  BTCUSDT              143 trades    12 wins  net   -101765  long       +0  short  -101765
+  TRXUSDT              167 trades    19 wins  net    -78643  long       +0  short   -78643
+  SANDUSDT             104 trades    11 wins  net    -40186  long       +0  short   -40186
+  RUNEUSDT              93 trades    10 wins  net    -35149  long       +0  short   -35149
+  ATOMUSDT             149 trades    20 wins  net    -31778  long       +0  short   -31778
+→ Output: results/battery_2026-05-05/shorts_only_slip25.txt
+>>> 19:31:27 finished shorts_only_slip25
+>>> 19:31:27 starting longs_combined_slip25
+
+════════════════════════════════════════════════════════════════════════════════════════
+  P4 variant: longs_combined_slip25
+  Args:  --signal-tf 4H  --target_rr=6.0  --side-filter long --max-hold-hours 336
+  Costs: fee=10bp slip=25bp funding=0bp/day tax=0%
+════════════════════════════════════════════════════════════════════════════════════════
+
+TOTAL  57 sym  8163 trades  16.97% WR
+  Gross +698607  Fees 470819  Funding 0  →  NET -758194  | 18/57 profitable
+  Long_NET -758194   Short_NET +0
+
+Top 15 by NET:
+  RUNEUSDT             165 trades    35 wins  net    +39901  long   +39901  short       +0
+  SANDUSDT             138 trades    30 wins  net    +39809  long   +39809  short       +0
+  OPUSDT               106 trades    24 wins  net    +36684  long   +36684  short       +0
+  TRXUSDT              193 trades    43 wins  net    +33282  long   +33282  short       +0
+  CHZUSDT              145 trades    28 wins  net    +24647  long   +24647  short       +0
+  SOLUSDT              148 trades    33 wins  net    +23334  long   +23334  short       +0
+  LTCUSDT              211 trades    42 wins  net    +22897  long   +22897  short       +0
+  DOTUSDT              162 trades    32 wins  net    +14634  long   +14634  short       +0
+  MANAUSDT             138 trades    27 wins  net    +13377  long   +13377  short       +0
+  WLDUSDT               62 trades    13 wins  net    +11987  long   +11987  short       +0
+  1INCHUSDT            162 trades    32 wins  net    +11196  long   +11196  short       +0
+  SEIUSDT               51 trades    10 wins  net    +11063  long   +11063  short       +0
+  FTMUSDT              148 trades    29 wins  net     +7614  long    +7614  short       +0
+  NEARUSDT             161 trades    31 wins  net     +5380  long    +5380  short       +0
+  ETHUSDT              185 trades    35 wins  net     +5217  long    +5217  short       +0
+
+Bottom 5 by NET:
+  ADAUSDT              184 trades    24 wins  net    -73057  long   -73057  short       +0
+  DYDXUSDT             132 trades    13 wins  net    -65944  long   -65944  short       +0
+  FILUSDT              155 trades    17 wins  net    -64311  long   -64311  short       +0
+  BNBUSDT              178 trades    27 wins  net    -63191  long   -63191  short       +0
+  UNIUSDT              172 trades    24 wins  net    -61539  long   -61539  short       +0
+→ Output: results/battery_2026-05-05/longs_combined_slip25.txt
+>>> 19:31:56 finished longs_combined_slip25
+>>> 19:31:56 starting combined_slip40
+
+════════════════════════════════════════════════════════════════════════════════════════
+  P4 variant: combined_slip40
+  Args:  --signal-tf 4H  --target_rr=6.0  --side-filter short --max-hold-hours 336
+  Costs: fee=10bp slip=40bp funding=0bp/day tax=0%
+════════════════════════════════════════════════════════════════════════════════════════
+
+TOTAL  57 sym  7772 trades  20.64% WR
+  Gross +1643447  Fees 421151  Funding 0  →  NET -143079  | 35/57 profitable
+  Long_NET +0   Short_NET -143079
+
+Top 15 by NET:
+  MKRUSDT              149 trades    39 wins  net    +58523  long       +0  short   +58523
+  GRTUSDT              140 trades    37 wins  net    +51953  long       +0  short   +51953
+  ROSEUSDT             117 trades    31 wins  net    +50745  long       +0  short   +50745
+  AVAXUSDT             132 trades    34 wins  net    +41493  long       +0  short   +41493
+  ENSUSDT              122 trades    31 wins  net    +40540  long       +0  short   +40540
+  CRVUSDT              158 trades    35 wins  net    +35054  long       +0  short   +35054
+  ARBUSDT               74 trades    19 wins  net    +30794  long       +0  short   +30794
+  KAVAUSDT             154 trades    34 wins  net    +25916  long       +0  short   +25916
+  FTMUSDT              138 trades    34 wins  net    +25333  long       +0  short   +25333
+  1INCHUSDT            139 trades    34 wins  net    +24886  long       +0  short   +24886
+  NEARUSDT             151 trades    33 wins  net    +24487  long       +0  short   +24487
+  SOLUSDT              141 trades    34 wins  net    +23992  long       +0  short   +23992
+  PYTHUSDT              44 trades    11 wins  net    +19597  long       +0  short   +19597
+  ADAUSDT              187 trades    43 wins  net    +18309  long       +0  short   +18309
+  SEIUSDT               52 trades    12 wins  net    +17814  long       +0  short   +17814
+
+Bottom 5 by NET:
+  BTCUSDT              163 trades    22 wins  net   -115637  long       +0  short  -115637
+  TRXUSDT              189 trades    26 wins  net   -110645  long       +0  short  -110645
+  XRPUSDT              177 trades    30 wins  net    -74602  long       +0  short   -74602
+  ATOMUSDT             179 trades    30 wins  net    -56030  long       +0  short   -56030
+  SANDUSDT             134 trades    21 wins  net    -55956  long       +0  short   -55956
+→ Output: results/battery_2026-05-05/combined_slip40.txt
+>>> 19:32:24 finished combined_slip40
+>>> 19:32:24 starting maxhold_only_slip40
+
+════════════════════════════════════════════════════════════════════════════════════════
+  P4 variant: maxhold_only_slip40
+  Args:  --signal-tf 4H  --target_rr=6.0  --max-hold-hours 336
+  Costs: fee=10bp slip=40bp funding=0bp/day tax=0%
+════════════════════════════════════════════════════════════════════════════════════════
+
+TOTAL  57 sym  13369 trades  18.96% WR
+  Gross +2040181  Fees 728329  Funding 0  →  NET -1084270  | 21/57 profitable
+  Long_NET -941725   Short_NET -142545
+
+Top 15 by NET:
+  SOLUSDT              239 trades    61 wins  net    +60378  long   +34379  short   +25998
+  AVAXUSDT             234 trades    56 wins  net    +54222  long   +14074  short   +40148
+  GRTUSDT              250 trades    56 wins  net    +54133  long   -21159  short   +75292
+  1INCHUSDT            238 trades    56 wins  net    +40078  long   +12127  short   +27951
+  FTMUSDT              239 trades    54 wins  net    +37122  long   +22310  short   +14812
+  MKRUSDT              278 trades    59 wins  net    +29732  long   -23815  short   +53547
+  KAVAUSDT             277 trades    55 wins  net    +26176  long    -1975  short   +28151
+  RUNEUSDT             266 trades    55 wins  net    +25171  long   +26280  short    -1108
+  ARBUSDT              121 trades    28 wins  net    +24212  long    -7351  short   +31563
+  MANAUSDT             227 trades    49 wins  net    +22429  long   +27735  short    -5306
+  OPUSDT               165 trades    35 wins  net    +19899  long   +32307  short   -12407
+  SEIUSDT               81 trades    17 wins  net    +17227  long    +5265  short   +11962
+  NEARUSDT             257 trades    54 wins  net    +16697  long    +2302  short   +14395
+  XLMUSDT              304 trades    66 wins  net    +15018  long    +3655  short   +11363
+  VETUSDT              278 trades    58 wins  net    +10864  long     +146  short   +10717
+
+Bottom 5 by NET:
+  XRPUSDT              321 trades    51 wins  net   -127802  long   -52676  short   -75126
+  BTCUSDT              274 trades    46 wins  net   -125073  long   -28330  short   -96742
+  LTCUSDT              357 trades    57 wins  net    -91799  long   -27095  short   -64703
+  TRXUSDT              318 trades    57 wins  net    -87561  long   +10720  short   -98281
+  ZILUSDT              247 trades    44 wins  net    -76184  long   -27812  short   -48371
+→ Output: results/battery_2026-05-05/maxhold_only_slip40.txt
+>>> 19:32:54 finished maxhold_only_slip40
+>>> 19:32:54 starting shorts_only_slip40
+
+════════════════════════════════════════════════════════════════════════════════════════
+  P4 variant: shorts_only_slip40
+  Args:  --signal-tf 4H  --target_rr=6.0  --side-filter short
+  Costs: fee=10bp slip=40bp funding=0bp/day tax=0%
+════════════════════════════════════════════════════════════════════════════════════════
+
+TOTAL  57 sym  5809 trades  16.70% WR
+  Gross +1082819  Fees 297800  Funding 0  →  NET -202237  | 26/57 profitable
+  Long_NET +0   Short_NET -202237
+
+Top 15 by NET:
+  AVAXUSDT             120 trades    27 wins  net    +47374  long       +0  short   +47374
+  MKRUSDT              122 trades    27 wins  net    +41621  long       +0  short   +41621
+  ENSUSDT               47 trades    13 wins  net    +38362  long       +0  short   +38362
+  GRTUSDT              112 trades    24 wins  net    +37863  long       +0  short   +37863
+  1INCHUSDT             44 trades    11 wins  net    +32187  long       +0  short   +32187
+  ARBUSDT               70 trades    17 wins  net    +30809  long       +0  short   +30809
+  VETUSDT              141 trades    28 wins  net    +27738  long       +0  short   +27738
+  ADAUSDT              172 trades    34 wins  net    +25660  long       +0  short   +25660
+  DOTUSDT              104 trades    21 wins  net    +25382  long       +0  short   +25382
+  FTMUSDT              117 trades    23 wins  net    +24894  long       +0  short   +24894
+  1000SHIBUSDT         106 trades    22 wins  net    +21242  long       +0  short   +21242
+  PYTHUSDT              40 trades     9 wins  net    +20927  long       +0  short   +20927
+  SEIUSDT               51 trades    11 wins  net    +17560  long       +0  short   +17560
+  ROSEUSDT             104 trades    20 wins  net    +16300  long       +0  short   +16300
+  GALAUSDT             115 trades    22 wins  net    +15369  long       +0  short   +15369
+
+Bottom 5 by NET:
+  BTCUSDT              143 trades    12 wins  net   -119642  long       +0  short  -119642
+  TRXUSDT              167 trades    19 wins  net    -97177  long       +0  short   -97177
+  SANDUSDT             104 trades    11 wins  net    -46749  long       +0  short   -46749
+  ATOMUSDT             149 trades    20 wins  net    -41122  long       +0  short   -41122
+  RUNEUSDT              93 trades    10 wins  net    -40494  long       +0  short   -40494
+→ Output: results/battery_2026-05-05/shorts_only_slip40.txt
+>>> 19:33:23 finished shorts_only_slip40
+>>> 19:33:23 starting longs_combined_slip40
+
+════════════════════════════════════════════════════════════════════════════════════════
+  P4 variant: longs_combined_slip40
+  Args:  --signal-tf 4H  --target_rr=6.0  --side-filter long --max-hold-hours 336
+  Costs: fee=10bp slip=40bp funding=0bp/day tax=0%
+════════════════════════════════════════════════════════════════════════════════════════
+
+TOTAL  57 sym  8163 trades  16.97% WR
+  Gross +698607  Fees 470819  Funding 0  →  NET -1349782  | 11/57 profitable
+  Long_NET -1349782   Short_NET +0
+
+Top 15 by NET:
+  RUNEUSDT             165 trades    35 wins  net    +31093  long   +31093  short       +0
+  SANDUSDT             138 trades    30 wins  net    +30977  long   +30977  short       +0
+  OPUSDT               106 trades    24 wins  net    +30495  long   +30495  short       +0
+  CHZUSDT              145 trades    28 wins  net    +15437  long   +15437  short       +0
+  SOLUSDT              148 trades    33 wins  net    +15003  long   +15003  short       +0
+  TRXUSDT              193 trades    43 wins  net    +10117  long   +10117  short       +0
+  WLDUSDT               62 trades    13 wins  net     +8744  long    +8744  short       +0
+  SEIUSDT               51 trades    10 wins  net     +8703  long    +8703  short       +0
+  LTCUSDT              211 trades    42 wins  net     +4545  long    +4545  short       +0
+  MANAUSDT             138 trades    27 wins  net     +3667  long    +3667  short       +0
+  DOTUSDT              162 trades    32 wins  net     +2614  long    +2614  short       +0
+  FTMUSDT              148 trades    29 wins  net      -356  long     -356  short       +0
+  1INCHUSDT            162 trades    32 wins  net     -1105  long    -1105  short       +0
+  NEARUSDT             161 trades    31 wins  net     -3054  long    -3054  short       +0
+  AAVEUSDT             156 trades    30 wins  net     -3941  long    -3941  short       +0
+
+Bottom 5 by NET:
+  ADAUSDT              184 trades    24 wins  net    -87653  long   -87653  short       +0
+  BNBUSDT              178 trades    27 wins  net    -83088  long   -83088  short       +0
+  FILUSDT              155 trades    17 wins  net    -76493  long   -76493  short       +0
+  XRPUSDT              198 trades    30 wins  net    -74595  long   -74595  short       +0
+  DYDXUSDT             132 trades    13 wins  net    -73741  long   -73741  short       +0
+→ Output: results/battery_2026-05-05/longs_combined_slip40.txt
+>>> 19:33:52 finished longs_combined_slip40
+>>> 19:33:52 starting maxhold_only_slip5_csv
+
+════════════════════════════════════════════════════════════════════════════════════════
+  P4 variant: maxhold_only_slip5_csv
+  Args:  --signal-tf 4H  --target_rr=6.0  --max-hold-hours 336
+  Costs: fee=10bp slip=5bp funding=0bp/day tax=0%
+════════════════════════════════════════════════════════════════════════════════════════
+
+TOTAL  57 sym  13369 trades  18.96% WR
+  Gross +2040181  Fees 728329  Funding 0  →  NET +1012337  | 35/57 profitable
+  Long_NET +131958   Short_NET +880379
+
+Top 15 by NET:
+  SOLUSDT              239 trades    61 wins  net    +90603  long   +49415  short   +41187
+  GRTUSDT              250 trades    56 wins  net    +86350  long    -3747  short   +90097
+  AVAXUSDT             234 trades    56 wins  net    +86169  long   +32894  short   +53274
+  1INCHUSDT            238 trades    56 wins  net    +73638  long   +30523  short   +43115
+  MKRUSDT              278 trades    59 wins  net    +70148  long    -2065  short   +72214
+  XLMUSDT              304 trades    66 wins  net    +68186  long   +32993  short   +35192
+  FTMUSDT              239 trades    54 wins  net    +64977  long   +34688  short   +30288
+  KAVAUSDT             277 trades    55 wins  net    +62330  long   +16331  short   +45999
+  MANAUSDT             227 trades    49 wins  net    +56420  long   +43965  short   +12455
+  RUNEUSDT             266 trades    55 wins  net    +55744  long   +42579  short   +13164
+  VETUSDT              278 trades    58 wins  net    +50062  long   +21439  short   +28622
+  NEARUSDT             257 trades    54 wins  net    +46696  long   +17674  short   +29021
+  ETHUSDT              314 trades    62 wins  net    +46053  long   +37592  short    +8460
+  ARBUSDT              121 trades    28 wins  net    +45684  long    +3193  short   +42490
+  OPUSDT               165 trades    35 wins  net    +42424  long   +42772  short     -347
+
+Bottom 5 by NET:
+  XRPUSDT              321 trades    51 wins  net    -65051  long   -22047  short   -43003
+  BTCUSDT              274 trades    46 wins  net    -50953  long    +8204  short   -59157
+  ZILUSDT              247 trades    44 wins  net    -39241  long    -9540  short   -29700
+  UNIUSDT              277 trades    47 wins  net    -35643  long   -19357  short   -16286
+  LTCUSDT              357 trades    57 wins  net    -24359  long    +6996  short   -31356
+→ Output: results/battery_2026-05-05/maxhold_only_slip5_csv.txt
+>>> 19:34:22 finished maxhold_only_slip5_csv
+>>> 19:34:22 starting shorts_only_slip5_csv
+
+════════════════════════════════════════════════════════════════════════════════════════
+  P4 variant: shorts_only_slip5_csv
+  Args:  --signal-tf 4H  --target_rr=6.0  --side-filter short
+  Costs: fee=10bp slip=5bp funding=0bp/day tax=0%
+════════════════════════════════════════════════════════════════════════════════════════
+
+TOTAL  57 sym  5809 trades  16.70% WR
+  Gross +1082819  Fees 297800  Funding 0  →  NET +661612  | 41/57 profitable
+  Long_NET +0   Short_NET +661612
+
+Top 15 by NET:
+  AVAXUSDT             120 trades    27 wins  net    +62673  long       +0  short   +62673
+  MKRUSDT              122 trades    27 wins  net    +57998  long       +0  short   +57998
+  ADAUSDT              172 trades    34 wins  net    +53860  long       +0  short   +53860
+  GRTUSDT              112 trades    24 wins  net    +51347  long       +0  short   +51347
+  VETUSDT              141 trades    28 wins  net    +46269  long       +0  short   +46269
+  ARBUSDT               70 trades    17 wins  net    +43845  long       +0  short   +43845
+  ENSUSDT               47 trades    13 wins  net    +43343  long       +0  short   +43343
+  1000SHIBUSDT         106 trades    22 wins  net    +39342  long       +0  short   +39342
+  FTMUSDT              117 trades    23 wins  net    +38332  long       +0  short   +38332
+  DOTUSDT              104 trades    21 wins  net    +38132  long       +0  short   +38132
+  1INCHUSDT             44 trades    11 wins  net    +35915  long       +0  short   +35915
+  GALAUSDT             115 trades    22 wins  net    +31696  long       +0  short   +31696
+  XLMUSDT              150 trades    27 wins  net    +31527  long       +0  short   +31527
+  ROSEUSDT             104 trades    20 wins  net    +29386  long       +0  short   +29386
+  CRVUSDT              139 trades    25 wins  net    +28936  long       +0  short   +28936
+
+Bottom 5 by NET:
+  BTCUSDT              143 trades    12 wins  net    -77931  long       +0  short   -77931
+  TRXUSDT              167 trades    19 wins  net    -53931  long       +0  short   -53931
+  SANDUSDT             104 trades    11 wins  net    -31435  long       +0  short   -31435
+  RUNEUSDT              93 trades    10 wins  net    -28022  long       +0  short   -28022
+  INJUSDT               93 trades    11 wins  net    -20793  long       +0  short   -20793
+→ Output: results/battery_2026-05-05/shorts_only_slip5_csv.txt
+>>> 19:34:52 finished shorts_only_slip5_csv
+>>> 19:34:52 starting longs_combined_slip5_csv
+
+════════════════════════════════════════════════════════════════════════════════════════
+  P4 variant: longs_combined_slip5_csv
+  Args:  --signal-tf 4H  --target_rr=6.0  --side-filter long --max-hold-hours 336
+  Costs: fee=10bp slip=5bp funding=0bp/day tax=0%
+════════════════════════════════════════════════════════════════════════════════════════
+
+TOTAL  57 sym  8163 trades  16.97% WR
+  Gross +698607  Fees 470819  Funding 0  →  NET +30591  | 27/57 profitable
+  Long_NET +30591   Short_NET +0
+
+Top 15 by NET:
+  TRXUSDT              193 trades    43 wins  net    +64169  long   +64169  short       +0
+  RUNEUSDT             165 trades    35 wins  net    +51644  long   +51644  short       +0
+  SANDUSDT             138 trades    30 wins  net    +51585  long   +51585  short       +0
+  LTCUSDT              211 trades    42 wins  net    +47367  long   +47367  short       +0
+  OPUSDT               106 trades    24 wins  net    +44936  long   +44936  short       +0
+  CHZUSDT              145 trades    28 wins  net    +36926  long   +36926  short       +0
+  SOLUSDT              148 trades    33 wins  net    +34442  long   +34442  short       +0
+  DOTUSDT              162 trades    32 wins  net    +30661  long   +30661  short       +0
+  ETHUSDT              185 trades    35 wins  net    +27920  long   +27920  short       +0
+  1INCHUSDT            162 trades    32 wins  net    +27598  long   +27598  short       +0
+  MANAUSDT             138 trades    27 wins  net    +26324  long   +26324  short       +0
+  BTCUSDT              181 trades    36 wins  net    +24519  long   +24519  short       +0
+  FTMUSDT              148 trades    29 wins  net    +18241  long   +18241  short       +0
+  AVAXUSDT             153 trades    29 wins  net    +16888  long   +16888  short       +0
+  AAVEUSDT             156 trades    30 wins  net    +16807  long   +16807  short       +0
+
+Bottom 5 by NET:
+  DYDXUSDT             132 trades    13 wins  net    -55549  long   -55549  short       +0
+  ADAUSDT              184 trades    24 wins  net    -53595  long   -53595  short       +0
+  FILUSDT              155 trades    17 wins  net    -48069  long   -48069  short       +0
+  UNIUSDT              172 trades    24 wins  net    -45800  long   -45800  short       +0
+  BNBUSDT              178 trades    27 wins  net    -36663  long   -36663  short       +0
+→ Output: results/battery_2026-05-05/longs_combined_slip5_csv.txt
+>>> 19:35:22 finished longs_combined_slip5_csv
+=== Battery complete 2026-05-05T19:35:22Z ===

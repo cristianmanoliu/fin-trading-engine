@@ -1,0 +1,34 @@
+
+════════════════════════════════════════════════════════════════════════════════════════
+  P4 variant: hist_funding
+  Args:  --signal-tf 4H  --target_rr=6.0  
+  Costs: fee=10bp slip=5bp funding=0bp/day tax=0%
+════════════════════════════════════════════════════════════════════════════════════════
+
+TOTAL  57 sym  9844 trades  16.04% WR
+  Gross +1320655  Fees 506463  Funding 0  →  NET +603103  | 35/57 profitable
+  Long_NET +66752   Short_NET +536351
+
+Top 15 by NET:
+  1INCHUSDT             76 trades    22 wins  net    +79162  long   +39001  short   +40160
+  AVAXUSDT             203 trades    41 wins  net    +72224  long   +21698  short   +50525
+  VETUSDT              231 trades    44 wins  net    +64678  long   +26184  short   +38493
+  FTMUSDT              200 trades    39 wins  net    +62717  long   +27936  short   +34780
+  KAVAUSDT             209 trades    40 wins  net    +58894  long   +30179  short   +28715
+  XLMUSDT              255 trades    47 wins  net    +56958  long   +29331  short   +27626
+  GRTUSDT              199 trades    37 wins  net    +49936  long   -14277  short   +64213
+  HBARUSDT             206 trades    38 wins  net    +44973  long   +30950  short   +14022
+  ARBUSDT              115 trades    24 wins  net    +44209  long    +3240  short   +40968
+  1000SHIBUSDT         195 trades    36 wins  net    +40759  long    -1308  short   +42068
+  OPUSDT               158 trades    29 wins  net    +38160  long   +36846  short    +1314
+  DOTUSDT              220 trades    39 wins  net    +37427  long   +13137  short   +24289
+  MKRUSDT              242 trades    42 wins  net    +36521  long   -17261  short   +53783
+  APEUSDT              133 trades    25 wins  net    +33618  long   +13475  short   +20142
+  ENSUSDT              169 trades    30 wins  net    +32924  long   -10769  short   +43693
+
+Bottom 5 by NET:
+  BTCUSDT              222 trades    25 wins  net    -76532  long   -10500  short   -66032
+  LINKUSDT             228 trades    26 wins  net    -61306  long   -51285  short   -10021
+  UNIUSDT              230 trades    28 wins  net    -44251  long   -23698  short   -20552
+  DYDXUSDT             181 trades    22 wins  net    -38967  long   -46037  short    +7069
+  AXSUSDT              233 trades    30 wins  net    -34683  long   -33083  short    -1599

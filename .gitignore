@@ -1,0 +1,38 @@
+# Market-data CSVs (12GB total — too large for git, downloadable via scripts/download_data.sh)
+data/*.csv
+
+# Build artifacts
+bin/
+*.exe
+
+# Local logs (paper-live engine output, not source)
+logs/
+
+# Local journal output from backtest/paper-live runs
+journal/
+
+# Editor / OS noise
+.DS_Store
+*.swp
+*.swo
+.vscode/
+.idea/
+
+# Claude Code harness internal state
+.claude/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Go test/profile outputs
+*.test
+*.prof
+*.out
+coverage.txt
+
+# Temporary
+/tmp/
+*.tmp
+*.bak
+*.bak.*

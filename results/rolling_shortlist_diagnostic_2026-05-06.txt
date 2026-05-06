@@ -1,0 +1,54 @@
+
+======================================================================================
+  ROLLING-SHORTLIST ANALYSIS
+  Per-quarter source: results/p4_quarterly_slip15_2026-05-06.tsv
+  Lookback: 4 quarters (12 mo)   Rebalance: quarterly   Shortlist: top-32
+  Forward window: 2021-Q1 → 2025-Q1  (4.25 yr)
+======================================================================================
+
+  Selection rule                              forward NET         $/yr
+  ---------------------------------------- -------------- ------------
+  rolling shortlist (trailing 4Q, top-32)  $     +404,125 $    +95,088
+  deployed-32 (fixed)                      $     +802,124 $   +188,735
+  all-57 (no selection)                    $     +555,211 $   +130,638
+
+  Rolling shortlist size per rebalance:
+    min/median/max: 6 / 19 / 32
+
+  Recoveries-cohort capture
+  ----------------------------------------------------------------------------------
+    Rolling shortlist captured $   +56,674 from recoveries (vs deployed-32: $    +7,988)
+    Recoveries appearing in rolling pick per quarter:
+      2021-Q1:  1  █
+      2021-Q2:  0  
+      2021-Q3:  0  
+      2021-Q4:  0  
+      2022-Q1:  1  █
+      2022-Q2:  2  ██
+      2022-Q3:  2  ██
+      2022-Q4:  0  
+      2023-Q1:  0  
+      2023-Q2:  4  ████
+      2023-Q3:  2  ██
+      2023-Q4:  6  ██████
+      2024-Q1:  4  ████
+      2024-Q2:  5  █████
+      2024-Q3:  4  ████
+      2024-Q4:  5  █████
+      2025-Q1: 10  ██████████
+
+  Shortlist turnover (Jaccard distance) between consecutive rebalances
+  ----------------------------------------------------------------------------------
+    2021-Q1 → 2021-Q2:  2/12 stable  (17% similarity)
+    2021-Q2 → 2021-Q3:  5/12 stable  (42% similarity)
+    2021-Q3 → 2021-Q4: 10/14 stable  (71% similarity)
+    2021-Q4 → 2022-Q1: 12/19 stable  (63% similarity)
+    2022-Q1 → 2022-Q2: 18/31 stable  (58% similarity)
+    2022-Q2 → 2022-Q3: 28/35 stable  (80% similarity)
+    2022-Q3 → 2022-Q4: 26/36 stable  (72% similarity)
+
+  VERDICT
+  ----------------------------------------------------------------------------------
+    Rolling shortlist UNDERPERFORMS deployed-32 by $397,999 (-49.6%) over 4.25yr.
+    Conclusion: recoveries-cohort capture does not offset turnover noise / momentum-chasing losses.
+

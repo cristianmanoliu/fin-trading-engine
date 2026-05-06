@@ -1,0 +1,34 @@
+
+════════════════════════════════════════════════════════════════════════════════════════
+  P4 variant: shorts_only_slip40
+  Args:  --signal-tf 4H  --target_rr=6.0  --side-filter short
+  Costs: fee=10bp slip=40bp funding=0bp/day tax=0%
+════════════════════════════════════════════════════════════════════════════════════════
+
+TOTAL  57 sym  5809 trades  16.70% WR
+  Gross +1082819  Fees 297800  Funding 0  →  NET -202237  | 26/57 profitable
+  Long_NET +0   Short_NET -202237
+
+Top 15 by NET:
+  AVAXUSDT             120 trades    27 wins  net    +47374  long       +0  short   +47374
+  MKRUSDT              122 trades    27 wins  net    +41621  long       +0  short   +41621
+  ENSUSDT               47 trades    13 wins  net    +38362  long       +0  short   +38362
+  GRTUSDT              112 trades    24 wins  net    +37863  long       +0  short   +37863
+  1INCHUSDT             44 trades    11 wins  net    +32187  long       +0  short   +32187
+  ARBUSDT               70 trades    17 wins  net    +30809  long       +0  short   +30809
+  VETUSDT              141 trades    28 wins  net    +27738  long       +0  short   +27738
+  ADAUSDT              172 trades    34 wins  net    +25660  long       +0  short   +25660
+  DOTUSDT              104 trades    21 wins  net    +25382  long       +0  short   +25382
+  FTMUSDT              117 trades    23 wins  net    +24894  long       +0  short   +24894
+  1000SHIBUSDT         106 trades    22 wins  net    +21242  long       +0  short   +21242
+  PYTHUSDT              40 trades     9 wins  net    +20927  long       +0  short   +20927
+  SEIUSDT               51 trades    11 wins  net    +17560  long       +0  short   +17560
+  ROSEUSDT             104 trades    20 wins  net    +16300  long       +0  short   +16300
+  GALAUSDT             115 trades    22 wins  net    +15369  long       +0  short   +15369
+
+Bottom 5 by NET:
+  BTCUSDT              143 trades    12 wins  net   -119642  long       +0  short  -119642
+  TRXUSDT              167 trades    19 wins  net    -97177  long       +0  short   -97177
+  SANDUSDT             104 trades    11 wins  net    -46749  long       +0  short   -46749
+  ATOMUSDT             149 trades    20 wins  net    -41122  long       +0  short   -41122
+  RUNEUSDT              93 trades    10 wins  net    -40494  long       +0  short   -40494

@@ -1,0 +1,32 @@
+symbol: BTCUSDT
+
+exchange:
+  ws_url: wss://fstream.binance.com
+
+strategy:
+  proximity_pct: 0.001        # 0.1% of price
+  wick_ratio: 2.0             # wick must be 2x the body for absorption
+  breakout_body_ratio: 0.6    # body must be 60% of range for breakout candles
+  absorption_candles: 2       # consecutive absorption candles required
+  stop_buffer_pct: 0.001      # 0.1% beyond wick extreme for stop
+  min_rr: 1.0                 # minimum R:R filter (0 = disabled)
+  target_rr: 2.0              # fixed take-profit multiplier (0 = use VWAP)
+  momentum_mode: false        # Option A: enter on 5m momentum candles in 4H bias direction
+  vwap_deviation_mode: false  # Option B: fade price stretched from session VWAP
+  vwap_deviation_pct: 0.003   # 0.3% away from VWAP to trigger a deviation entry
+  ema_mode: false             # Option C: EMA9/EMA21 crossover aligned with 4H bias
+  stake_usd: 1000             # fixed USD risked per trade (sizes position by stop distance)
+
+backtest:
+  csv_path: ./data/BTCUSDT-1m-2024-01.csv
+
+# Optional manual supply/demand zones
+zones: []
+# Example:
+# zones:
+#   - low: 42000
+#     high: 42500
+#     type: supply
+#   - low: 40000
+#     high: 40500
+#     type: demand

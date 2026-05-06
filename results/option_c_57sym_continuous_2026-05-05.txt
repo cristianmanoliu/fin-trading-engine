@@ -1,0 +1,71 @@
+
+════════════════════════════════════════════════════════════════════
+  OPTION C — EMA9×EMA21  target_rr=5.0  CONTINUOUS 5y backtest
+  (no monthly restart — eliminates force-close segmentation bias)
+  Flags: --exact-fills --include-boundary --pessimistic-ambiguous
+  Period: 2020-01 → 2025-04  |  $1k stake per trade
+════════════════════════════════════════════════════════════════════
+
+Symbol               Trades   Wins WinPct    Total_$1k
+────── ────── ──── ────── ─────────
+RUNEUSDT               7298   1355  18.6% +     833k
+SOLUSDT                7895   1451  18.4% +     811k
+BNBUSDT                8167   1444  17.7% +     499k
+HBARUSDT               7012   1246  17.8% +     464k
+XLMUSDT                8736   1528  17.5% +     433k
+IOTAUSDT               8568   1498  17.5% +     420k
+LINKUSDT               9131   1590  17.4% +     410k
+GRTUSDT                7615   1333  17.5% +     385k
+TRXUSDT                7751   1354  17.5% +     377k
+FTMUSDT                7522   1315  17.5% +     368k
+APEUSDT                5602    995  17.8% +     368k
+BLURUSDT               3343    612  18.3% +     330k
+ARBUSDT                3606    653  18.1% +     312k
+SNXUSDT                7994   1376  17.2% +     262k
+AAVEUSDT               7900   1359  17.2% +     254k
+ATOMUSDT               8920   1528  17.1% +     248k
+MKRUSDT                7788   1339  17.2% +     247k
+VETUSDT                8713   1493  17.1% +     245k
+PYTHUSDT               2543    462  18.2% +     231k
+NEARUSDT               7774   1329  17.1% +     200k
+BTCUSDT                8074   1375  17.0% +     176k
+KAVAUSDT               7801   1329  17.0% +     173k
+ENJUSDT                7819   1330  17.0% +     162k
+1INCHUSDT              7246   1233  17.0% +     152k
+TIAUSDT                2494    440  17.6% +     146k
+AVAXUSDT               7982   1354  17.0% +     142k
+DOTUSDT                8075   1369  17.0% +     139k
+ETHUSDT                9049   1531  16.9% +     137k
+GMXUSDT                3497    601  17.2% +     109k
+XRPUSDT                8776   1480  16.9% +     104k
+DYDXUSDT               6533   1106  16.9% +     103k
+ZILUSDT                8181   1380  16.9% +     100k
+DOGEUSDT               8067   1360  16.9% +      93k
+LDOUSDT                4514    762  16.9% +      58k
+BCHUSDT                9262   1552  16.8% +      51k
+INJUSDT                4867    819  16.8% +      47k
+UNIUSDT                8049   1348  16.7% +      39k
+IMXUSDT                5420    909  16.8% +      34k
+SEIUSDT                2996    504  16.8% +      28k
+ROSEUSDT               5779    965  16.7% +      11k
+1000SHIBUSDT           6983   1161  16.6%      -17k
+MANAUSDT               7085   1176  16.6%      -29k
+OPUSDT                 5183    856  16.5%      -43k
+GALAUSDT               6440   1065  16.5%      -50k
+SUIUSDT                3402    557  16.4%      -60k
+AXSUSDT                7532   1244  16.5%      -66k
+ICPUSDT                6550   1078  16.5%      -82k
+WLDUSDT                3272    529  16.2%      -98k
+ENSUSDT                6012    984  16.4%     -108k
+FILUSDT                7937   1303  16.4%     -119k
+ADAUSDT                8894   1461  16.4%     -128k
+CHZUSDT                7522   1223  16.3%     -184k
+APTUSDT                4360    692  15.9%     -208k
+LTCUSDT                8818   1433  16.3%     -220k
+SANDUSDT               7206   1161  16.1%     -240k
+ETCUSDT                9226   1456  15.8%     -490k
+CRVUSDT                7762   1161  15.0%     -796k
+
+────────────────────────────────────────────────────────────────────
+TOTAL  57 symbols | 392543 trades | 66547 wins (17.0%) | +6766822$ total
+       40/57 profitable | avg +118716$/symbol

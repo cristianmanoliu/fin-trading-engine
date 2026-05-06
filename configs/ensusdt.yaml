@@ -1,0 +1,20 @@
+symbol: ENSUSDT
+
+exchange:
+  ws_url: wss://fstream.binance.com
+
+strategy:
+  proximity_pct: 0.001
+  wick_ratio: 2.0
+  breakout_body_ratio: 0.6
+  absorption_candles: 2
+  stop_buffer_pct: 0.001
+  min_rr: 1.0          # global setting: most consistent across all instruments
+  target_rr: 5.0          # YAML value (overridden to 6.0 by systemd --target-rr flag)
+  ema_mode: true          # enable EMA9/EMA21 crossover (required for P4-Combined/Strategy B)
+  stake_usd: 1000
+
+backtest:
+  csv_path: ./data/ENSUSDT-1m-2024-01.csv
+
+zones: []

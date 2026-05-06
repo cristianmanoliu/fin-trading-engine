@@ -1,0 +1,34 @@
+
+════════════════════════════════════════════════════════════════════════════════════════
+  P4 variant: tf2H_slip15
+  Args:  --signal-tf 2H  --target_rr=6.0  --side-filter short
+  Costs: fee=10bp slip=15bp funding=0bp/day tax=0%
+════════════════════════════════════════════════════════════════════════════════════════
+
+TOTAL  57 sym  12651 trades  15.82% WR
+  Gross +1419513  Fees 1445893  Funding 0  →  NET -1821906  | 13/57 profitable
+  Long_NET +0   Short_NET -1821906
+
+Top 15 by NET:
+  TIAUSDT               87 trades    18 wins  net    +28845  long       +0  short   +28845
+  DOTUSDT              219 trades    43 wins  net    +26135  long       +0  short   +26135
+  OPUSDT               139 trades    28 wins  net    +25676  long       +0  short   +25676
+  SUIUSDT              123 trades    25 wins  net    +22503  long       +0  short   +22503
+  ARBUSDT              147 trades    29 wins  net    +12719  long       +0  short   +12719
+  ENSUSDT              104 trades    19 wins  net    +10655  long       +0  short   +10655
+  ROSEUSDT             177 trades    32 wins  net    +10216  long       +0  short   +10216
+  GMXUSDT              130 trades    25 wins  net     +8543  long       +0  short    +8543
+  SANDUSDT             229 trades    40 wins  net     +4864  long       +0  short    +4864
+  INJUSDT              155 trades    27 wins  net     +3238  long       +0  short    +3238
+  SEIUSDT              109 trades    19 wins  net     +1363  long       +0  short    +1363
+  SOLUSDT              257 trades    45 wins  net      +934  long       +0  short     +934
+  BLURUSDT             122 trades    22 wins  net      +190  long       +0  short     +190
+  IMXUSDT              177 trades    30 wins  net     -3385  long       +0  short    -3385
+  LINKUSDT             325 trades    56 wins  net     -6903  long       +0  short    -6903
+
+Bottom 5 by NET:
+  BTCUSDT              266 trades    37 wins  net   -118863  long       +0  short  -118863
+  ETHUSDT              292 trades    42 wins  net    -89369  long       +0  short   -89369
+  CHZUSDT              216 trades    26 wins  net    -86451  long       +0  short   -86451
+  BCHUSDT              337 trades    50 wins  net    -85156  long       +0  short   -85156
+  TRXUSDT              305 trades    48 wins  net    -83224  long       +0  short   -83224

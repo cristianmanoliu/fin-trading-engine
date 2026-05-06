@@ -1,0 +1,20 @@
+
+════════════════════════════════════════════════════════════════════════════════
+  OPTION C — EMA9×EMA21  REALISTIC target_rr sweep  (continuous 5y, $1k stake)
+  Flags: --exact-fills --include-boundary --pessimistic-ambiguous
+         --fee-bps=8  --stop-slippage-bps=5
+  Period: 2020-01 → 2025-04  |  57 symbols
+════════════════════════════════════════════════════════════════════════════════
+
+target_rr    trades   win%  breakevn       Gross_$        Fees_$         NET_$  profitable
+─────────  ──────  ────  ────────  ────────  ──────  ─────  ──────────
+2.0          465912  33.4%     33.3%      +281892    119461064   -168909162  0/57 profitable
+3.0          440808  25.2%     25.0%     +3968369    112321085   -160780139  0/57 profitable
+4.0          415777  20.2%     20.0%     +4866388    105425964   -153039247  0/57 profitable
+5.0          392543  17.0%     16.7%     +6766822     99147511   -143755599  0/57 profitable
+
+════════════════════════════════════════════════════════════════════════════════
+  Verdict: any target_rr where NET >= 0 indicates a parameter region that
+  clears realistic costs. If all rows are negative, the strategy family is
+  not viable at any of the tested RR settings.
+════════════════════════════════════════════════════════════════════════════════
