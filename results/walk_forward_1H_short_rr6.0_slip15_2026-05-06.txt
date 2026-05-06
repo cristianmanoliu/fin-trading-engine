@@ -1,0 +1,27 @@
+
+════════════════════════════════════════════════════════════════════════════════════════
+  WALK-FORWARD VALIDATION  1H_short_rr6.0_slip15
+  Config: signal_tf=1H  side=short  target_rr=6.0  slip=15bp
+  Costs: --fee-bps=10  --stop-slippage-bps=15  funding=CSV  max_hold=336h
+  Universe: 57 symbols
+════════════════════════════════════════════════════════════════════════════════════════
+
+Window                            NET   Trades      WR%  Profitable
+------                            ---   ------      ---  ----------
+W1_2023-05_to_2024-04        -2122085     6264   15.28%  5/57 sym profitable
+W2_2024-05_to_2025-04        -1653273     6501   15.49%  8/57 sym profitable
+W3_2025-05_to_2026-04        -1508061     6345   16.41%  11/56 sym profitable
+
+  Aggregate
+  ────────────────────────────────────────────────────────────────────────────
+    Sum NET across 3 windows: -5283419
+    Mean NET per window:       -1761139
+    Positive windows:          0/3
+
+  Verdict
+  ────────────────────────────────────────────────────────────────────────────
+    REJECTED — no window positive
+
+  Caveat: each window is one regime sample. Even a robust verdict requires
+  multiple-comparison adjustment if many configurations are tested. Treat as
+  hypothesis-strength evidence, not proof of forward edge.

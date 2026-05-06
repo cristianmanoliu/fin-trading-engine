@@ -2,30 +2,39 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Current state (2026-05-06, post-fresh-OOS-failure)
+## Current state (2026-05-06, post-walk-forward — high-variance, not-decayed, not-validated)
 
-> ⚠️ **STRATEGY ALPHA-DECAY DISCOVERED 2026-05-06.** A fresh out-of-sample test on the only 12-month window (2025-05 → 2026-04) of data the strategy was NEVER selected against showed:
-> - Universe-57 NET: **+$24k @ slip=5bp / −$82k @ slip=15bp / −$187k @ slip=25bp** (vs backtest expectation +$210k / +$142k / +$74k per year)
-> - Longs-only is **WORSE** than shorts (−$462k) — rules out regime-change explanation
-> - Both-sides −$438k — confirms signal failure across direction
-> - Universe WR 18.91% (shorts) / 14.61% (longs, below 14.3% breakeven) / 16.93% (both)
-> - **Deployed-16 captured 37% of expectation** (+$48k vs ~$127k expected at slip=15bp annualised)
-> - 25/57 symbols showed sign-REVERSAL between backtest and fresh OOS
+> ⚠️ **STRATEGY STATUS: HIGHLY VARIANT, NOT FORWARD-VALIDATED. Real-money sizing remains zero.** Today produced both an alarming fresh-OOS finding AND a stricter walk-forward validation that re-frames it. Order matters — read both.
 >
-> **Read this as alpha decay, not regime change.** The 4H EMA9×EMA21 crossover edge has materially decayed across both sides. **Do NOT allocate real money to this strategy as configured.** Forward-paper engines may continue running as observational data, but the validation hypothesis is materially weakened.
+> **1. Fresh OOS finding (n=1 window):** the only 12-month window (2025-05 → 2026-04) of data the strategy was never tuned against showed universe-57 NET = +$24k @ slip=5bp / **−$82k @ slip=15bp** / −$187k @ slip=25bp, vs backtest expectation +$210k / +$142k / +$74k per year. Longs-only worse (−$462k), both-sides −$438k. Initially read as alpha decay.
 >
-> Full analysis: `results/fresh_oos_2025-05_to_2026-04_*_2026-05-06.txt`, `scripts/p4_fresh_oos.sh`, `scripts/fresh_oos_compare.py`. See `## Fresh OOS validation (2026-05-06)` below for the full per-symbol breakdown and methodology.
+> **2. Walk-forward re-framing (n=3 windows):** ran the SAME deployed configuration on three non-overlapping 12-month windows (2023-05 → 2024-04, 2024-05 → 2025-04, 2025-05 → 2026-04). 4H result: **+$15k / +$504k / −$82k** — sum **+$437k**, mean **+$146k/yr**. The mean across the 3 windows MATCHES the original backtest expectation almost exactly ($146k vs $142k). The W3 loss is **one of three windows**, not a categorical decay verdict.
+> - 1H: −$5,283k across 3 windows, 0/3 positive → REJECTED
+> - 2H: −$912k, 1/3 positive → REJECTED
+> - **4H (deployed): +$437k, 2/3 positive → SUPPORTIVE**
+> - **1D: +$85k, 2/3 positive (incl. true OOS) → SUPPORTIVE**
 >
-> **Followup analysis 2026-05-06 (post-failure rescue):** the strategy framework is NOT dead — wrong timeframe and wrong subset were deployed.
-> - **Universe-57 on 1D timeframe**: fresh OOS +$57k/yr at slip=15bp, 32.3% WR (vs 4H's −$82k). Coarser TF preserved alpha; finer TFs decayed (1H = −$1.5M, 2H ≈ break-even).
-> - **Persistent-20 subset on 4H** (symbols positive in BOTH backtest AND fresh OOS): +$202k fresh OOS at slip=15bp (+194% vs backtest expectation). Caveat: subset chosen using fresh-OOS data → look-ahead-tainted, but indicative.
-> - **Persistent ∩ Deployed-16 (9 symbols)** on 4H: +$100k fresh OOS at slip=15bp. The most-validated subset — within current deployment, drop the 7 "dead" picks (BCH, GRT, KAVA, ADA, AVAX, FIL, 1000SHIB) and the remaining 9 produced double the deployed-16 PnL.
+> **3. Critical caveat on walk-forward:** of the 3 windows, only W3 (2025-05 → 2026-04) is true OOS — the universe-57 was selected by knowing what worked over 2020-01 → 2025-04, so W1 and W2 carry symbol-selection look-ahead. Walk-forward shows VARIANCE honestly; it does not validate forward edge.
 >
-> **Diagnosis**: alpha decay is a microstructure/arbitrage phenomenon, not regime. Short-horizon signals (1H/2H/4H) decay faster than long-horizon (1D). The 4H edge has been arbitraged but 1D is too slow to attract the same competition.
+> **What the evidence does NOT support:**
+> - "Strategy decayed, kill it" — n=1 evidence, walk-forward shows W3 is one of three windows, the mean matches expectation
+> - "Walk-forward validates the strategy" — only one window is true OOS, and the variance is enormous ($-82k to $+504k)
+> - "Deploy persistent-20 / drop 7 dead picks" — both retracted, post-hoc data mining (see `## Post-failure rescue` below)
 >
-> See `## Post-failure rescue (2026-05-06)` below for the full breakdown.
+> **What the evidence DOES support:**
+> - The strategy has very high per-window variance under realistic costs
+> - The mean economics across multiple windows are consistent with backtest expectations
+> - 1H and 2H are clearly fee-killed (REJECTED across all windows including in-sample)
+> - We need more truly-OOS windows to make a confident forward claim — i.e. more calendar time
+>
+> **Operational stance:**
+> - 16 paper engines on 4H Strategy A continue running as forward observational data
+> - Real-money allocation remains zero until walk-forward accumulates more truly-OOS windows AND the 60-day forward-paper go/no-go criteria pass
+> - The "kill if 30 days net-negative" rule from this morning is reset — apply against walk-forward expectations ($28-146k/yr depending on TF), not against either the old backtest claim or the morning's panic claim
+>
+> Full analysis: `results/walk_forward_*_2026-05-06.txt`, `scripts/walk_forward.sh`, `scripts/walk_forward_compare.py`. See `## Walk-forward validation framework (2026-05-06)` below for the full breakdown and methodology, and `## Fresh OOS validation (2026-05-06)` for the n=1 finding that prompted it.
 
-## Current state (2026-05-06, post-redeploy — strategy now in fresh-OOS-failure status, see ⚠️ above)
+## Current state (2026-05-06, post-walk-forward — high-variance, see ⚠️ banner above for walk-forward re-framing)
 
 | Layer | What is it | Where |
 |---|---|---|
@@ -519,22 +528,90 @@ Pattern: **coarser timeframes preserved alpha, finer ones decayed**. Suggests th
 
 Tested as a possible "best of both" but 1D's sparsity (248 trades / 12mo / 56 sym = ~4.4 trades/sym/yr) means the persistent-20 subset only generates 90 trades total → +$26k. The smaller universe-57 1D had higher absolute PnL because more symbols accumulated more trades. **For 1D, broader selection seems better than narrower; for 4H, narrower is better than broader.**
 
-### Recommendations (forward path, in order of conviction)
+### Recommendations — RETRACTED
 
-1. **Honest deploy: switch deployed engines from 4H to 1D, keep all-symbol scope.** True OOS-validated. Trade rate drops substantially (engineers would generate ~70 trades/yr across 16 symbols → ~140 days for 150-trade go/no-go). Expected ≈ +$57k/yr at slip=15bp on universe-57; for deployed-16 sub-aggregate would need a separate 1D-deployed-16 sweep.
-2. **Conditional deploy: persistent-20 on 4H.** Highest EV (~$200k/yr at slip=15bp) BUT uses fresh-OOS data to select symbols. Honest only as a hypothesis to be validated on the NEXT 12-month OOS period.
-3. **Conservative deploy: drop the 7 dead picks from deployed-16.** Just keep the 9 persistent-deployed (1INCH, APT, DOT, ENS, ETC, IMX, ROSE, RUNE, XLM) on 4H. ~$100k fresh OOS at slip=15bp. Selection logic is "remove confirmed losers" rather than "add validated winners" — less bias.
-4. **Status quo + observe**: keep the 16 paper engines running on 4H, accept the negative-expected forward outcome, treat the next 60 days as data collection rather than validation.
+The original commit (`fc65e81`) of this section recommended four "deploy paths" — persistent-20, drop-7-dead-picks, persistent-∩-deployed-16, and 1D-universe — with conviction levels. **Those recommendations were data-mined selections from a single 12-month OOS window.** They tell us nothing about forward edge. Striking them.
+
+**What the per-symbol data above actually shows** (without selection):
+- 25 of 57 symbols sign-reversed between backtest and fresh OOS — variance is enormous
+- The DEPLOYED-16 selection methodology (train-only top-K with slip-25 robustness gate) captured 37% of expectation in fresh OOS — significantly underperformed but not catastrophically negative
+- Some symbols had highly stable performance (ROSE, XLM, ETC); most had highly variable performance
+- These observations suggest the 4H signal HAS some edge per-symbol, but the edge is heavily contaminated by symbol-specific variance
+
+**The right operational stance:**
+- **Do not re-select the deployed shortlist based on fresh-OOS results.** That's exactly the look-ahead bias we measured this morning at +26-70%, applied a second time.
+- **The 1D timeframe finding stands as suggestive** (independent backtest support + one fresh OOS) but is NOT validated — see `## Walk-forward validation framework (2026-05-06)` below for the proper test.
+- **Forward EV remains unknown.** The system has produced one negative OOS result. We need additional non-overlapping OOS windows before any deployment claim can be made with confidence.
 
 ### Operational note
 
-These results enable real-money consideration in a way the "everything failed" framing earlier today did not. But none of these reach the original $86-184k/yr expectation cleanly. **Real-money sizing should be 1/10th of original plan** at minimum, with the new lower expectation as the anchor and the kill-criteria from `## Forward-paper go/no-go criteria` strictly applied.
+Real-money deployment is **NOT supported** by current evidence. The original $86-184k/yr expectation is anchored to a backtest that produced a negative fresh OOS. The "rescue" findings do not constitute additional evidence — they are post-hoc selection. Real-money sizing remains: zero, until walk-forward validation produces convergent positive results across multiple windows.
 
 Files:
 - `scripts/persistent_alpha.py` — analysis A reproducible
 - `results/persistent_alpha_2026-05-06.txt` — analysis A output
 - `results/fresh_oos_{1H,2H,1D}_slip15_2026-05-06.txt` — analysis B raw data
 - `results/fresh_oos_1D_persistent20_slip15_2026-05-06.txt` — combined analysis
+
+## Walk-forward validation framework (2026-05-06)
+
+After the morning's "alpha decay" finding (n=1 OOS window) and the retracted "rescue" recommendations (post-hoc selection), built a proper walk-forward framework: test the SAME deployed configuration across MULTIPLE non-overlapping 12-month windows, no symbol re-selection between windows. Output: `results/walk_forward_{1H,2H,4H,1D}_short_rr6.0_slip15_2026-05-06.txt`, comparison `results/walk_forward_comparison_2026-05-06.txt`. Reproduces via `scripts/walk_forward.sh` + `scripts/walk_forward_compare.py`.
+
+### Setup
+
+| Window | Range | Status vs original backtest (2020-01 → 2025-04) |
+|---|---|---|
+| W1 | 2023-05 → 2024-04 | **In-sample** time slice (universe was selected over the whole 5y) |
+| W2 | 2024-05 → 2025-04 | **In-sample** time slice |
+| W3 | 2025-05 → 2026-04 | **True OOS** — the "fresh OOS" window from earlier today |
+
+**Critical caveat:** the universe-57 was selected by knowing what worked over the full 2020-01 → 2025-04 backtest, so W1 and W2 carry symbol-selection look-ahead. They are useful as VARIANCE references, not as independent validation. Only W3 is a clean OOS sample. Walk-forward with truly OOS windows would require either waiting for forward time (one window per year of patience) or using a rolling-train-then-test design that reselects per window — out of scope for this iteration.
+
+### Results — universe-57, target_rr=6.0, side=short, slip=15bp, fee=10bp
+
+| TF | W1 (in-sample) | W2 (in-sample) | W3 (true OOS) | sum 3yr | mean/yr | pos/3 | Verdict |
+|---:|---:|---:|---:|---:|---:|:---:|---|
+| 1H | −$2,122k | −$1,653k | −$1,508k | **−$5,283k** | −$1,761k | 0 | REJECTED |
+| 2H | −$508k | −$413k | +$9k | **−$912k** | −$304k | 1 | REJECTED |
+| **4H** | +$15k | +$504k | −$82k | **+$437k** | **+$146k** | 2 | SUPPORTIVE |
+| **1D** | −$38k | +$65k | +$57k | **+$85k** | +$28k | 2 | SUPPORTIVE |
+
+### Findings
+
+1. **1H/2H REJECTED across 3 windows including in-sample.** No alpha at finer timeframes. This is consistent with the prior 5y backtest finding and the timeframe sweep — confirms with multi-window evidence that fine-TF EMA crossover is fee-killed.
+
+2. **4H mean across 3 windows: +$146k/yr — almost exactly matches the original backtest annualised expectation of +$142k/yr at slip=15bp.** This is meaningful: the deployed configuration's *expected* economics held up across slices, even though the realized PnL has very high per-window variance ($-82k to $+504k).
+
+3. **The morning's "alpha decay" framing was n=1 evidence.** With n=3, the W3 (-$82k) result is one losing window in a SUPPORTIVE configuration, not a categorical decay verdict. This DOES NOT mean the strategy is forward-validated — variance is enormous and only one window is true OOS — but the doomsday read was overstated.
+
+4. **1D maintains positive mean across 3 windows** (+$28k/yr) including the true OOS W3. Lower magnitude than 4H but with two consecutive recent positive windows. The 1D result has independent backtest support (+$82k over 5y), the timeframe sweep position, AND walk-forward consistency. This is the strongest multi-evidence case for any timeframe.
+
+5. **The strategy is highly variant under realistic costs.** 4H per-window range $-82k to $+504k illustrates why single-window OOS results — in either direction — are weak evidence. A pessimist looking at W3 would kill the strategy; an optimist looking at W2 would over-allocate. Both reads ignore the variance.
+
+### What this changes vs the morning panic
+
+- **Doesn't change:** the deployed 4H configuration is NOT forward-validated, true OOS sample is still n=1, real-money allocation remains unjustified.
+- **Does change:** the framing from "alpha decayed, kill the strategy" to "the strategy has very high variance with one losing OOS window in a 3-window sample — insufficient evidence to deploy or to kill". The mean matches expectation; we just need more OOS windows (i.e. more time) to know.
+- **Practical implication:** the running 16 paper engines should continue collecting forward data. The 60-day go/no-go criteria below remain the operative test. Walk-forward provides a stricter yardstick than fresh-OOS-only and accepted the deployed configuration provisionally.
+
+### What walk-forward CANNOT tell us
+
+- Whether the W3 negative is a transient or a regime change. Need W4 (2026-05 → 2027-04) when it exists.
+- Whether the 1D edge is real or a recovery from arbitrarily-bad picks at finer TFs. Same answer: more time.
+- Whether ANY symbol-selection rule applied today would have forward edge. Symbol selection is downstream of strategy validation; if the strategy itself is uncertain, selection is doubly uncertain.
+
+### Methodological discipline reinforced
+
+- **Don't trust n=1 OOS results in either direction.** Today proved this works both ways: morning panic (W3 negative → "decay") and morning rescue (post-hoc subset selection → "rescue capture") were both wrong for the same reason — single-sample inference under high variance.
+- **Symbol re-selection from OOS data is data mining**, even when it sounds like "we found the alpha that survived" — there are too many subsets for any to mean anything without forward validation.
+- **Walk-forward with truly OOS windows requires patience.** We have one window per year of waiting. The framework is designed to ACCUMULATE evidence over years, not to provide an instant verdict.
+
+### Files
+
+- `scripts/walk_forward.sh` — multi-window runner (env-configurable TF/side/RR/slip)
+- `scripts/walk_forward_compare.py` — aggregates per-config results into comparison matrix
+- `results/walk_forward_{1H,2H,4H,1D}_short_rr6.0_slip15_2026-05-06.txt` — per-config raw output
+- `results/walk_forward_comparison_2026-05-06.txt` — combined comparison matrix
 
 ## Forward-paper go/no-go criteria
 

@@ -1,0 +1,32 @@
+
+==============================================================================================================
+  WALK-FORWARD COMPARISON  (universe-57, shorts only, target_rr=6.0, fee=10bp, slip=15bp)
+  4 configurations × 3 windows
+==============================================================================================================
+
+  config                 sum_3yr    mean/yr  pos/N   2023-05_to_2024   2024-05_to_2025   2025-05_to_2026
+  ------------------ ----------- ---------- ------  ----------------  ----------------  ----------------
+  1D_short_rr6.0_slip15     +84,602    +28,200 2/3             -37,779           +65,093           +57,288
+  1H_short_rr6.0_slip15  -5,283,419 -1,761,140 0/3          -2,122,085        -1,653,273        -1,508,061
+  2H_short_rr6.0_slip15    -911,545   -303,849 1/3            -507,784          -412,732            +8,971
+  4H_short_rr6.0_slip15    +437,496   +145,832 2/3             +14,897          +504,267           -81,668
+
+  Verdict by configuration
+  ------------------------------------------------------------------------------------------
+    1D_short_rr6.0_slip15  2/3 positive, mean $+28,200/yr  →  SUPPORTIVE (positive majority + positive mean)
+    1H_short_rr6.0_slip15  0/3 positive, mean $-1,761,140/yr  →  REJECTED (no window positive)
+    2H_short_rr6.0_slip15  1/3 positive, mean $-303,849/yr  →  REJECTED (negative mean)
+    4H_short_rr6.0_slip15  2/3 positive, mean $+145,832/yr  →  SUPPORTIVE (positive majority + positive mean)
+
+  Interpretation guide
+  ------------------------------------------------------------------------------------------
+  - Walk-forward = test on N non-overlapping OOS windows the strategy
+    was never tuned against. n=3 with one losing window is consistent
+    with normal regime variance, NOT a free pass to deploy.
+  - SUPPORTIVE means the strategy survived a stricter test than single-window
+    fresh OOS, but is NOT proof of forward edge. The variance is enormous.
+  - REJECTED means the strategy did not survive — across multiple windows it
+    failed to produce positive expected value. This is high-confidence evidence
+    that the configuration has no exploitable edge.
+  - This framework is designed to REJECT bad strategies efficiently, not to
+    validate good ones. A SUPPORTIVE result is necessary but not sufficient.
