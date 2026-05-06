@@ -429,6 +429,41 @@ Open with **$100/trade** (1/10th of backtest stake), not $1k. Cost of being wron
 - Don't tune target_rr, signal_tf, or side-filter. Every additional sweep cell consumes statistical degrees of freedom you've already spent.
 - Don't read into wins/losses inside the 60-day power floor. The natural shorts-only hit-rate is 20.6% — variance is enormous at low n.
 
+## Multi-symbol engine (2026-05-06)
+
+Replaced the per-symbol `paper-live@*.service` deployment with a single `paper-live-multi.service` running `cmd/engine` in multi-symbol mode.
+
+**Why:** The per-symbol architecture caused the 2026-05-06 9-hour IP ban. Each engine opened its own WebSocket; on Tokyo zero-frame backends, multiple engines fell back to REST aggTrade simultaneously, exceeding the 2400-weight/min cap and triggering 418. Single-WS architecture eliminates the synchronized-fallback failure mode entirely.
+
+**How it works:** `cmd/engine --symbols ROSEUSDT,MKRUSDT,...` opens ONE combined-streams WebSocket (`wss://fstream.binance.com/stream?streams=roseusdt@aggTrade/mkrusdt@aggTrade/...`), demuxes by stream name in `pkg/marketdata/binance_multi.go`, and fans ticks into per-symbol goroutine groups (aggregator + strategy runner + Stub executor + heartbeat). All 16 engines share one TCP connection, one DNS resolution, one IP.
+
+**REST fallback removed.** The single-symbol `BinanceFutures` falls back to per-symbol REST aggTrade polling on stall. The multi version does NOT — it reconnects WS only (with explicit zero-frame detection: 60s no-message timeout forces reconnect to re-roll DNS, capped at 5 retries before terminating to allow systemd restart). During sustained Binance WS outages, the multi engine accepts data gaps. The 4H signal timeframe is robust to brief gaps.
+
+**Latent bug surfaced and fixed during this work:** the existing `aggTradeMsg` struct in `pkg/marketdata/binance.go` was missing an `EventTime int64 \`json:"E"\`` field. Without it, Go's case-insensitive JSON fallback would try to assign the number from `"E"` into the string-tagged `"e"` field, causing `Unmarshal` to return non-nil error AND the engine to drop the tick at `binance.go:253-256`. The single-symbol live engine had been silently relying on REST aggTrade polling for live ticks because every WS message was being dropped. Adding the `EventTime` field was the minimum-impact fix and is now in place.
+
+**Deploy:**
+
+```bash
+./deploy/migrate-to-multi.sh root@178.105.24.230
+```
+
+The script: (1) syncs code, (2) rebuilds the binary on the VPS, (3) stops + disables the 16 `paper-live@*.service` units, (4) installs `paper-live-multi.service`, (5) starts it, (6) waits 90s, (7) prints a per-symbol heartbeat health check.
+
+**Rollback:** Re-enable any subset of `paper-live@*.service` units after stopping `paper-live-multi.service`. The single-symbol code path in `cmd/engine/main.go` is unchanged.
+
+**Files added/modified in this refactor (commits on branch `feature/multi-symbol-engine`):**
+- `pkg/marketdata/binance.go` — `+EventTime` field in `aggTradeMsg` (latent-bug fix)
+- `pkg/marketdata/binance_multi.go` — new `BinanceFuturesMulti` type, combined-streams client (~330 lines)
+- `pkg/marketdata/binance_multi_test.go` — pure-Go unit tests for envelope, URL, demux (6 test functions)
+- `cmd/engine/main.go` — `--symbols` flag + multi-mode branch (single-symbol path unchanged)
+- `cmd/engine/multi.go` — `runMulti` setup + `parseSideFilter` (~225 lines)
+- `deploy/systemd/paper-live-multi.service` — production unit
+- `deploy/migrate-to-multi.sh` — migration script (does not auto-run)
+
+**Watchdog/digest follow-up:** the `paper-live-watchdog` and `paper-live-digest` shell scripts likely still parse per-symbol log paths (`/var/log/paper-live/{SYMBOL}.log`) rather than the unified `/var/log/paper-live/multi.log`. After running the migration, those scripts will need updates to read the multi log. Tracked but not yet fixed.
+
+**TODO after migration runs:** update the `## Current state` table's "Live engines (VPS)" row once the multi engine has been alive for ≥1 hour. Replace with: "RUNNING — 1 multi-engine on 16 symbols since YYYY-MM-DD HH:MM UTC. Single `paper-live-multi.service`. ExecStart per `deploy/systemd/paper-live-multi.service`. Replaced the prior 16 per-symbol units after the 2026-05-06 IP-ban incident — see `## Multi-symbol engine (2026-05-06)`. journal: `/var/log/paper-live/journal/*.jsonl`, log: `/var/log/paper-live/multi.log`."
+
 ## Historical strategies (kept for context — do not use to decide)
 
 **Option C (EMA9×EMA21, 5m, target_rr=5.0)** — falsified 2026-05-05. Continuous 5y × 57 symbols at 8 bp fees + 5 bp slip = **NET −$143.76M, 0/57 profitable**. Required WR 22.9% vs observed 17.0%. Pre-fees the same sweep was +$6.77M (40/57 profitable) — a fee-illusion edge of 0.3pp above breakeven WR. Output: `results/option_c_57sym_realistic_2026-05-05.txt`. Live VPS engines are still paper-trading this strategy as of 2026-05-05 — see *Current state* table at top.
