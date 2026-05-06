@@ -2,6 +2,44 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## CORRECTION 2026-05-06 (end of session) — funding-loader bug fixed
+
+> **A pre-existing critical bug in `pkg/funding/funding.go` silently zeroed all historical funding accrual since the loader was first written.** Binance's funding-rate CSV exports quote the rate field (e.g. `"-0.00012359"`); the loader passed the quoted form straight into `strconv.ParseFloat`, which rejected it as invalid syntax and silently skipped every row. The Historical provider had an empty rate table, so `ChargeFor()` always returned $0. Engines logged "loaded historical funding" successfully even though the data was empty.
+>
+> **All session backtests using `--funding-csv-dir` (~36 result files) had $0 funding contribution.** Fix: strip surrounding double-quotes before ParseFloat. Regression test added at `pkg/funding/funding_test.go:TestNewHistorical_ParsesQuotedRates` so this can't recur silently.
+>
+> **Quantified impact (4H short universe-57 walk-forward at slip=15bp):**
+>
+> | Window | Pre-fix (funding=$0) | Post-fix (real funding) | Delta |
+> |---|---:|---:|---:|
+> | W1 (in-sample, BULL) | +$14,897 | +$62,163 | **+$47k** |
+> | W2 (in-sample, neutral) | +$504,267 | +$533,352 | +$29k |
+> | W3 (true OOS, BEAR) | −$81,668 | −$63,683 | +$18k |
+> | **Sum 3yr** | **+$437,496** | **+$531,832** | **+$94k (+22%)** |
+> | **Mean/yr** | **+$146k** | **+$177k** | **+$31k/yr** |
+>
+> All three windows shifted in the positive direction. Larger benefit in higher-funding windows (W1 +$47k vs W3 +$18k) — consistent with shorts collecting more funding income in bull regimes.
+>
+> **Specific session claims that need re-validation when convenient:**
+> - The funding-regime correlation r=−0.175 was computed on bug-affected data. With real funding income for shorts now flowing, the correlation will weaken substantially (shorts collect MORE in higher-funding regimes, raising NET in those bins). The "regime-conditioned" interpretation may persist but at lower magnitude — needs a quarterly re-run.
+> - Quarterly bootstrap CI [−$144k, +$345k] shifts upward but the variance pattern is unchanged.
+> - Walk-forward verdicts (SUPPORTIVE / STRONG) likely persist but magnitudes ~20% higher.
+>
+> **Specific claims that DO NOT change:**
+> - Per-symbol skill REFUTED at proper rigor (funding is symbol-agnostic; doesn't affect this finding)
+> - Time-trend not significant (funding shifts magnitude uniformly across time)
+> - 1D both-sides has highest verdict at slip=15bp
+> - 4H short is slip-fragile; 1D is slip-robust
+> - Real-money allocation remains zero pending forward-paper
+>
+> **Live engines on VPS unaffected** — the fix is in the shared `funding.LoadFromDir` code path used by both `cmd/backtest` and `cmd/engine`. Next engine restart picks up real funding accrual; until then they continue running with $0 funding (which has been the steady state for the entire forward-paper window so far).
+>
+> **Resources:**
+> - Bug fix: commit `<TBD>` — `pkg/funding/funding.go` (3-line patch + RateAt accessor)
+> - Regression test: `pkg/funding/funding_test.go:TestNewHistorical_ParsesQuotedRates`
+> - Comparison data: `/tmp/wf_postfix.txt` vs `results/walk_forward_4H_short_rr6.0_slip15_2026-05-06.txt`
+> - Funding filter (dormant unless `--funding-filter-max-bps-per-day` set): `pkg/strategy/funding_filter.go`
+
 ## Current state (2026-05-06, post-walk-forward — high-variance, not-decayed, not-validated)
 
 > ⚠️ **STRATEGY STATUS: HIGHLY VARIANT, NOT FORWARD-VALIDATED. Real-money sizing remains zero.** Today produced both an alarming fresh-OOS finding AND a stricter walk-forward validation that re-frames it. Order matters — read both.

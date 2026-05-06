@@ -36,6 +36,7 @@ func main() {
 	sideFilter           := flag.String("side-filter", "both", "filter signals by direction: both | long | short")
 	maxHoldHours         := flag.Float64("max-hold-hours", 0, "force-close any open position older than this many hours; 0 = no cap (default). Useful to trim funding-eaten tails.")
 	fundingCSVDir        := flag.String("funding-csv-dir", "", "directory of per-symbol funding CSVs (e.g. data/funding/). When set, replaces --funding-bps-per-day with actual historical Binance funding rates accrued per 8h event with correct per-side sign.")
+	fundingFilterMaxBpsPerDay := flag.Float64("funding-filter-max-bps-per-day", 0, "skip SHORT signals when current funding rate × 3 (per-day in bps) exceeds this threshold; 0 = disabled. Requires --funding-csv-dir. e.g. 5 = exclude only extreme bull regimes; 0.1 = exclude all positive funding.")
 	flag.Parse()
 
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
@@ -149,6 +150,20 @@ func main() {
 		entryCfg,
 		exec,
 	)
+
+	// Funding filter (optional): gate SHORT signals by current funding regime.
+	// Requires Historical funding provider — Constant rate has no time variation.
+	if *fundingFilterMaxBpsPerDay > 0 {
+		if hist, ok := exec.FundingProvider.(*funding.Historical); ok {
+			runner.SetFundingFilter(&strategy.FundingFilter{
+				Reader:       hist,
+				MaxBpsPerDay: *fundingFilterMaxBpsPerDay,
+			})
+			slog.Info("funding filter enabled", "max_bps_per_day", *fundingFilterMaxBpsPerDay)
+		} else {
+			slog.Warn("--funding-filter-max-bps-per-day requires --funding-csv-dir to load Historical provider; filter ignored")
+		}
+	}
 
 loop:
 	for {

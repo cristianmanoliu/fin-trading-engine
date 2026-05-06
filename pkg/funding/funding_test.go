@@ -112,6 +112,87 @@ func TestHistoricalProvider_BoundaryExclusion(t *testing.T) {
 	}
 }
 
+// quotedRateCSV writes a fixture using Binance's actual export format where
+// the funding_rate field is double-quoted (e.g. `"-0.00012359"`). The pre-fix
+// loader's strconv.ParseFloat call rejected these as invalid syntax and silently
+// skipped every row, leaving the table empty and producing $0 funding for all
+// trades regardless of regime. This regression test pins the behaviour: the
+// loader must strip surrounding quotes before parsing.
+func quotedRateCSV(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "TESTUSDT.csv")
+	body := "funding_time_ms,funding_rate\n" +
+		`1577836800000,"-0.00012359"` + "\n" +
+		`1577865600000,"0.00010000"` + "\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	return path
+}
+
+func TestNewHistorical_ParsesQuotedRates(t *testing.T) {
+	h, err := NewHistorical("TESTUSDT", quotedRateCSV(t))
+	if err != nil {
+		t.Fatalf("NewHistorical: %v", err)
+	}
+	if got := len(h.times); got != 2 {
+		t.Fatalf("expected 2 funding events parsed, got %d (regression: quoted-rate skip)", got)
+	}
+	if h.rates[0] != -0.00012359 {
+		t.Errorf("rate[0]: got %v, want -0.00012359", h.rates[0])
+	}
+	if h.rates[1] != 0.00010000 {
+		t.Errorf("rate[1]: got %v, want 0.00010000", h.rates[1])
+	}
+}
+
+func TestHistorical_RateAt(t *testing.T) {
+	h, err := NewHistorical("TESTUSDT", quotedRateCSV(t))
+	if err != nil {
+		t.Fatalf("NewHistorical: %v", err)
+	}
+	// Event 1 at 2020-01-01 00:00:00 UTC, rate -0.00012359
+	// Event 2 at 2020-01-01 08:00:00 UTC, rate +0.00010000
+	cases := []struct {
+		name string
+		ts   time.Time
+		want float64
+	}{
+		{"before any event returns 0", time.Date(2019, 12, 31, 23, 0, 0, 0, time.UTC), 0},
+		{"between events returns first rate", time.Date(2020, 1, 1, 4, 0, 0, 0, time.UTC), -0.00012359},
+		{"after second event returns second rate", time.Date(2020, 1, 1, 12, 0, 0, 0, time.UTC), 0.00010000},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := h.RateAt(tc.ts); got != tc.want {
+				t.Errorf("RateAt(%v): got %v, want %v", tc.ts, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestHistorical_QuotedCSV_EndToEnd is the end-to-end check: a position spanning
+// a funding event in a quoted-rate CSV must produce non-zero funding cost.
+// Before the fix this returned 0 silently, masking the bug across the codebase.
+func TestHistorical_QuotedCSV_EndToEnd(t *testing.T) {
+	h, err := NewHistorical("TESTUSDT", quotedRateCSV(t))
+	if err != nil {
+		t.Fatalf("NewHistorical: %v", err)
+	}
+	openT := time.Date(2020, 1, 1, 0, 0, 1, 0, time.UTC) // strictly after event 1
+	closeT := time.Date(2020, 1, 1, 12, 0, 0, 0, time.UTC) // covers event 2 only
+	notional := 100000.0
+	cost := h.ChargeFor(models.Long, notional, openT, closeT)
+	if cost == 0 {
+		t.Fatalf("ChargeFor returned 0 for span covering an event — quoted CSV not parsed (regression)")
+	}
+	want := 0.00010000 * notional // single event between (openT, closeT]
+	if math.Abs(cost-want) > 1e-6 {
+		t.Errorf("ChargeFor: got %v, want %v", cost, want)
+	}
+}
+
 func itoa(n int64) string {
 	const digits = "0123456789"
 	if n == 0 {

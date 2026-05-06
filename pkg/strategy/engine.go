@@ -40,8 +40,19 @@ type Runner struct {
 	// detector with slower candles, producing structurally wider stops.
 	signalTF models.Timeframe
 
+	// fundingFilter (optional) gates SHORT signals by funding regime — see
+	// pkg/strategy/funding_filter.go. nil = disabled (default).
+	fundingFilter *FundingFilter
+
 	// output
 	executor Executor
+}
+
+// SetFundingFilter installs (or clears, if nil) a funding-regime filter on
+// SHORT signals. Safe to call before Run starts. Concurrent use during Run is
+// not supported (caller must set up before calling Run).
+func (r *Runner) SetFundingFilter(f *FundingFilter) {
+	r.fundingFilter = f
 }
 
 // NewRunner wires up the strategy runner.
@@ -222,6 +233,15 @@ func (r *Runner) evaluateEntry(c models.Candle) {
 
 	sig := r.detector.Evaluate(keyLevels, vwap, r.bias)
 	if sig == nil {
+		return
+	}
+
+	if r.fundingFilter != nil && !r.fundingFilter.Allows(sig.Side, sig.Timestamp) {
+		slog.Info("signal filtered by funding rate",
+			"side", sig.Side,
+			"time", sig.Timestamp,
+			"rate_8h", r.fundingFilter.Reader.RateAt(sig.Timestamp),
+			"threshold_bps_per_day", r.fundingFilter.MaxBpsPerDay)
 		return
 	}
 

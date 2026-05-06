@@ -91,7 +91,12 @@ func NewHistorical(symbol, csvPath string) (*Historical, error) {
 		if err != nil {
 			continue
 		}
-		rate, err := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
+		// Binance CSV exports quote the funding_rate value (e.g. "-0.00012359").
+		// Strip surrounding double quotes before parsing — without this fix every
+		// row silently fails ParseFloat and the loader returns an empty table,
+		// producing $0 funding for all trades.
+		rateStr := strings.Trim(strings.TrimSpace(parts[1]), `"`)
+		rate, err := strconv.ParseFloat(rateStr, 64)
 		if err != nil {
 			continue
 		}
@@ -117,6 +122,21 @@ func NewHistorical(symbol, csvPath string) (*Historical, error) {
 		h.times, h.rates = newT, newR
 	}
 	return h, nil
+}
+
+// RateAt returns the per-8h funding rate of the most recent funding event
+// at or before t. Returns 0 if t precedes the first event in the table.
+// Used by strategy-side funding filters that need to gate entries on the
+// prevailing funding regime at signal time.
+func (h *Historical) RateAt(t time.Time) float64 {
+	if len(h.times) == 0 {
+		return 0
+	}
+	i := sort.Search(len(h.times), func(i int) bool { return h.times[i].After(t) })
+	if i == 0 {
+		return 0
+	}
+	return h.rates[i-1]
 }
 
 // ChargeFor implements Provider. Sums signed funding cost over events in (openTime, closeTime].
