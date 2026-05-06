@@ -1,0 +1,109 @@
+
+==============================================================================================================
+  QUARTERLY MECHANISM ANALYSIS  (P4-Combined: 4H short, target_rr=6, slip=15bp, fee=10bp)
+  Universe: 57 symbols × 25 quarters
+  Source: p4_quarterly_slip15_full_2026-05-06.tsv
+==============================================================================================================
+
+  TEST Q1 — per-symbol skill detection (one-sample t-test, Bonferroni)
+  ──────────────────────────────────────────────────────────────────────────────────────────
+  Each symbol has up to 25 quarterly NET observations. Test H0: mean=0 vs H1: mean!=0.
+  Bonferroni-adjusted critical value at α=0.05/57 ≈ 0.0009 → |t| > 3.45 (df>20)
+
+  symbol            avg_q      sum_q   n_q       t  significant?
+  ------------ ---------- ---------- ----- -------  ---
+  ROSEUSDT     $   +4,855 $  +82,537    17   +2.23  no
+  ENSUSDT      $   +2,803 $  +50,448    18   +2.10  no
+  AVAXUSDT     $   +2,455 $  +54,015    22   +1.99  no
+  ETCUSDT      $   +2,866 $  +71,646    25   +1.88  no
+  GRTUSDT      $   +2,425 $  +53,340    22   +1.70  no
+  MKRUSDT      $   +2,412 $  +50,645    21   +1.40  no
+  APTUSDT      $   +2,337 $  +32,722    14   +1.38  no
+  AAVEUSDT     $   +1,629 $  +35,841    22   +1.32  no
+  FILUSDT      $   +1,325 $  +29,150    22   +1.27  no
+  WLDUSDT      $   +2,678 $  +29,459    11   +1.20  no
+  APEUSDT      $   +2,068 $  +35,150    17   +1.16  no
+  NEARUSDT     $   +2,131 $  +46,879    22   +1.12  no
+  TIAUSDT      $   +3,567 $  +35,669    10   +1.09  no
+  IMXUSDT      $   +1,851 $  +31,466    17   +1.09  no
+  1INCHUSDT    $   +1,946 $  +40,869    21   +1.06  no
+  ... (42 more rows)
+
+  → 0/57 symbols pass Bonferroni-adjusted significance (p < 0.0009)
+    Under H0, expect 2.9 false-positives. 0 observed → 
+    NO statistical evidence of per-symbol skill.
+
+  TEST Q2 — time trend in aggregate quarterly NET (decay detection)
+  ──────────────────────────────────────────────────────────────────────────────────────────
+  quarter             NET  active syms
+  2020-Q1    $    +51,065           14  █
+  2020-Q2    $    -63,296           15  ▒
+  2020-Q3    $    +22,528           25  
+  2020-Q4    $    -72,580           32  ▒
+  2021-Q1    $   -174,832           37  ▒▒▒
+  2021-Q2    $    +57,626           39  █
+  2021-Q3    $    +36,612           41  
+  2021-Q4    $     +4,521           42  
+  2022-Q1    $   +108,202           45  ██
+  2022-Q2    $   +256,159           46  █████
+  2022-Q3    $    -59,677           47  ▒
+  2022-Q4    $   +224,531           49  ████
+  2023-Q1    $   -112,304           50  ▒▒
+  2023-Q2    $   +100,254           53  ██
+  2023-Q3    $   +104,144           55  ██
+  2023-Q4    $   -386,996           57  ▒▒▒▒▒▒▒
+  2024-Q1    $   -139,766           57  ▒▒
+  2024-Q2    $    +29,743           57  
+  2024-Q3    $    +46,256           57  
+  2024-Q4    $    +46,613           57  
+  2025-Q1    $   +414,125           56  ████████
+  2025-Q2    $     -2,686           56  
+  2025-Q3    $    -85,009           56  ▒
+  2025-Q4    $    +74,467           55  █
+  2026-Q1    $   +175,930           55  ███
+
+  Linear trend: NET = +3,591 × q + -16,864  (slope t=+0.82)
+  → No significant trend. Strategy edge is stable in expectation.
+
+  TEST Q3 — drawdown analysis (cumulative quarterly NET)
+  ──────────────────────────────────────────────────────────────────────────────────────────
+    Cumulative range: min $-237,115  max $+655,630
+    Final cumulative: $+655,630
+    Max drawdown:     $-526,762 (peak 2023-Q3 → trough 2024-Q1)
+    Drawdown duration: 2 quarters
+
+  TEST Q4 — bootstrap CI on annualized expected value
+  ──────────────────────────────────────────────────────────────────────────────────────────
+    Mean quarterly NET:    $+26,225
+    Mean annualized:       $+104,901/yr
+    95% bootstrap CI (annual): [$-130,547, $+337,236]
+    Width: $467,783 — variance bound on per-year expectation
+
+  TEST Q5 — pairwise symbol correlation (25 quarter observations)
+  ──────────────────────────────────────────────────────────────────────────────────────────
+    Average pairwise correlation: +0.182  (vs +0.16 from window analysis)
+    Median: +0.190
+    106/1596 pairs > +0.5
+    0/1596 pairs < -0.5
+    With N=25 the correlation estimates are much more reliable (σ ≈ 1/√25 = 0.20)
+
+  TEST Q6 — high-power per-symbol consistency
+  ──────────────────────────────────────────────────────────────────────────────────────────
+    symbol        pos/total     pos%
+    ------------ ---------- --------
+    ROSEUSDT      14/17        82.4%
+    ENSUSDT       13/18        72.2%
+    IMXUSDT       11/17        64.7%
+    ADAUSDT       16/25        64.0%
+    AVAXUSDT      14/22        63.6%
+    FILUSDT       14/22        63.6%
+    GRTUSDT       14/22        63.6%
+    NEARUSDT      14/22        63.6%
+    KAVAUSDT      14/23        60.9%
+    ICPUSDT       12/20        60.0%
+
+    Mean positive%: 51.7%
+    Symbols with >60% positive quarters: 9/57
+    Symbols with >70% positive quarters: 2/57
+
+==============================================================================================================
