@@ -3,6 +3,9 @@ package marketdata
 import (
 	"encoding/json"
 	"testing"
+	"time"
+
+	"github.com/cristianmanoliu/trading-engine/pkg/models"
 )
 
 func TestCombinedEnvelopeUnmarshal(t *testing.T) {
@@ -54,5 +57,51 @@ func TestBuildCombinedURL(t *testing.T) {
 				t.Errorf("got %q want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestRouteEnvelope(t *testing.T) {
+	chBTC := make(chan models.Tick, 1)
+	chETH := make(chan models.Tick, 1)
+	channels := map[string]chan<- models.Tick{
+		"BTCUSDT": chBTC,
+		"ETHUSDT": chETH,
+	}
+
+	raw := []byte(`{"stream":"ethusdt@aggTrade","data":{"e":"aggTrade","T":1748128765400,"p":"3500.50","q":"0.5"}}`)
+	if err := routeEnvelope(raw, channels); err != nil {
+		t.Fatalf("route: %v", err)
+	}
+
+	select {
+	case tick := <-chETH:
+		if tick.Symbol != "ETHUSDT" {
+			t.Errorf("symbol: got %q want ETHUSDT", tick.Symbol)
+		}
+		if tick.Price != 3500.50 {
+			t.Errorf("price: got %v want 3500.50", tick.Price)
+		}
+		want := time.UnixMilli(1748128765400).UTC()
+		if !tick.Timestamp.Equal(want) {
+			t.Errorf("timestamp: got %v want %v", tick.Timestamp, want)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("no tick on ETH channel")
+	}
+
+	select {
+	case <-chBTC:
+		t.Fatal("unexpected tick on BTC channel")
+	default:
+	}
+}
+
+func TestRouteEnvelopeUnknownSymbolDropped(t *testing.T) {
+	channels := map[string]chan<- models.Tick{}
+	raw := []byte(`{"stream":"xrpusdt@aggTrade","data":{"e":"aggTrade","T":1,"p":"1.0","q":"1"}}`)
+	// Should NOT error — just drop. We may receive ticks for symbols we
+	// don't subscribe to (we shouldn't, but be defensive).
+	if err := routeEnvelope(raw, channels); err != nil {
+		t.Errorf("expected nil error for unknown symbol, got %v", err)
 	}
 }
