@@ -1,0 +1,37 @@
+═══════════════════════════════════════════════════════════════════════════════
+  FUNDING-FILTER SWEEP — 4H short, slip=15bp, universe-57, 3 OOS windows
+═══════════════════════════════════════════════════════════════════════════════
+
+config           W1 NET       W2 NET       W3 NET    Sum 3yr  pos/3   verdict
+------           ------       ------       ------    -------  -----   -------
+baseline         +62163      +533352       -63683   +531832   2/3   ← deployed
+filt1           +135118       -92591      -252079   -209552   1/3
+filt2            +33510      +231774      -168944    +96340   2/3
+filt5            -29980      +465986       -63683   +372323   1/3
+filt10           -10384      +535255       -63683   +461188   1/3
+
+Per-cell trade counts (each filter level removes some shorts):
+
+config          W1_tr    W1_wr    W2_tr    W2_wr    W3_tr    W3_wr
+------         ------   ------   ------   ------   ------   ------
+baseline         1868   19.33%     1955   22.51%     1983   18.91%
+filt1             360   23.06%      568   14.61%     1025   15.02%
+filt2             581   19.79%      944   21.72%     1571   16.93%
+filt5            1600   18.50%     1892   22.20%     1983   18.91%
+filt10           1735   18.62%     1953   22.53%     1983   18.91%
+
+VERDICT: FILTER REJECTED — do NOT deploy.
+
+No filter level beats the no-filter baseline. The trade-level filter removes too
+many winners along with the regime-aligned losers. Specifically:
+- filt1 catastrophically removes 71% of W2's profitable trades (1955→568)
+- filt5/filt10 essentially leave W3 unchanged (W3 had low avg funding so few
+  shorts fired during high-funding moments)
+- The regime correlation at QUARTER level (r=-0.17) is real but does NOT
+  translate to TRADE level — a short entered during a brief funding spike
+  often still profits because it holds 60+ hours and the underlying bear
+  pattern plays out regardless of entry-moment funding
+
+Implication: do not wire this filter to live engines. The dormant filter code
+in pkg/strategy/funding_filter.go remains as a primitive for future variants
+that might gate by something other than current funding rate.

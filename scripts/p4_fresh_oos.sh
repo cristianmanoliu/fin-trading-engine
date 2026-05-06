@@ -87,12 +87,18 @@ run_symbol() {
     # NOTE: target_rr is configured via YAML (sed pattern above sets it in $cfg).
     # cmd/backtest does not have a --target-rr CLI flag; it's a YAML-only setting.
     # jq output is tab-separated so awk -F'\t' parses each field cleanly.
+    local filter_arg=""
+    if [[ -n "${FUNDING_FILTER_BPS:-}" ]] && [[ "${FUNDING_FILTER_BPS}" != "0" ]]; then
+        filter_arg="--funding-filter-max-bps-per-day ${FUNDING_FILTER_BPS}"
+    fi
+
     local result
     result=$("$BINARY" --config "$cfg" \
         --exact-fills --include-boundary --pessimistic-ambiguous \
         --fee-bps "$FEE_BPS" --stop-slippage-bps "$SLIP_BPS" \
         --funding-bps-per-day 0 \
         $funding_arg \
+        $filter_arg \
         --signal-tf "$SIGNAL_TF" \
         --side-filter "$SIDE_FILTER" --max-hold-hours "$MAX_HOLD_HOURS" 2>&1 \
         | jq -r 'select(.msg | test("SUMMARY")) | [.total_trades, .wins, (.total_pnl_usd // 0), (.gross_pnl_usd // 0), (.total_fees_usd // 0), (.total_funding_usd // 0), (.long_net_usd // 0), (.short_net_usd // 0), (.avg_hold_hours // 0)] | @tsv' \
@@ -105,7 +111,7 @@ run_symbol() {
     printf '%s\t%s\n' "$symbol" "$result"
 }
 export -f run_symbol
-export ROOT BINARY WORKDIR FEE_BPS SLIP_BPS SIGNAL_TF TARGET_RR SIDE_FILTER MAX_HOLD_HOURS FUNDING_DIR START_YEAR START_MONTH END_YEAR END_MONTH
+export ROOT BINARY WORKDIR FEE_BPS SLIP_BPS SIGNAL_TF TARGET_RR SIDE_FILTER MAX_HOLD_HOURS FUNDING_DIR START_YEAR START_MONTH END_YEAR END_MONTH FUNDING_FILTER_BPS
 
 RAW=$(printf '%s\n' $SYMBOLS \
     | xargs -P "$NCPU" -I{} bash -c 'run_symbol "{}"')
