@@ -2,7 +2,21 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Current state (2026-05-06, post-redeploy)
+## Current state (2026-05-06, post-fresh-OOS-failure)
+
+> ⚠️ **STRATEGY ALPHA-DECAY DISCOVERED 2026-05-06.** A fresh out-of-sample test on the only 12-month window (2025-05 → 2026-04) of data the strategy was NEVER selected against showed:
+> - Universe-57 NET: **+$24k @ slip=5bp / −$82k @ slip=15bp / −$187k @ slip=25bp** (vs backtest expectation +$210k / +$142k / +$74k per year)
+> - Longs-only is **WORSE** than shorts (−$462k) — rules out regime-change explanation
+> - Both-sides −$438k — confirms signal failure across direction
+> - Universe WR 18.91% (shorts) / 14.61% (longs, below 14.3% breakeven) / 16.93% (both)
+> - **Deployed-16 captured 37% of expectation** (+$48k vs ~$127k expected at slip=15bp annualised)
+> - 25/57 symbols showed sign-REVERSAL between backtest and fresh OOS
+>
+> **Read this as alpha decay, not regime change.** The 4H EMA9×EMA21 crossover edge has materially decayed across both sides. **Do NOT allocate real money to this strategy as configured.** Forward-paper engines may continue running as observational data, but the validation hypothesis is materially weakened.
+>
+> Full analysis: `results/fresh_oos_2025-05_to_2026-04_*_2026-05-06.txt`, `scripts/p4_fresh_oos.sh`, `scripts/fresh_oos_compare.py`. See `## Fresh OOS validation (2026-05-06)` below for the full per-symbol breakdown and methodology.
+
+## Current state (2026-05-06, post-redeploy — strategy now in fresh-OOS-failure status, see ⚠️ above)
 
 | Layer | What is it | Where |
 |---|---|---|
@@ -393,6 +407,66 @@ Restoration command (rolls back today's stop):
 ssh root@178.105.24.230 'systemctl enable --now paper-live@btcusdt.service paper-live@ethusdt.service ...'
 ssh root@178.105.24.230 'systemctl enable --now paper-live-watchdog.timer paper-live-digest.timer'
 ```
+
+## Fresh OOS validation (2026-05-06)
+
+After today's symbol-list consolidation + test coverage closure, ran a true out-of-sample test on data the strategy had **never** been selected against. The original cost-survivor battery, train-only-shortlist diagnostic, and per-quarter sweep all used 2020-01 → 2025-04. The 12 months from **2025-05 → 2026-04** are pure OOS — selected for, never tested against, never tuned to.
+
+**Headline (universe-57, fresh 12-month window):**
+
+| Slip | Backtest annualised | Fresh 12mo NET | Gap |
+|---:|---:|---:|---:|
+| 5bp | +$210k/yr | **+$24k** | −89% |
+| 15bp | +$142k/yr | **−$82k** | sign flip |
+| 25bp | +$74k/yr | **−$187k** | massive loss |
+
+WR fresh: 18.91% (shorts) vs 20.64% backtest. Below the 14.3% breakeven WR for cost-laden long-side trades.
+
+**Direction sweep (fresh OOS @ slip=15bp):**
+
+| Side filter | NET | Profitable sym | WR |
+|---|---:|:---:|:---:|
+| shorts (deployed) | −$82k | 24/56 | 18.91% |
+| longs only | **−$462k** | 11/56 | 14.61% (below breakeven) |
+| both sides | −$438k | 20/56 | 16.93% |
+
+**Critical interpretation:** longs-only being **worse** than shorts rules out the "2025-2026 was a bull regime that hurt shorts" hypothesis. If the issue were regime, longs would have made money. Instead, the signal failed in both directions. **This is alpha decay, not regime change.**
+
+**Per-symbol category breakdown (57 symbols, comparing backtest annualised vs fresh 12mo, slip=15):**
+- **REVERSAL** (sign change): 25 symbols (44%) — including former winners CRV, MKR, BCH, LDO, ENJ, GMX
+- **DECAYER** (>50% deterioration, same sign): 8 symbols
+- **maintainer** (within ±50%): 14 symbols — includes 5 of deployed-16 (ROSE, 1INCH, AAVE, DOT, RUNE)
+- **IMPROVER** (>50% better): 10 symbols — TIA (+1107%), HBAR (+3477%), APE, OP, DYDX, ETC, XLM, BLUR, APT, PYTH
+
+**Deployed-16 specifics (fresh 12mo @ slip=15):**
+- Aggregate: **+$47,595** (positive but 37% of backtest expectation $127k/yr)
+- Strong: ETC (+$23k), XLM (+$23k), ROSE (+$16k), 1INCH (+$12k), APT (+$12k)
+- Marginal: ENS (+$4k), RUNE (+$4k), DOT (+$5k), 1000SHIB (−$0.2k)
+- Loss: BCH (−$20k!), GRT (−$8k), KAVA (−$7k), FIL (−$7k), ADA (−$5k), AVAX (−$4k), IMX (+$0.7k)
+
+The selection captured SOME signal (deployed-16 still positive while universe is negative) but with major bad picks (BCH, GRT, KAVA all turned negative).
+
+**Symbols we EXCLUDED that worked in fresh OOS — i.e. opportunities the train-only filter missed:**
+- TIAUSDT (+$22k) — was a "late-listing recovery" excluded by train-only filter
+- HBARUSDT (+$14k) — recovery
+- APEUSDT (+$15k) — train-rank too low
+- DYDXUSDT (+$14k) — regime-flipper
+
+These are exactly the "structural blind spots" the train-only-shortlist diagnostic flagged. Forward data confirms they contained real alpha.
+
+**Symbols we EXCLUDED that confirmed losers (correct exclusions):** BTC (−$16k), TRX (−$17k), ENJ (−$17k), INJ (−$14k).
+
+**What this implies for the deployed forward-paper system:**
+- The 16 paper engines continue running on VPS (free observational data)
+- The original ~$69-184k/yr forward-PnL expectation no longer holds — fresh evidence suggests **+$48k/yr ≈ true expected value at slip=15bp**, with high variance
+- The 60-day go/no-go criteria need updating: against the new ~$48k/yr expectation, the deployed-16 should be net-positive within 30-60 days if the fresh-OOS pattern repeats. If it goes net-negative for 30+ days, kill the strategy entirely.
+- Real-money deployment as previously framed is no longer indicated. If forward-paper passes the new (lower) bar over 60 days, *then* consider a small real-money tranche.
+
+**Methodology notes:**
+- Fresh window slip=15bp is a strict comparison: backtest at slip=15bp showed +$710k/5y = +$142k/yr; fresh 1y showed −$82k.
+- 12 months is one regime sample — high variance. Five 12-month windows would tell us more, but we only have one. Treat the magnitude as indicative; treat the SIGN as load-bearing.
+- The fresh window includes some delisted symbols (MKR, FTM) with partial data; their contribution is included for completeness.
+- Per-symbol breakdown in `results/fresh_oos_2025-05_to_2026-04_slip15_2026-05-06.txt`. Side-filter variants in `results/fresh_oos_{longs,both}_slip15_2026-05-06.txt`. Comparison logic: `scripts/fresh_oos_compare.py`.
 
 ## Forward-paper go/no-go criteria
 
