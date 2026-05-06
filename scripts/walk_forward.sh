@@ -41,6 +41,23 @@ VWAP_DEV_PCT="${VWAP_DEV_PCT:-0}"  # 0 → VWAP fade disabled; e.g. 0.02 = 2% de
 RSI_MODE="${RSI_MODE:-0}"          # 1 → enable RSI cross-50 strategy
 RSI_PERIOD="${RSI_PERIOD:-0}"      # 0 → defaults to 14
 PDH_PDL_MODE="${PDH_PDL_MODE:-0}"  # 1 → enable PDH/PDL break strategy
+MACD_MODE="${MACD_MODE:-0}"        # 1 → enable MACD line/signal cross
+MACD_FAST="${MACD_FAST:-0}"        # 0 → defaults to 12
+MACD_SLOW="${MACD_SLOW:-0}"        # 0 → defaults to 26
+MACD_SIGNAL="${MACD_SIGNAL:-0}"    # 0 → defaults to 9
+BB_MODE="${BB_MODE:-0}"            # 1 → enable Bollinger band breakdown
+BB_PERIOD="${BB_PERIOD:-0}"        # 0 → defaults to 20
+BB_STD="${BB_STD:-0}"              # 0 → defaults to 2.0
+TRAIL_MODE="${TRAIL_MODE:-0}"            # Cat B1: 1 → enable trailing stop
+TRAIL_INTERVAL_R="${TRAIL_INTERVAL_R:-0}" # Cat B1: trail step in R; 0 → defaults to 1.0
+MLTP_MODE="${MLTP_MODE:-0}"               # Cat B2: 1 → enable multi-level TP
+MID_R="${MID_R:-0}"                       # Cat B2: mid-R multiple; 0 → defaults to 3.0
+MID_FRAC="${MID_FRAC:-0}"                 # Cat B2: partial fraction; 0 → defaults to 0.5
+CONFL_1D_MODE="${CONFL_1D_MODE:-0}"       # Cat D1: 1 → enable 1D bias confluence filter
+CONFL_FAST="${CONFL_FAST:-0}"             # Cat D1: 1D EMA fast period; 0 → 9
+CONFL_SLOW="${CONFL_SLOW:-0}"             # Cat D1: 1D EMA slow period; 0 → 21
+VOL_FILTER_MODE="${VOL_FILTER_MODE:-0}"   # Cat E1: 1 → enable vol-regime filter
+MAX_VOL="${MAX_VOL:-0}"                   # Cat E1: max annualized vol fraction; 0 → 1.20
 
 # Label embeds the filter level only when active so unfiltered runs keep their
 # existing filename (no churn for the deployed config baseline).
@@ -59,6 +76,24 @@ if [[ "$RSI_MODE" == "1" ]]; then
 fi
 if [[ "$PDH_PDL_MODE" == "1" ]]; then
     LABEL="${LABEL}_pdhpdl"
+fi
+if [[ "$MACD_MODE" == "1" ]]; then
+    LABEL="${LABEL}_macd${MACD_FAST}-${MACD_SLOW}-${MACD_SIGNAL}"
+fi
+if [[ "$BB_MODE" == "1" ]]; then
+    LABEL="${LABEL}_bb${BB_PERIOD}-${BB_STD}"
+fi
+if [[ "$TRAIL_MODE" == "1" ]]; then
+    LABEL="${LABEL}_trail${TRAIL_INTERVAL_R}"
+fi
+if [[ "$MLTP_MODE" == "1" ]]; then
+    LABEL="${LABEL}_mltp${MID_R}-${MID_FRAC}"
+fi
+if [[ "$CONFL_1D_MODE" == "1" ]]; then
+    LABEL="${LABEL}_confl1d${CONFL_FAST}-${CONFL_SLOW}"
+fi
+if [[ "$VOL_FILTER_MODE" == "1" ]]; then
+    LABEL="${LABEL}_volfilt${MAX_VOL}"
 fi
 OUT="${1:-results/walk_forward_${LABEL}_$(date +%F).txt}"
 WORKDIR=$(mktemp -d /tmp/wf-XXXXXXXX)
@@ -113,6 +148,12 @@ for win in "${WINDOWS[@]}"; do
     EMA_FAST="$EMA_FAST" EMA_SLOW="$EMA_SLOW" \
     VWAP_DEV_PCT="$VWAP_DEV_PCT" \
     RSI_MODE="$RSI_MODE" RSI_PERIOD="$RSI_PERIOD" PDH_PDL_MODE="$PDH_PDL_MODE" \
+    MACD_MODE="$MACD_MODE" MACD_FAST="$MACD_FAST" MACD_SLOW="$MACD_SLOW" MACD_SIGNAL="$MACD_SIGNAL" \
+    BB_MODE="$BB_MODE" BB_PERIOD="$BB_PERIOD" BB_STD="$BB_STD" \
+    TRAIL_MODE="$TRAIL_MODE" TRAIL_INTERVAL_R="$TRAIL_INTERVAL_R" \
+    MLTP_MODE="$MLTP_MODE" MID_R="$MID_R" MID_FRAC="$MID_FRAC" \
+    CONFL_1D_MODE="$CONFL_1D_MODE" CONFL_FAST="$CONFL_FAST" CONFL_SLOW="$CONFL_SLOW" \
+    VOL_FILTER_MODE="$VOL_FILTER_MODE" MAX_VOL="$MAX_VOL" \
     START_YEAR="$sy" START_MONTH="$sm" END_YEAR="$ey" END_MONTH="$em" \
     "${ROOT}/scripts/p4_fresh_oos.sh" "$win_out" > /dev/null 2>&1
 

@@ -20,6 +20,24 @@ type OpenPosition struct {
 	MaxAdverse float64   // worst price seen against the trade (for MAE tracking)
 	LastPrice  float64   // most recent tick price
 	LastTime   time.Time // most recent tick timestamp (used for force-close at end of data)
+
+	// OriginalStopDist: |entry - signalStopLoss| at OnSignal time. Used by closePosition
+	// for sizing (units = StakeUSDT / OriginalStopDist). Cached because B1 (trailing
+	// stop) and B2 (BE-stop after partial) mutate Signal.StopLoss after entry, which
+	// would otherwise produce stopDist=0 (divide-by-zero) at exit.
+	OriginalStopDist float64
+
+	// MaxFavorableR: peak favorable price excursion in R-multiples since entry.
+	// Used by B1 trailing stop. Updated each tick. Initial value 0.
+	MaxFavorableR float64
+
+	// MidRHit: set true after the B2 mid-R partial close has fired. Prevents repeat firing.
+	MidRHit bool
+
+	// RemainingFrac: fraction of original position size still open. Starts at 1.0.
+	// After a B2 partial close, drops to 1 - MidFrac. closePosition uses this to
+	// scale units = StakeUSDT × RemainingFrac / OriginalStopDist.
+	RemainingFrac float64
 }
 
 // Stub is a paper-trading execution engine.
@@ -82,8 +100,26 @@ type Stub struct {
 	// classification: won = (pnl > 0) — same accounting as natural target/stop hits.
 	MaxHoldHours float64
 
+	// TrailingStopMode (B1): when true, ratchet the stop favorable as price moves.
+	// At maxFavorableR ≥ 1.0, lock the stop at entry + (floor(maxFavorableR) − 1) × originalStopDist
+	// (LONG; mirror for SHORT). Stop only ratchets in the favorable direction. Take-profit
+	// still acts as a backstop. Cat B: trailing stop test (2026-05-07). See `results/cat_b_decision_rule_2026-05-07.md`.
+	TrailingStopMode bool
+	TrailIntervalR   float64 // 0 → defaults to 1.0
+
+	// MultiLevelTPMode (B2): when true, scale out at mid-R. At entry ± MidRMult × originalStopDist,
+	// close MidFrac of the position; emit a separate tradeResult with outcome=PARTIAL; raise
+	// stop on the remainder to entry (BE). Remainder runs to either 6R target or BE-stop.
+	// Cat B: multi-level TP test (2026-05-07). See pre-registered rule above.
+	MultiLevelTPMode bool
+	MidRMult         float64 // 0 → defaults to 3.0
+	MidFrac          float64 // 0 → defaults to 0.5
+
 	// timeStopCount: audit counter for positions force-closed by MaxHoldHours.
 	timeStopCount int
+
+	// partialCloseCount: audit counter for B2 mid-R partial closes.
+	partialCloseCount int
 
 	// JournalPath, when non-empty, is a directory where per-symbol JSONL trade journals
 	// are written (one file per calendar month). Set by cmd/engine only — backtest
@@ -168,7 +204,14 @@ func (s *Stub) OnSignal(sig *models.Signal) {
 			"new_signal", sig.Reason)
 		return
 	}
-	s.position = &OpenPosition{Signal: sig, MaxAdverse: sig.EntryPrice, LastPrice: sig.EntryPrice, LastTime: sig.Timestamp}
+	s.position = &OpenPosition{
+		Signal:           sig,
+		MaxAdverse:       sig.EntryPrice,
+		LastPrice:        sig.EntryPrice,
+		LastTime:         sig.Timestamp,
+		OriginalStopDist: math.Abs(sig.EntryPrice - sig.StopLoss),
+		RemainingFrac:    1.0,
+	}
 	slog.Info("position opened",
 		"side", sig.Side,
 		"entry", sig.EntryPrice,
@@ -245,6 +288,43 @@ func (s *Stub) OnTick(tick models.Tick) {
 		s.position.MaxAdverse = tick.Price
 	}
 
+	// B1 trailing stop: update favorable-excursion watermark and ratchet stop.
+	if s.TrailingStopMode && s.position.OriginalStopDist > 0 {
+		var favR float64
+		if sig.Side == models.Long {
+			favR = (tick.Price - sig.EntryPrice) / s.position.OriginalStopDist
+		} else {
+			favR = (sig.EntryPrice - tick.Price) / s.position.OriginalStopDist
+		}
+		if favR > s.position.MaxFavorableR {
+			s.position.MaxFavorableR = favR
+		}
+		interval := s.TrailIntervalR
+		if interval <= 0 {
+			interval = 1.0
+		}
+		// Lock (floor(maxFav/interval) × interval - interval)R favorable when ≥ interval.
+		// At interval=1: maxFav 1.x → locked 0 (BE); 2.x → locked 1; etc.
+		if s.position.MaxFavorableR >= interval {
+			lockedR := math.Floor(s.position.MaxFavorableR/interval)*interval - interval
+			if lockedR < 0 {
+				lockedR = 0
+			}
+			var newStop float64
+			if sig.Side == models.Long {
+				newStop = sig.EntryPrice + lockedR*s.position.OriginalStopDist
+				if newStop > sig.StopLoss { // only ratchet favorable
+					sig.StopLoss = newStop
+				}
+			} else {
+				newStop = sig.EntryPrice - lockedR*s.position.OriginalStopDist
+				if newStop < sig.StopLoss {
+					sig.StopLoss = newStop
+				}
+			}
+		}
+	}
+
 	stopHit := (sig.Side == models.Long && tick.Price <= sig.StopLoss) ||
 		(sig.Side == models.Short && tick.Price >= sig.StopLoss)
 
@@ -256,7 +336,19 @@ func (s *Stub) OnTick(tick models.Tick) {
 		if s.ExactFills {
 			exitPrice = sig.StopLoss
 		}
-		s.closePosition(exitPrice, tick.Timestamp, false)
+		// Under TrailingStopMode (or after a B2 partial that raised stop to BE),
+		// the stop can fire at or above entry — classify as won by PnL sign.
+		// Baseline behavior preserved when neither mode is active: stop = loss.
+		won := false
+		if s.TrailingStopMode || (s.MultiLevelTPMode && s.position.MidRHit) {
+			if sig.Side == models.Long {
+				won = exitPrice > sig.EntryPrice
+			} else {
+				won = exitPrice < sig.EntryPrice
+			}
+		}
+		s.closePosition(exitPrice, tick.Timestamp, won)
+		return
 	} else if targetHit {
 		exitPrice := tick.Price
 		if s.ExactFills {
@@ -271,7 +363,118 @@ func (s *Stub) OnTick(tick models.Tick) {
 			return
 		}
 		s.closePosition(exitPrice, tick.Timestamp, true)
+		return
 	}
+
+	// B2 multi-level TP: at mid-R, close MidFrac of position; raise remainder stop to BE.
+	// Fires at most once per position (MidRHit gate).
+	if s.MultiLevelTPMode && !s.position.MidRHit && s.position.OriginalStopDist > 0 {
+		midRMult := s.MidRMult
+		if midRMult <= 0 {
+			midRMult = 3.0
+		}
+		midFrac := s.MidFrac
+		if midFrac <= 0 {
+			midFrac = 0.5
+		}
+		var midRPrice float64
+		var midRHit bool
+		if sig.Side == models.Long {
+			midRPrice = sig.EntryPrice + midRMult*s.position.OriginalStopDist
+			midRHit = tick.Price >= midRPrice
+		} else {
+			midRPrice = sig.EntryPrice - midRMult*s.position.OriginalStopDist
+			midRHit = tick.Price <= midRPrice
+		}
+		if midRHit {
+			exitPrice := tick.Price
+			if s.ExactFills {
+				exitPrice = midRPrice
+			}
+			s.recordPartialClose(exitPrice, tick.Timestamp, midFrac)
+			s.position.RemainingFrac -= midFrac
+			s.position.MidRHit = true
+			sig.StopLoss = sig.EntryPrice // raise stop to breakeven on remainder
+		}
+	}
+}
+
+// recordPartialClose emits a tradeResult for a partial close at midFrac of the original
+// position size. Position remains open with reduced RemainingFrac. Used by B2 multi-level TP.
+func (s *Stub) recordPartialClose(exitPrice float64, exitTime time.Time, frac float64) {
+	sig := s.position.Signal
+	stopDist := s.position.OriginalStopDist
+	if stopDist == 0 {
+		return
+	}
+
+	var pnlPts float64
+	if sig.Side == models.Long {
+		pnlPts = exitPrice - sig.EntryPrice
+	} else {
+		pnlPts = sig.EntryPrice - exitPrice
+	}
+
+	holdSeconds := 0.0
+	if !exitTime.IsZero() && !sig.Timestamp.IsZero() {
+		holdSeconds = exitTime.Sub(sig.Timestamp).Seconds()
+		if holdSeconds < 0 {
+			holdSeconds = 0
+		}
+	}
+
+	var grossUSDT, feeUSDT, fundingUSDT, pnlUSDT float64
+	if s.StakeUSDT > 0 {
+		units := s.StakeUSDT * frac / stopDist
+		grossUSDT = units * pnlPts
+		notional := units * sig.EntryPrice
+		if s.FeeBps > 0 {
+			feeUSDT = s.FeeBps / 10000.0 * notional
+		}
+		// Partial close is always a winner (mid-R is favorable) — no slippage.
+		if s.FundingProvider != nil && holdSeconds > 0 {
+			fundingUSDT = s.FundingProvider.ChargeFor(sig.Side, notional, sig.Timestamp, exitTime)
+		} else if s.FundingBpsPerDay > 0 && holdSeconds > 0 {
+			holdDays := holdSeconds / 86400.0
+			fundingUSDT = s.FundingBpsPerDay / 10000.0 * notional * holdDays
+		}
+		pnlUSDT = grossUSDT - feeUSDT - fundingUSDT
+	}
+
+	s.partialCloseCount++
+
+	stopDistPct := 0.0
+	if sig.EntryPrice > 0 {
+		stopDistPct = stopDist / sig.EntryPrice * 100
+	}
+	s.results = append(s.results, tradeResult{
+		signal:      sig,
+		exitPrice:   exitPrice,
+		exitTime:    exitTime,
+		won:         true,
+		pnlPts:      pnlPts,
+		pnlUSDT:     pnlUSDT,
+		grossUSDT:   grossUSDT,
+		feeUSDT:     feeUSDT,
+		slipUSDT:    0,
+		fundingUSDT: fundingUSDT,
+		holdSeconds: holdSeconds,
+		stopDistPct: stopDistPct,
+	})
+	s.appendJournal(journalEntry{
+		Event:   "close",
+		Symbol:  s.Symbol,
+		TS:      time.Now().UTC().Format(time.RFC3339),
+		Side:    sig.Side.String(),
+		Entry:   sig.EntryPrice,
+		Exit:    exitPrice,
+		Stop:    sig.StopLoss,
+		Target:  sig.TakeProfit,
+		PnlPts:  math.Round(pnlPts*100) / 100,
+		PnlUSD:  math.Round(pnlUSDT*100) / 100,
+		Outcome: "PARTIAL",
+		Reason:  sig.Reason,
+	})
 }
 
 func (s *Stub) closePosition(exitPrice float64, exitTime time.Time, won bool) {
@@ -294,12 +497,21 @@ func (s *Stub) closePosition(exitPrice float64, exitTime time.Time, won bool) {
 	}
 
 	// Fixed-stake dollar PnL: size the trade so that the stop distance = StakeUSDT.
-	// units = StakeUSDT / |entry - stop|; gross = units × pnlPts; net = gross − fee − slip − funding.
+	// units = (StakeUSDT × remainingFrac) / |entry - originalStop|; gross = units × pnlPts;
+	// net = gross − fee − slip − funding. Uses OriginalStopDist (cached at OnSignal) so that
+	// B1/B2 stop mutations don't break sizing. RemainingFrac scales for B2 partial closes.
 	var grossUSDT, feeUSDT, slipUSDT, fundingUSDT, pnlUSDT float64
 	if s.StakeUSDT > 0 {
-		stopDist := math.Abs(sig.EntryPrice - sig.StopLoss)
+		stopDist := s.position.OriginalStopDist
+		if stopDist == 0 {
+			stopDist = math.Abs(sig.EntryPrice - sig.StopLoss) // fallback for legacy callers
+		}
+		remainingFrac := s.position.RemainingFrac
+		if remainingFrac == 0 {
+			remainingFrac = 1.0 // legacy callers that didn't go through OnSignal
+		}
 		if stopDist > 0 {
-			units := s.StakeUSDT / stopDist
+			units := s.StakeUSDT * remainingFrac / stopDist
 			grossUSDT = units * pnlPts
 			notional := units * sig.EntryPrice
 			if s.FeeBps > 0 {

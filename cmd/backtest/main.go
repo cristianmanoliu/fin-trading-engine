@@ -44,6 +44,23 @@ func main() {
 	rsiMode := flag.Bool("rsi-mode", false, "enable RSI-cross-50 strategy (momentum). Overrides EMA mode when true.")
 	rsiPeriod := flag.Int("rsi-period", 0, "RSI period (default 14)")
 	pdhPdlMode := flag.Bool("pdh-pdl-break-mode", false, "enable PDH/PDL breakdown strategy (momentum, fixed-RR variant). Overrides EMA mode when true.")
+	macdMode := flag.Bool("macd-mode", false, "enable MACD line/signal cross strategy (momentum). Overrides EMA mode when true.")
+	macdFast := flag.Int("macd-fast", 0, "MACD fast EMA period (default 12)")
+	macdSlow := flag.Int("macd-slow", 0, "MACD slow EMA period (default 26)")
+	macdSignal := flag.Int("macd-signal", 0, "MACD signal-line EMA period (default 9)")
+	bollingerMode := flag.Bool("bollinger-mode", false, "enable Bollinger band breakdown/breakout strategy (momentum). Overrides EMA mode when true.")
+	bollingerPeriod := flag.Int("bollinger-period", 0, "Bollinger band SMA period (default 20)")
+	bollingerStdMult := flag.Float64("bollinger-std-mult", 0, "Bollinger band stdev multiplier (default 2.0)")
+	trailingStopMode := flag.Bool("trailing-stop-mode", false, "Cat B1: ratchet stop favorable as price moves (lock (N-1)R after NR favorable). Coexists with target-rr backstop.")
+	trailIntervalR := flag.Float64("trail-interval-r", 0, "Cat B1: trail step in R-multiples (default 1.0)")
+	multiLevelTPMode := flag.Bool("multi-level-tp-mode", false, "Cat B2: scale-out at mid-R; close MidFrac of position; raise stop to BE on remainder.")
+	midR := flag.Float64("mid-r", 0, "Cat B2: mid-R multiple at which to partial-close (default 3.0)")
+	midFrac := flag.Float64("mid-frac", 0, "Cat B2: fraction of position closed at mid-R (default 0.5)")
+	confluence1DMode := flag.Bool("confluence-1d-mode", false, "Cat D1: gate signals by 1D EMA bias agreement. Sample 4H closes at UTC hour=0 into 1D EMA pair.")
+	confluenceFastPeriod := flag.Int("confluence-fast", 0, "Cat D1: 1D EMA fast period (default 9)")
+	confluenceSlowPeriod := flag.Int("confluence-slow", 0, "Cat D1: 1D EMA slow period (default 21)")
+	volFilterMode := flag.Bool("vol-filter-mode", false, "Cat E1: skip entries when realized 30d annualized vol > MaxVolAnnualized.")
+	maxVolAnnualized := flag.Float64("max-vol-annualized", 0, "Cat E1: max 30d realized vol as fraction (default 1.20 = 120%)")
 	flag.Parse()
 
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
@@ -117,12 +134,24 @@ func main() {
 		MomentumMode:      cfg.Strategy.MomentumMode,
 		VWAPDeviationMode: cfg.Strategy.VWAPDeviationMode || *vwapDevMode,
 		VWAPDeviationPct:  func() float64 { if *vwapDevPct > 0 { return *vwapDevPct }; return cfg.Strategy.VWAPDeviationPct }(),
-		EMAMode:           cfg.Strategy.EMAMode && !(*vwapDevMode) && !(*rsiMode) && !(*pdhPdlMode),
+		EMAMode:           cfg.Strategy.EMAMode && !(*vwapDevMode) && !(*rsiMode) && !(*pdhPdlMode) && !(*macdMode) && !(*bollingerMode),
 		EMAFastPeriod:     *emaFastPeriod,
 		EMASlowPeriod:     *emaSlowPeriod,
 		RSIMode:           *rsiMode,
 		RSIPeriod:         *rsiPeriod,
 		PDHPDLBreakMode:   *pdhPdlMode,
+		MACDMode:          *macdMode,
+		MACDFast:          *macdFast,
+		MACDSlow:          *macdSlow,
+		MACDSignal:        *macdSignal,
+		BollingerMode:        *bollingerMode,
+		BollingerPeriod:      *bollingerPeriod,
+		BollingerStdMult:     *bollingerStdMult,
+		Confluence1DMode:     *confluence1DMode,
+		ConfluenceFastPeriod: *confluenceFastPeriod,
+		ConfluenceSlowPeriod: *confluenceSlowPeriod,
+		VolFilterMode:        *volFilterMode,
+		MaxVolAnnualized:     *maxVolAnnualized,
 		ATRStopMult:       *atrStopMult,
 		ATRPeriod:         *atrPeriod,
 		SignalTimeframe:   tf,
@@ -138,6 +167,11 @@ func main() {
 		FundingBpsPerDay:     *fundingBpsPerDay,
 		TaxRatePct:           *taxRatePct,
 		MaxHoldHours:         *maxHoldHours,
+		TrailingStopMode:     *trailingStopMode,
+		TrailIntervalR:       *trailIntervalR,
+		MultiLevelTPMode:     *multiLevelTPMode,
+		MidRMult:             *midR,
+		MidFrac:              *midFrac,
 	}
 
 	// Per-symbol historical funding overrides the constant rate when the file is present.

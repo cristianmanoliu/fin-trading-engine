@@ -9,13 +9,16 @@ User=paperlive
 WorkingDirectory=/opt/trading-engine
 EnvironmentFile=/etc/paper-live/env
 Environment=PAPER_LIVE_JOURNAL_DIR=/var/log/paper-live/journal
-# Strategy A (P4-Combined) with mh504 (21d max-hold) + 2 shadow strategies.
-# Pre-registered 6-window validation 2026-05-06 EOS:
-#   - mh504 wins 6/6 vs mh336 → STRONG → adopted as live config
-#   - 5/15 EMA wins 4/6 vs 9/21 → WEAK → run as shadow for forward validation
+# Strategy A (P4-Combined) with mh504 (21d max-hold) + 3 shadow strategies.
+# Pre-registered validation history:
+#   - 2026-05-06: mh504 wins 6/6 vs mh336 → STRONG → adopted as live config
+#   - 2026-05-06: 5/15 EMA wins 4/6 vs 9/21 → WEAK → run as shadow for forward validation
+#   - 2026-05-07: BB(20, 2.0) Cat A WEAK literal + D2 Sharpe SUPPORTIVE (+81% Sharpe,
+#     +63% sum vs baseline) → added as shadow. NOT a parameter variant — entirely
+#     different entry mechanism (Bollinger breakdown vs EMA cross), shorts-only.
 # Shadow strategies receive identical market data but write to separate journals
 # at /var/log/paper-live/journal/shadow/<label>/. Compare live vs shadow PnL
-# after sufficient forward time accumulates to test the WEAK signals on real data.
+# after sufficient forward time accumulates.
 # Rollback: drop --shadow flag (live unaffected); change --max-hold-hours 504 → 336.
 ExecStart=/opt/trading-engine/bin/engine --config /opt/trading-engine/configs/%i.yaml \
     --signal-tf 4H --target-rr 6.0 \
@@ -23,7 +26,7 @@ ExecStart=/opt/trading-engine/bin/engine --config /opt/trading-engine/configs/%i
     --funding-csv-dir /opt/trading-engine/data/funding \
     --fee-bps 10 --stop-slippage-bps 5 --funding-bps-per-day 0 \
     --max-hold-hours 504 \
-    --shadow alt5-15-336:5-15-336,alt5-15-504:5-15-504
+    --shadow alt5-15-336:5-15-336,alt5-15-504:5-15-504,bb20:bb:20-2.0-504
 StandardOutput=append:/var/log/paper-live/%i.log
 StandardError=append:/var/log/paper-live/%i.log
 Restart=always

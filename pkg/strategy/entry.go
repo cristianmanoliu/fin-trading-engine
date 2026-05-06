@@ -26,6 +26,31 @@ type EntryDetector struct {
 	// RSI state (used only when RSIMode=true)
 	rsi     *indicators.RSI
 	prevRSI float64
+
+	// MACD state (used only when MACDMode=true)
+	macd       *indicators.MACD
+	prevMACD   float64
+	prevSignal float64
+
+	// Bollinger state (used only when BollingerMode=true). Zone flags edge-trigger
+	// the entry: fire only on the FIRST close that enters the band region. Without
+	// this gate, sustained moves below the lower band would re-fire on every candle.
+	bollinger      *indicators.Bollinger
+	inBBLowerZone  bool // last evaluation: close was below lower band
+	inBBUpperZone  bool // last evaluation: close was above upper band
+
+	// D1 confluence state (used only when Confluence1DMode=true).
+	// Sample 4H closes at CloseTime hour=0 UTC into a 1D EMA pair. Used as
+	// a gating filter inside checkEMACrossover — only emit signals whose direction
+	// agrees with the 1D bias. Cat D1: 2026-05-07.
+	confluenceEMAFast *indicators.EMA
+	confluenceEMASlow *indicators.EMA
+
+	// E1 vol-regime state (used only when VolFilterMode=true). Rolling window of
+	// 4H log returns; realized vol annualized via sqrt(6×365). Updated every AddCandle.
+	// Used as a gating filter inside checkEMACrossover. Cat E1: 2026-05-07.
+	logReturns      []float64
+	realizedVol30d  float64 // annualized; 0 until window has ≥30 returns
 }
 
 // EntryConfig holds the tunable parameters for entry detection.
@@ -58,6 +83,37 @@ type EntryConfig struct {
 	// Same exit framework as EMA mode. Cat A: RSI test (2026-05-06 EOS).
 	RSIMode   bool
 	RSIPeriod int // 0 → defaults to 14
+
+	// MACDMode: enter on MACD line crossing signal line. Bullish cross (MACD up
+	// through signal) → long; bearish cross → short. Same exit framework as EMA.
+	// Cat A: MACD test (2026-05-07).
+	MACDMode     bool
+	MACDFast     int // 0 → defaults to 12
+	MACDSlow     int // 0 → defaults to 26
+	MACDSignal   int // 0 → defaults to 9
+
+	// BollingerMode: enter on close breaking outside Bollinger bands. Close <
+	// lower band → bearish breakdown (short); close > upper band → bullish
+	// breakout (long). Edge-triggered (fires only on band entry). Same exit
+	// framework as EMA. Cat A: Bollinger test (2026-05-07).
+	BollingerMode    bool
+	BollingerPeriod  int     // 0 → defaults to 20
+	BollingerStdMult float64 // 0 → defaults to 2.0
+
+	// Confluence1DMode (D1): when true and EMAMode is active, gate signals by 1D EMA
+	// bias agreement. 1D EMA pair is sampled at 4H candle CloseTime hour=0 UTC (Binance
+	// canonical daily close). Only emit when 1D EMA bias agrees with signal direction.
+	// Cat D1: multi-TF confluence test (2026-05-07).
+	Confluence1DMode     bool
+	ConfluenceFastPeriod int // 0 → defaults to 9 (1D EMA fast)
+	ConfluenceSlowPeriod int // 0 → defaults to 21 (1D EMA slow)
+
+	// VolFilterMode (E1): when true and EMAMode is active, gate signals by realized
+	// volatility regime. Skip entries when 30-day annualized realized vol exceeds
+	// MaxVolAnnualized. Computed on rolling 180 4H log returns × sqrt(6×365).
+	// Cat E1: vol-regime filter test (2026-05-07).
+	VolFilterMode    bool
+	MaxVolAnnualized float64 // 0 → defaults to 1.20 (120% annualized)
 
 	// ATRStopMult: when > 0 (and EMAMode), place stop at last.Close ± ATRStopMult × ATR(period).
 	// 0 keeps the legacy wick-based stop (last.Low or last.High with StopBufferPct).
@@ -106,6 +162,24 @@ func NewEntryDetector(cfg EntryConfig) *EntryDetector {
 		}
 		d.rsi = indicators.NewRSI(period)
 	}
+	if cfg.MACDMode {
+		d.macd = indicators.NewMACD(cfg.MACDFast, cfg.MACDSlow, cfg.MACDSignal)
+	}
+	if cfg.BollingerMode {
+		d.bollinger = indicators.NewBollinger(cfg.BollingerPeriod, cfg.BollingerStdMult)
+	}
+	if cfg.Confluence1DMode {
+		fast := cfg.ConfluenceFastPeriod
+		if fast <= 0 {
+			fast = 9
+		}
+		slow := cfg.ConfluenceSlowPeriod
+		if slow <= 0 {
+			slow = 21
+		}
+		d.confluenceEMAFast = indicators.NewEMA(fast)
+		d.confluenceEMASlow = indicators.NewEMA(slow)
+	}
 	return d
 }
 
@@ -124,6 +198,49 @@ func (e *EntryDetector) AddCandle(c models.Candle) {
 	if e.cfg.RSIMode && e.rsi != nil {
 		e.prevRSI = e.rsi.Value()
 		e.rsi.Update(c.Close)
+	}
+	if e.cfg.MACDMode && e.macd != nil {
+		e.prevMACD, e.prevSignal = e.macd.Value()
+		e.macd.Update(c.Close)
+	}
+	if e.cfg.BollingerMode && e.bollinger != nil {
+		e.bollinger.Update(c.Close)
+	}
+
+	// D1 confluence: sample 4H close into 1D EMA pair at UTC day boundary.
+	// CloseTime hour=0 UTC marks the close of the 20-24 UTC 4H candle (Binance
+	// canonical daily close). One sample per calendar day.
+	if e.cfg.Confluence1DMode && e.confluenceEMAFast != nil && e.confluenceEMASlow != nil {
+		if c.CloseTime.UTC().Hour() == 0 {
+			e.confluenceEMAFast.Update(c.Close)
+			e.confluenceEMASlow.Update(c.Close)
+		}
+	}
+
+	// E1 vol filter: roll log returns and recompute realized vol when window has ≥30 obs.
+	if e.cfg.VolFilterMode && len(e.window) >= 1 {
+		prev := e.window[len(e.window)-1].Close
+		if prev > 0 && c.Close > 0 {
+			ret := math.Log(c.Close / prev)
+			e.logReturns = append(e.logReturns, ret)
+			if len(e.logReturns) > 180 {
+				e.logReturns = e.logReturns[len(e.logReturns)-180:]
+			}
+			if len(e.logReturns) >= 30 {
+				var sum float64
+				for _, r := range e.logReturns {
+					sum += r
+				}
+				mean := sum / float64(len(e.logReturns))
+				var sumSq float64
+				for _, r := range e.logReturns {
+					d := r - mean
+					sumSq += d * d
+				}
+				stdev := math.Sqrt(sumSq / float64(len(e.logReturns)))
+				e.realizedVol30d = stdev * math.Sqrt(6.0*365.0)
+			}
+		}
 	}
 
 	e.window = append(e.window, c)
@@ -160,6 +277,14 @@ func (e *EntryDetector) Evaluate(levels []float64, vwap float64, bias *BiasTrack
 
 	if e.cfg.RSIMode {
 		return e.checkRSIBreakdown(last, bias)
+	}
+
+	if e.cfg.MACDMode {
+		return e.checkMACDCross(last, bias)
+	}
+
+	if e.cfg.BollingerMode {
+		return e.checkBollingerBreakdown(last, bias)
 	}
 
 	if e.cfg.PDHPDLBreakMode {
@@ -322,6 +447,141 @@ func (e *EntryDetector) checkRSIBreakdown(last models.Candle, bias *BiasTracker)
 	}
 }
 
+// checkMACDCross fires when MACD line crosses the signal line. Bullish cross
+// (MACD up through signal) → long; bearish cross → short. Uses the same fixed-
+// TargetRR exit framework as EMAMode/RSIMode (wick stop, side filter).
+// Cat A: MACD test 2026-05-07.
+func (e *EntryDetector) checkMACDCross(last models.Candle, bias *BiasTracker) *models.Signal {
+	if e.macd == nil || !e.macd.Primed() {
+		return nil
+	}
+	if e.prevMACD == 0 && e.prevSignal == 0 {
+		return nil // need a previous reading
+	}
+	curMACD, curSignal := e.macd.Value()
+
+	bullishCross := e.prevMACD <= e.prevSignal && curMACD > curSignal
+	bearishCross := e.prevMACD >= e.prevSignal && curMACD < curSignal
+	if !bullishCross && !bearishCross {
+		return nil
+	}
+
+	var side models.Direction
+	if bullishCross {
+		side = models.Long
+	} else {
+		side = models.Short
+	}
+	if !bias.Allows(side, true) {
+		return nil
+	}
+
+	var stopLoss float64
+	if side == models.Long {
+		stopLoss = last.Low * (1 - e.cfg.StopBufferPct)
+	} else {
+		stopLoss = last.High * (1 + e.cfg.StopBufferPct)
+	}
+
+	risk := math.Abs(last.Close - stopLoss)
+	if risk == 0 {
+		return nil
+	}
+	rr := e.cfg.TargetRR
+	if rr <= 0 {
+		rr = 6.0
+	}
+	var takeProfit float64
+	if side == models.Long {
+		takeProfit = last.Close + risk*rr
+	} else {
+		takeProfit = last.Close - risk*rr
+	}
+
+	return &models.Signal{
+		Symbol:     last.Symbol,
+		Side:       side,
+		EntryPrice: last.Close,
+		StopLoss:   stopLoss,
+		TakeProfit: takeProfit,
+		Timestamp:  last.CloseTime,
+		Reason: fmt.Sprintf("macd_cross %s | macd=%.4f signal=%.4f | rr=%.1f",
+			side, curMACD, curSignal, rr),
+	}
+}
+
+// checkBollingerBreakdown fires when close breaks outside Bollinger bands.
+// Close < lower band → bearish breakdown (short); close > upper band → bullish
+// breakout (long). Edge-triggered via inBB*Zone flags so sustained moves below
+// the band don't re-fire each candle. Same exit framework as EMA/RSI.
+// Cat A: Bollinger test 2026-05-07.
+func (e *EntryDetector) checkBollingerBreakdown(last models.Candle, bias *BiasTracker) *models.Signal {
+	if e.bollinger == nil || !e.bollinger.Primed() {
+		return nil
+	}
+	lower, _, upper := e.bollinger.Value()
+
+	nowBelowLower := last.Close < lower
+	nowAboveUpper := last.Close > upper
+
+	bearishBreakdown := !e.inBBLowerZone && nowBelowLower
+	bullishBreakout := !e.inBBUpperZone && nowAboveUpper
+
+	// Update zone flags for the next evaluation, regardless of whether we fire.
+	e.inBBLowerZone = nowBelowLower
+	e.inBBUpperZone = nowAboveUpper
+
+	if !bearishBreakdown && !bullishBreakout {
+		return nil
+	}
+
+	var side models.Direction
+	var band float64
+	if bullishBreakout {
+		side = models.Long
+		band = upper
+	} else {
+		side = models.Short
+		band = lower
+	}
+	if !bias.Allows(side, true) {
+		return nil
+	}
+
+	var stopLoss float64
+	if side == models.Long {
+		stopLoss = last.Low * (1 - e.cfg.StopBufferPct)
+	} else {
+		stopLoss = last.High * (1 + e.cfg.StopBufferPct)
+	}
+
+	risk := math.Abs(last.Close - stopLoss)
+	if risk == 0 {
+		return nil
+	}
+	rr := e.cfg.TargetRR
+	if rr <= 0 {
+		rr = 6.0
+	}
+	var takeProfit float64
+	if side == models.Long {
+		takeProfit = last.Close + risk*rr
+	} else {
+		takeProfit = last.Close - risk*rr
+	}
+
+	return &models.Signal{
+		Symbol:     last.Symbol,
+		Side:       side,
+		EntryPrice: last.Close,
+		StopLoss:   stopLoss,
+		TakeProfit: takeProfit,
+		Timestamp:  last.CloseTime,
+		Reason: fmt.Sprintf("bollinger_break %s | close=%.4f band=%.4f | rr=%.1f",
+			side, last.Close, band, rr),
+	}
+}
+
 // checkPDHPDLBreakFixedRR fires when the candle breaks through PDH/PDL on a
 // strong-body close. Same exit framework as EMA mode (wick stop, fixed TargetRR
 // target). Independent of legacy checkBreakout which uses VWAP target.
@@ -472,6 +732,37 @@ func (e *EntryDetector) checkEMACrossover(last models.Candle, bias *BiasTracker)
 	// Optional one-sided filter (longs-only or shorts-only experiments).
 	if e.cfg.SideFilter != models.Neutral && side != e.cfg.SideFilter {
 		return nil
+	}
+
+	// D1 confluence: gate by 1D EMA bias agreement. Only emit when 1D bias
+	// matches signal direction. Skips signal when 1D EMAs not yet primed
+	// (conservative — no false positives during warmup).
+	if e.cfg.Confluence1DMode && e.confluenceEMAFast != nil && e.confluenceEMASlow != nil {
+		if !e.confluenceEMAFast.Primed() || !e.confluenceEMASlow.Primed() {
+			return nil
+		}
+		biasFast := e.confluenceEMAFast.Value()
+		biasSlow := e.confluenceEMASlow.Value()
+		// 1D bias DOWN (fast < slow) → only allow shorts. 1D bias UP → only allow longs.
+		if side == models.Short && biasFast >= biasSlow {
+			return nil
+		}
+		if side == models.Long && biasFast <= biasSlow {
+			return nil
+		}
+	}
+
+	// E1 vol filter: skip when realized 30d annualized vol exceeds threshold.
+	// realizedVol30d is 0 until the rolling window has ≥30 observations — during
+	// warmup the filter is a no-op (signals pass through).
+	if e.cfg.VolFilterMode && e.realizedVol30d > 0 {
+		threshold := e.cfg.MaxVolAnnualized
+		if threshold <= 0 {
+			threshold = 1.20
+		}
+		if e.realizedVol30d > threshold {
+			return nil
+		}
 	}
 
 	var stopLoss float64

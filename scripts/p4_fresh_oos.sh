@@ -113,6 +113,40 @@ run_symbol() {
         fi
     elif [[ "${PDH_PDL_MODE:-0}" == "1" ]]; then
         mode_arg="--pdh-pdl-break-mode"
+    elif [[ "${MACD_MODE:-0}" == "1" ]]; then
+        mode_arg="--macd-mode"
+        [[ -n "${MACD_FAST:-}" ]]   && [[ "${MACD_FAST}"   != "0" ]] && mode_arg="$mode_arg --macd-fast ${MACD_FAST}"
+        [[ -n "${MACD_SLOW:-}" ]]   && [[ "${MACD_SLOW}"   != "0" ]] && mode_arg="$mode_arg --macd-slow ${MACD_SLOW}"
+        [[ -n "${MACD_SIGNAL:-}" ]] && [[ "${MACD_SIGNAL}" != "0" ]] && mode_arg="$mode_arg --macd-signal ${MACD_SIGNAL}"
+    elif [[ "${BB_MODE:-0}" == "1" ]]; then
+        mode_arg="--bollinger-mode"
+        [[ -n "${BB_PERIOD:-}" ]] && [[ "${BB_PERIOD}" != "0" ]] && mode_arg="$mode_arg --bollinger-period ${BB_PERIOD}"
+        [[ -n "${BB_STD:-}" ]]    && [[ "${BB_STD}"    != "0" ]] && mode_arg="$mode_arg --bollinger-std-mult ${BB_STD}"
+    fi
+
+    # Cat B exit-framework alternatives. These COMPOSE with the entry mode (typically EMA cross),
+    # not replace it. Each goes through its own flag chain.
+    local exit_arg=""
+    if [[ "${TRAIL_MODE:-0}" == "1" ]]; then
+        exit_arg="--trailing-stop-mode"
+        [[ -n "${TRAIL_INTERVAL_R:-}" ]] && [[ "${TRAIL_INTERVAL_R}" != "0" ]] && exit_arg="$exit_arg --trail-interval-r ${TRAIL_INTERVAL_R}"
+    fi
+    if [[ "${MLTP_MODE:-0}" == "1" ]]; then
+        exit_arg="$exit_arg --multi-level-tp-mode"
+        [[ -n "${MID_R:-}" ]]    && [[ "${MID_R}"    != "0" ]] && exit_arg="$exit_arg --mid-r ${MID_R}"
+        [[ -n "${MID_FRAC:-}" ]] && [[ "${MID_FRAC}" != "0" ]] && exit_arg="$exit_arg --mid-frac ${MID_FRAC}"
+    fi
+
+    # Cat D/E filters — apply ON TOP of the existing entry mode (typically EMA cross).
+    local filter_arg2=""
+    if [[ "${CONFL_1D_MODE:-0}" == "1" ]]; then
+        filter_arg2="--confluence-1d-mode"
+        [[ -n "${CONFL_FAST:-}" ]] && [[ "${CONFL_FAST}" != "0" ]] && filter_arg2="$filter_arg2 --confluence-fast ${CONFL_FAST}"
+        [[ -n "${CONFL_SLOW:-}" ]] && [[ "${CONFL_SLOW}" != "0" ]] && filter_arg2="$filter_arg2 --confluence-slow ${CONFL_SLOW}"
+    fi
+    if [[ "${VOL_FILTER_MODE:-0}" == "1" ]]; then
+        filter_arg2="$filter_arg2 --vol-filter-mode"
+        [[ -n "${MAX_VOL:-}" ]] && [[ "${MAX_VOL}" != "0" ]] && filter_arg2="$filter_arg2 --max-vol-annualized ${MAX_VOL}"
     fi
 
     local result
@@ -125,6 +159,8 @@ run_symbol() {
         $ema_arg \
         $vwap_arg \
         $mode_arg \
+        $exit_arg \
+        $filter_arg2 \
         --signal-tf "$SIGNAL_TF" \
         --side-filter "$SIDE_FILTER" --max-hold-hours "$MAX_HOLD_HOURS" 2>&1 \
         | jq -r 'select(.msg | test("SUMMARY")) | [.total_trades, .wins, (.total_pnl_usd // 0), (.gross_pnl_usd // 0), (.total_fees_usd // 0), (.total_funding_usd // 0), (.long_net_usd // 0), (.short_net_usd // 0), (.avg_hold_hours // 0)] | @tsv' \
@@ -137,7 +173,7 @@ run_symbol() {
     printf '%s\t%s\n' "$symbol" "$result"
 }
 export -f run_symbol
-export ROOT BINARY WORKDIR FEE_BPS SLIP_BPS SIGNAL_TF TARGET_RR SIDE_FILTER MAX_HOLD_HOURS FUNDING_DIR START_YEAR START_MONTH END_YEAR END_MONTH FUNDING_FILTER_BPS EMA_FAST EMA_SLOW VWAP_DEV_PCT RSI_MODE RSI_PERIOD PDH_PDL_MODE
+export ROOT BINARY WORKDIR FEE_BPS SLIP_BPS SIGNAL_TF TARGET_RR SIDE_FILTER MAX_HOLD_HOURS FUNDING_DIR START_YEAR START_MONTH END_YEAR END_MONTH FUNDING_FILTER_BPS EMA_FAST EMA_SLOW VWAP_DEV_PCT RSI_MODE RSI_PERIOD PDH_PDL_MODE MACD_MODE MACD_FAST MACD_SLOW MACD_SIGNAL BB_MODE BB_PERIOD BB_STD TRAIL_MODE TRAIL_INTERVAL_R MLTP_MODE MID_R MID_FRAC CONFL_1D_MODE CONFL_FAST CONFL_SLOW VOL_FILTER_MODE MAX_VOL
 
 RAW=$(printf '%s\n' $SYMBOLS \
     | xargs -P "$NCPU" -I{} bash -c 'run_symbol "{}"')

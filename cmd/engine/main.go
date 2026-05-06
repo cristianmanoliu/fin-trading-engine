@@ -201,14 +201,30 @@ func main() {
 		}
 	}
 
-	// Build shadow runners: each gets its own EntryConfig override (EMA periods),
-	// its own Stub (with shadow-prefixed JournalPath and per-spec MaxHoldHours),
-	// and its own slot in the fan-out arrays.
+	// Build shadow runners: each gets its own EntryConfig (per-type), its own Stub
+	// (with shadow-prefixed JournalPath and per-spec MaxHoldHours), and its own slot
+	// in the fan-out arrays.
+	//
+	// Two shadow types supported:
+	//   - "ema": override EMAFastPeriod/EMASlowPeriod on the live entry config.
+	//   - "bb":  switch to Bollinger entry mode (EMAMode=false, BollingerMode=true).
 	shadowRunners := make([]*strategy.Runner, len(shadowSpecs))
 	for i, spec := range shadowSpecs {
 		shadowEntryCfg := entryCfg
-		shadowEntryCfg.EMAFastPeriod = spec.EMAFastPeriod
-		shadowEntryCfg.EMASlowPeriod = spec.EMASlowPeriod
+		switch spec.Type {
+		case "bb":
+			// Disable EMA dispatch; use Bollinger breakdown trigger.
+			shadowEntryCfg.EMAMode = false
+			shadowEntryCfg.BollingerMode = true
+			shadowEntryCfg.BollingerPeriod = spec.BollingerPeriod
+			shadowEntryCfg.BollingerStdMult = spec.BollingerStdMult
+			// Force Cat D/E filters off for BB shadow — they were tuned for EMA entry.
+			shadowEntryCfg.Confluence1DMode = false
+			shadowEntryCfg.VolFilterMode = false
+		default: // "ema" or empty (legacy)
+			shadowEntryCfg.EMAFastPeriod = spec.EMAFastPeriod
+			shadowEntryCfg.EMASlowPeriod = spec.EMASlowPeriod
+		}
 
 		shadowExec := &execution.Stub{
 			StakeUSDT:        cfg.Strategy.StakeUSDT,
@@ -230,12 +246,24 @@ func main() {
 			shadowEntryCfg,
 			shadowExec,
 		)
-		slog.Info("shadow strategy registered",
-			"label", spec.Label,
-			"ema_fast", spec.EMAFastPeriod,
-			"ema_slow", spec.EMASlowPeriod,
-			"max_hold_hours", spec.MaxHoldHours,
-			"journal_path", shadowExec.JournalPath)
+		switch spec.Type {
+		case "bb":
+			slog.Info("shadow strategy registered",
+				"label", spec.Label,
+				"type", "bb",
+				"bollinger_period", spec.BollingerPeriod,
+				"bollinger_std_mult", spec.BollingerStdMult,
+				"max_hold_hours", spec.MaxHoldHours,
+				"journal_path", shadowExec.JournalPath)
+		default:
+			slog.Info("shadow strategy registered",
+				"label", spec.Label,
+				"type", "ema",
+				"ema_fast", spec.EMAFastPeriod,
+				"ema_slow", spec.EMASlowPeriod,
+				"max_hold_hours", spec.MaxHoldHours,
+				"journal_path", shadowExec.JournalPath)
+		}
 	}
 
 	hb := marketdata.NewHeartbeat(cfg.Symbol)

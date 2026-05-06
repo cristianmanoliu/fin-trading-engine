@@ -424,6 +424,213 @@ func TestMaxHoldForceClose(t *testing.T) {
 	}
 }
 
+func TestTrailingStop_RatchetsToBE_AndExitsProfitably(t *testing.T) {
+	// B1 trailing stop. Setup: long, entry=100, stop=99 (1R=$1), target=110 (10R), trail interval=1R.
+	// Tick 1 at 102 (2R favorable): stop should ratchet from 99 to entry+1R = 101.
+	// Tick 2 at 100.9 (back below 101): hits ratcheted stop → exit at 100.9 (or 101 with ExactFills).
+	// won = true (exit > entry under TrailingStopMode classification).
+	stub := &Stub{
+		StakeUSDT:        1000,
+		ExactFills:       true,
+		TrailingStopMode: true,
+		TrailIntervalR:   1.0,
+	}
+	openTime := time.Date(2026, 5, 7, 0, 0, 0, 0, time.UTC)
+	stub.OnSignal(&models.Signal{
+		Symbol: "X", Side: models.Long,
+		EntryPrice: 100, StopLoss: 99, TakeProfit: 110,
+		Timestamp: openTime,
+	})
+
+	// Tick 1: 2R favorable. Should ratchet stop to entry + 1R = 101.
+	stub.OnTick(models.Tick{Symbol: "X", Timestamp: openTime.Add(time.Hour), Price: 102})
+	if stub.position == nil {
+		t.Fatal("position closed too early on first tick")
+	}
+	if stub.position.Signal.StopLoss != 101 {
+		t.Errorf("trailing stop did not ratchet: want 101, got %v", stub.position.Signal.StopLoss)
+	}
+	if stub.position.MaxFavorableR != 2.0 {
+		t.Errorf("MaxFavorableR: want 2.0, got %v", stub.position.MaxFavorableR)
+	}
+
+	// Tick 2: pullback to 100.9. Hits the ratcheted stop (101) — exit at exact stop.
+	stub.OnTick(models.Tick{Symbol: "X", Timestamp: openTime.Add(2 * time.Hour), Price: 100.9})
+	if len(stub.results) != 1 {
+		t.Fatalf("expected 1 trade, got %d", len(stub.results))
+	}
+	r := stub.results[0]
+	if r.exitPrice != 101 {
+		t.Errorf("exit price: want 101 (ExactFills at ratcheted stop), got %v", r.exitPrice)
+	}
+	if !r.won {
+		t.Errorf("trailed stop above entry should classify as WON, got loss")
+	}
+	// Gross = (101 - 100) × (1000 / 1) = 1000.
+	if r.grossUSDT != 1000 {
+		t.Errorf("gross: want 1000, got %v", r.grossUSDT)
+	}
+}
+
+func TestTrailingStop_NoRatchetBeforeOneR(t *testing.T) {
+	// B1: until favorable move ≥ 1R, stop stays at original.
+	stub := &Stub{
+		StakeUSDT:        1000,
+		ExactFills:       true,
+		TrailingStopMode: true,
+		TrailIntervalR:   1.0,
+	}
+	openTime := time.Date(2026, 5, 7, 0, 0, 0, 0, time.UTC)
+	stub.OnSignal(&models.Signal{
+		Symbol: "X", Side: models.Short,
+		EntryPrice: 100, StopLoss: 101, TakeProfit: 90,
+		Timestamp: openTime,
+	})
+
+	// Tick at 99.5 = 0.5R favorable for short. Below the 1R threshold → no ratchet.
+	stub.OnTick(models.Tick{Symbol: "X", Timestamp: openTime.Add(time.Hour), Price: 99.5})
+	if stub.position == nil {
+		t.Fatal("position closed unexpectedly")
+	}
+	if stub.position.Signal.StopLoss != 101 {
+		t.Errorf("stop ratcheted prematurely: want 101 (original), got %v", stub.position.Signal.StopLoss)
+	}
+
+	// Tick at 99 = 1R favorable. Should ratchet to entry (BE) — locked at 0R.
+	stub.OnTick(models.Tick{Symbol: "X", Timestamp: openTime.Add(2 * time.Hour), Price: 99})
+	if stub.position.Signal.StopLoss != 100 {
+		t.Errorf("at 1R favorable, stop should ratchet to entry (100), got %v", stub.position.Signal.StopLoss)
+	}
+}
+
+func TestMultiLevelTP_PartialAtMidR_ThenFullWinAt6R(t *testing.T) {
+	// B2: long, entry=100, stop=99 (1R=$1), target=106 (6R), mid-R=3, mid-frac=0.5.
+	// Tick 1 at 103 (3R) → partial close 50% at 103. Stop raises to 100 (BE). RemainingFrac=0.5.
+	// Tick 2 at 106 (6R) → final TARGET on remaining 50%.
+	// Expected results: 2 tradeResults.
+	stub := &Stub{
+		StakeUSDT:        1000,
+		ExactFills:       true,
+		MultiLevelTPMode: true,
+		MidRMult:         3.0,
+		MidFrac:          0.5,
+	}
+	openTime := time.Date(2026, 5, 7, 0, 0, 0, 0, time.UTC)
+	stub.OnSignal(&models.Signal{
+		Symbol: "X", Side: models.Long,
+		EntryPrice: 100, StopLoss: 99, TakeProfit: 106,
+		Timestamp: openTime,
+	})
+
+	// Mid-R hit: partial close.
+	stub.OnTick(models.Tick{Symbol: "X", Timestamp: openTime.Add(time.Hour), Price: 103})
+	if len(stub.results) != 1 {
+		t.Fatalf("expected 1 partial result after mid-R hit, got %d", len(stub.results))
+	}
+	if !stub.position.MidRHit {
+		t.Errorf("MidRHit not set after partial")
+	}
+	if stub.position.RemainingFrac != 0.5 {
+		t.Errorf("RemainingFrac: want 0.5, got %v", stub.position.RemainingFrac)
+	}
+	if stub.position.Signal.StopLoss != 100 {
+		t.Errorf("stop should raise to BE (100), got %v", stub.position.Signal.StopLoss)
+	}
+	partial := stub.results[0]
+	// Partial: units = 1000 × 0.5 / 1 = 500. gross = 500 × (103-100) = 1500.
+	if partial.grossUSDT != 1500 {
+		t.Errorf("partial gross: want 1500, got %v", partial.grossUSDT)
+	}
+	if !partial.won {
+		t.Errorf("partial close should be classified as won")
+	}
+
+	// 6R hit: final target on remainder.
+	stub.OnTick(models.Tick{Symbol: "X", Timestamp: openTime.Add(2 * time.Hour), Price: 106})
+	if len(stub.results) != 2 {
+		t.Fatalf("expected 2 results after final close, got %d", len(stub.results))
+	}
+	final := stub.results[1]
+	// Remainder: units = 1000 × 0.5 / 1 = 500. gross = 500 × (106-100) = 3000.
+	if final.grossUSDT != 3000 {
+		t.Errorf("final gross: want 3000, got %v", final.grossUSDT)
+	}
+	if !final.won {
+		t.Errorf("final 6R should be won")
+	}
+	if stub.partialCloseCount != 1 {
+		t.Errorf("partialCloseCount: want 1, got %v", stub.partialCloseCount)
+	}
+}
+
+func TestMultiLevelTP_PartialAtMidR_ThenBEStop(t *testing.T) {
+	// B2: short, entry=100, stop=101, target=94 (6R), mid-R=3.
+	// Mid-R = 100 - 3 = 97. Tick 1 at 97 → partial close 50%. Stop raises to 100 (BE).
+	// Tick 2 at 100 → BE stop fires on remainder. won = true (gross = 0 means classify by sign:
+	//   exitPrice > entryPrice for long, < for short. 100 < 100 is false → won = false).
+	stub := &Stub{
+		StakeUSDT:        1000,
+		ExactFills:       true,
+		MultiLevelTPMode: true,
+		MidRMult:         3.0,
+		MidFrac:          0.5,
+	}
+	openTime := time.Date(2026, 5, 7, 0, 0, 0, 0, time.UTC)
+	stub.OnSignal(&models.Signal{
+		Symbol: "X", Side: models.Short,
+		EntryPrice: 100, StopLoss: 101, TakeProfit: 94,
+		Timestamp: openTime,
+	})
+
+	stub.OnTick(models.Tick{Symbol: "X", Timestamp: openTime.Add(time.Hour), Price: 97})
+	if !stub.position.MidRHit {
+		t.Fatal("mid-R should fire at 97 for short with entry=100, stop=101")
+	}
+	// Stop raises to BE (entry = 100).
+	if stub.position.Signal.StopLoss != 100 {
+		t.Errorf("BE stop: want 100, got %v", stub.position.Signal.StopLoss)
+	}
+
+	// Tick 2 back at 100: hits BE-stop on remainder.
+	stub.OnTick(models.Tick{Symbol: "X", Timestamp: openTime.Add(2 * time.Hour), Price: 100})
+	if len(stub.results) != 2 {
+		t.Fatalf("want 2 results (partial + BE-stop), got %d", len(stub.results))
+	}
+	final := stub.results[1]
+	// Remainder gross = 500 × (100-100) = 0.
+	if final.grossUSDT != 0 {
+		t.Errorf("BE-stop gross: want 0, got %v", final.grossUSDT)
+	}
+	// Classification: TrailingStopMode is OFF but MultiLevelTPMode + MidRHit → use PnL sign.
+	// Short BE: exitPrice (100) < entryPrice (100) is false → won = false. Correct.
+	if final.won {
+		t.Errorf("BE-stop hit at exact entry should classify as not won")
+	}
+}
+
+func TestNoModeBaseline_PreservedExactly(t *testing.T) {
+	// Regression: with TrailingStopMode and MultiLevelTPMode both off, the legacy
+	// behavior is byte-exact. Same stake, fees, slip as TestFeeAndSlippageMath.
+	stub := &Stub{
+		StakeUSDT:       1000,
+		ExactFills:      true,
+		FeeBps:          8,
+		StopSlippageBps: 5,
+	}
+	stub.OnSignal(&models.Signal{
+		Symbol: "X", Side: models.Long,
+		EntryPrice: 50000, StopLoss: 49900, TakeProfit: 50500,
+		Timestamp: time.Now().UTC(),
+	})
+	stub.OnTick(models.Tick{Symbol: "X", Timestamp: time.Now().UTC(), Price: 50500})
+	r := stub.results[0]
+	// Same expectations as the original fee/slip test.
+	if r.grossUSDT != 5000 || r.feeUSDT != 400 || r.slipUSDT != 0 || r.pnlUSDT != 4600 {
+		t.Errorf("baseline math drifted: gross=%v fee=%v slip=%v net=%v (want 5000/400/0/4600)",
+			r.grossUSDT, r.feeUSDT, r.slipUSDT, r.pnlUSDT)
+	}
+}
+
 func TestJournalDisabledInBacktest(t *testing.T) {
 	// When JournalPath is empty (backtest mode), no files should be created.
 	stub := &Stub{StakeUSDT: 1000} // JournalPath intentionally not set
