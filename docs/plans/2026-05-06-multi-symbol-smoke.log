@@ -1,0 +1,49 @@
+{"time":"2026-05-06T11:42:26.523412+03:00","level":"INFO","msg":"loaded historical funding","symbol":"BTCUSDT"}
+{"time":"2026-05-06T11:42:26.52487+03:00","level":"INFO","msg":"loaded historical funding","symbol":"ETHUSDT"}
+{"time":"2026-05-06T11:42:26.526225+03:00","level":"INFO","msg":"loaded historical funding","symbol":"SOLUSDT"}
+{"time":"2026-05-06T11:42:26.52626+03:00","level":"INFO","msg":"multi engine starting","symbols":3,"ws_url":"wss://fstream.binance.com","backfill_hours":48}
+{"time":"2026-05-06T11:42:26.935307+03:00","level":"INFO","msg":"kline backfill complete","symbol":"BTCUSDT","hours":48,"klines":1500,"ticks":6000}
+{"time":"2026-05-06T11:42:27.271368+03:00","level":"INFO","msg":"kline backfill complete","symbol":"ETHUSDT","hours":48,"klines":1500,"ticks":6000}
+{"time":"2026-05-06T11:42:27.852734+03:00","level":"INFO","msg":"kline backfill complete","symbol":"SOLUSDT","hours":48,"klines":1500,"ticks":6000}
+{"time":"2026-05-06T11:42:28.760096+03:00","level":"INFO","msg":"strategy runner started"}
+{"time":"2026-05-06T11:42:28.760508+03:00","level":"INFO","msg":"strategy runner started"}
+{"time":"2026-05-06T11:42:28.760846+03:00","level":"INFO","msg":"strategy runner started"}
+{"time":"2026-05-06T11:42:28.761057+03:00","level":"INFO","msg":"4H candle closed","open":2385.91,"close":2379.17,"bias":-1}
+{"time":"2026-05-06T11:42:28.761337+03:00","level":"INFO","msg":"4H candle closed","open":81021.5,"close":80815.8,"bias":-1}
+{"time":"2026-05-06T11:42:28.761008+03:00","level":"INFO","msg":"4H candle closed","open":84.99,"close":84.83,"bias":-1}
+{"time":"2026-05-06T11:42:28.763878+03:00","level":"INFO","msg":"4H candle closed","open":84.83,"close":84.93,"bias":1}
+{"time":"2026-05-06T11:42:28.766095+03:00","level":"INFO","msg":"4H candle closed","open":80815.8,"close":80973,"bias":1}
+{"time":"2026-05-06T11:42:28.766604+03:00","level":"INFO","msg":"4H candle closed","open":2379.16,"close":2378.65,"bias":-1}
+{"time":"2026-05-06T11:42:28.768848+03:00","level":"INFO","msg":"4H candle closed","open":84.93,"close":85.47,"bias":1}
+{"time":"2026-05-06T11:42:28.768945+03:00","level":"INFO","msg":"4H candle closed","open":80973.1,"close":81488.7,"bias":1}
+{"time":"2026-05-06T11:42:28.77104+03:00","level":"INFO","msg":"4H candle closed","open":2378.65,"close":2379.84,"bias":1}
+{"time":"2026-05-06T11:42:28.772388+03:00","level":"INFO","msg":"4H candle closed","open":81488.7,"close":81554.4,"bias":1}
+{"time":"2026-05-06T11:42:28.773682+03:00","level":"INFO","msg":"4H candle closed","open":85.46,"close":86.47,"bias":1}
+{"time":"2026-05-06T11:42:28.775164+03:00","level":"INFO","msg":"4H candle closed","open":2379.84,"close":2370.58,"bias":-1}
+{"time":"2026-05-06T11:42:28.777053+03:00","level":"INFO","msg":"4H candle closed","open":86.46,"close":86.24,"bias":-1}
+{"time":"2026-05-06T11:42:28.777054+03:00","level":"INFO","msg":"4H candle closed","open":81554.3,"close":80861.9,"bias":-1}
+{"time":"2026-05-06T11:42:28.778331+03:00","level":"INFO","msg":"4H candle closed","open":2370.58,"close":2359.47,"bias":-1}
+{"time":"2026-05-06T11:42:28.779738+03:00","level":"INFO","msg":"4H candle closed","open":86.24,"close":87.29,"bias":1}
+{"time":"2026-05-06T11:42:28.780611+03:00","level":"INFO","msg":"4H candle closed","open":80861.9,"close":81535.9,"bias":1}
+{"time":"2026-05-06T11:42:28.781482+03:00","level":"INFO","msg":"4H candle closed","open":2359.47,"close":2375.32,"bias":1}
+{"time":"2026-05-06T11:42:28.782545+03:00","level":"INFO","msg":"4H candle closed","open":87.28,"close":87.65,"bias":1}
+{"time":"2026-05-06T11:42:28.782991+03:00","level":"INFO","msg":"4H candle closed","open":81535.9,"close":81333.3,"bias":-1}
+{"time":"2026-05-06T11:42:28.783824+03:00","level":"INFO","msg":"4H candle closed","open":2375.33,"close":2370.54,"bias":-1}
+{"time":"2026-05-06T11:42:39.565599+03:00","level":"INFO","msg":"multi: ws reconnected","symbols":3}
+{"time":"2026-05-06T11:42:50.467802+03:00","level":"INFO","msg":"multi: ws reconnected","symbols":3}
+{"time":"2026-05-06T11:43:01.275978+03:00","level":"INFO","msg":"multi: ws reconnected","symbols":3}
+{"time":"2026-05-06T11:43:12.176654+03:00","level":"INFO","msg":"multi: ws reconnected","symbols":3}
+{"time":"2026-05-06T11:43:23.133631+03:00","level":"INFO","msg":"multi: ws reconnected","symbols":3}
+{"time":"2026-05-06T11:43:28.760799+03:00","level":"INFO","msg":"heartbeat","symbol":"BTCUSDT","ticks_since_last":6000,"last_tick_age":29000000000}
+{"time":"2026-05-06T11:43:28.760822+03:00","level":"INFO","msg":"heartbeat","symbol":"ETHUSDT","ticks_since_last":6000,"last_tick_age":29000000000}
+{"time":"2026-05-06T11:43:28.760891+03:00","level":"INFO","msg":"heartbeat","symbol":"SOLUSDT","ticks_since_last":6000,"last_tick_age":29000000000}
+{"time":"2026-05-06T11:43:33.990515+03:00","level":"INFO","msg":"multi: ws reconnected","symbols":3}
+{"time":"2026-05-06T11:43:44.847193+03:00","level":"INFO","msg":"multi: ws reconnected","symbols":3}
+{"time":"2026-05-06T11:43:55.754899+03:00","level":"INFO","msg":"multi: ws reconnected","symbols":3}
+{"time":"2026-05-06T11:44:06.604536+03:00","level":"INFO","msg":"multi: ws reconnected","symbols":3}
+{"time":"2026-05-06T11:44:17.373673+03:00","level":"INFO","msg":"multi: ws reconnected","symbols":3}
+{"time":"2026-05-06T11:44:28.161376+03:00","level":"INFO","msg":"multi: ws reconnected","symbols":3}
+{"time":"2026-05-06T11:44:28.761286+03:00","level":"INFO","msg":"heartbeat","symbol":"BTCUSDT","ticks_since_last":0,"last_tick_age":89000000000}
+{"time":"2026-05-06T11:44:28.761336+03:00","level":"INFO","msg":"heartbeat","symbol":"SOLUSDT","ticks_since_last":0,"last_tick_age":89000000000}
+{"time":"2026-05-06T11:44:28.761323+03:00","level":"INFO","msg":"heartbeat","symbol":"ETHUSDT","ticks_since_last":0,"last_tick_age":89000000000}
+{"time":"2026-05-06T11:44:31.05556+03:00","level":"INFO","msg":"multi engine stopped"}
