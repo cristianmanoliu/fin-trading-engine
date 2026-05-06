@@ -157,8 +157,142 @@ func (b *BinanceFuturesMulti) backfillAll(ctx context.Context, channels map[stri
 // Buffer size per channel: 8192 — same as single-symbol BinanceFutures, sized
 // to hold full backfill (1500 klines × 4 ticks = 6000) with headroom.
 func (b *BinanceFuturesMulti) SubscribeMulti(ctx context.Context) (map[string]<-chan models.Tick, error) {
-	// Implementation in Task 5 + Task 6.
-	return nil, fmt.Errorf("not implemented")
+	if len(b.symbols) == 0 {
+		return nil, fmt.Errorf("multi: no symbols")
+	}
+
+	// Owned (writable) channels for backfill + readLoop. Returned to caller as
+	// receive-only.
+	owned := make(map[string]chan models.Tick, len(b.symbols))
+	exposed := make(map[string]<-chan models.Tick, len(b.symbols))
+	for _, sym := range b.symbols {
+		ch := make(chan models.Tick, 8192)
+		owned[sym] = ch
+		exposed[sym] = ch
+	}
+
+	// Backfill BEFORE opening WS so DailyLevels is primed when first live tick
+	// arrives. Sequential — see backfillAll comment.
+	b.backfillAll(ctx, owned)
+
+	url := buildCombinedURL(b.wsURL, b.symbols)
+	conn, _, err := websocket.DefaultDialer.DialContext(ctx, url, nil)
+	if err != nil {
+		for _, ch := range owned {
+			close(ch)
+		}
+		return nil, fmt.Errorf("dial combined ws: %w", err)
+	}
+	b.connMu.Lock()
+	b.conn = conn
+	b.connMu.Unlock()
+
+	// readLoop owns all channel writes and closes after this point.
+	// Build a routing map matching routeEnvelope's signature.
+	routeMap := make(map[string]chan<- models.Tick, len(owned))
+	for k, v := range owned {
+		routeMap[k] = v
+	}
+
+	go b.readLoop(ctx, routeMap, owned)
+	return exposed, nil
+}
+
+// readLoop drains the combined WS and routes ticks until ctx is cancelled or
+// reconnect attempts give up. On exit, all per-symbol channels are closed so
+// downstream consumers terminate cleanly.
+func (b *BinanceFuturesMulti) readLoop(
+	ctx context.Context,
+	routeMap map[string]chan<- models.Tick,
+	owned map[string]chan models.Tick,
+) {
+	defer func() {
+		for _, ch := range owned {
+			close(ch)
+		}
+	}()
+
+	consecutiveStalls := 0
+	const maxStalls = 5 // higher than single-symbol's 2 — combined stream represents
+	// 16 symbols, so giving up means everyone goes blind. Reconnect more aggressively.
+	backoff := time.Second
+	const maxBackoff = 30 * time.Second
+
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+
+		b.connMu.Lock()
+		conn := b.conn
+		b.connMu.Unlock()
+		if conn == nil {
+			// Closed externally — reconnect.
+			if !b.reconnect(ctx) {
+				return
+			}
+			continue
+		}
+
+		conn.SetReadDeadline(time.Now().Add(wsReadDeadline))
+		_, msg, err := conn.ReadMessage()
+		if err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			consecutiveStalls++
+			slog.Warn("multi: ws read error",
+				"err", err, "stalls", consecutiveStalls, "max", maxStalls)
+			if consecutiveStalls >= maxStalls {
+				slog.Error("multi: max stalls reached, terminating",
+					"stalls", consecutiveStalls)
+				return
+			}
+			// Reconnect.
+			gapStart := time.Now()
+			b.connMu.Lock()
+			if b.conn != nil {
+				b.conn.Close()
+				b.conn = nil
+			}
+			b.connMu.Unlock()
+			time.Sleep(backoff)
+			backoff = time.Duration(float64(backoff) * 2)
+			if backoff > maxBackoff {
+				backoff = maxBackoff
+			}
+			if !b.reconnect(ctx) {
+				return
+			}
+			slog.Info("multi: ws gap closed",
+				"duration", time.Since(gapStart).Round(time.Second))
+			continue
+		}
+
+		consecutiveStalls = 0
+		backoff = time.Second
+
+		if err := routeEnvelope(msg, routeMap); err != nil {
+			slog.Warn("multi: route error", "err", err)
+		}
+	}
+}
+
+// reconnect attempts to re-establish the combined WS. Returns false if ctx is
+// cancelled during the attempt.
+func (b *BinanceFuturesMulti) reconnect(ctx context.Context) bool {
+	url := buildCombinedURL(b.wsURL, b.symbols)
+	conn, _, err := websocket.DefaultDialer.DialContext(ctx, url, nil)
+	if err != nil {
+		slog.Error("multi: reconnect failed", "err", err)
+		// Caller's outer loop will retry after backoff.
+		return ctx.Err() == nil
+	}
+	b.connMu.Lock()
+	b.conn = conn
+	b.connMu.Unlock()
+	slog.Info("multi: ws reconnected", "symbols", len(b.symbols))
+	return true
 }
 
 // Close shuts down the underlying WebSocket connection. Safe to call multiple
