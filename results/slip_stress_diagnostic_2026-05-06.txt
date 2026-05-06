@@ -1,0 +1,47 @@
+
+========================================================================================
+  TRAIN-ONLY SHORTLIST DIAGNOSTIC — SLIP-STRESS COMBINED REPORT
+  Strategy: P4-Combined  (4H, target_rr=6, --side-filter short --max-hold-hours 336)
+  Train: 2020-01..2022-12   Test: 2023-01..2025-04   Period: 2.33 yr
+  Costs: --fee-bps=10  --funding=CSV   slip ∈ {5, 15, 25} bp
+========================================================================================
+
+  TEST-PERIOD NET ($, total)
+   slip          all-57     deployed-32  top-32-by-train  train-positive
+   ----  --------------  --------------  --------------  --------------
+    5bp  $     +619,862  $     +559,434  $     +444,166  $     +488,304  (n=36)
+   15bp  $     +406,385  $     +437,773  $     +327,295  $     +346,630  (n=35)
+   25bp  $     +192,910  $     +301,367  $     +177,520  $     +177,520  (n=32)
+
+  ANNUALISED TEST ($/yr, period=2.33yr)
+   slip          all-57     deployed-32  top-32-by-train  train-positive
+   ----  --------------  --------------  --------------  --------------
+    5bp  $     +265,655  $     +239,757  $     +190,357  $     +209,273
+   15bp  $     +174,165  $     +187,617  $     +140,269  $     +148,556
+   25bp  $      +82,676  $     +129,157  $      +76,080  $      +76,080
+
+  LOOK-AHEAD INFLATION  (deployed-32 minus top-32-by-train, on TEST)
+   slip    absolute $   % of honest    $/yr inflated
+   ----  ------------  ------------  ---------------
+    5bp  $   +115,268        +26.0%  $       +49,401
+   15bp  $   +110,478        +33.8%  $       +47,348
+   25bp  $   +123,847        +69.8%  $       +53,077
+
+  COHORT SIZE  (sensitive to slip — losing trades drop more symbols below 0)
+   slip    persistent winners    regime flippers    recoveries   persistent losers
+    5bp                    32                  4            15                   6
+   15bp                    28                  7            12                  10
+   25bp                    23                  9            14                  11
+
+  VERDICT
+  --------------------------------------------------------------------------------------
+    Strategy survives honest train-only selection at every slip level: PASS.
+    But look-ahead bias scales WITH slippage:
+      slip= 5bp:  honest annual ≈ $190,357/yr   deployed-32 inflation = +  26%
+      slip=15bp:  honest annual ≈ $140,269/yr   deployed-32 inflation = +  34%
+      slip=25bp:  honest annual ≈ $ 76,080/yr   deployed-32 inflation = +  70%
+
+    Headline: at slip=25bp (the realistic Binance Regular fill scenario),
+    honest expected value is at the LOW end of CLAUDE.md's stated $74-142k/yr range,
+    and the deployed-32 list overstates expected value by 70%.
+

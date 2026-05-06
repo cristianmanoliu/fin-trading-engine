@@ -1,0 +1,23 @@
+
+════════════════════════════════════════════════════════════════════════════════════════════
+  PROTOTYPE SWEEP — cost-geometry escape  (continuous 5y, 57 symbols, target_rr=5.0)
+  Costs: --fee-bps=10  --stop-slippage-bps=5  --funding-bps-per-day=3  --tax-rate-pct=30
+  Audit flags: --exact-fills --include-boundary --pessimistic-ambiguous
+════════════════════════════════════════════════════════════════════════════════════════════
+
+Configuration                      trades  win%     Gross_$      Fees_$   Funding_$  NET(pretax)   AfterTax_$ profit/total
+───────────── ────── ──── ──────── ────── ───────── ────────── ────────── ──────────
+B0  5m  + wick (baseline)          392543 17.0%    +6766822   123934389     1681361   -170223837   -170223837   0/57
+P1  5m  + ATR(14)x2.0              248069 17.1%    +5867206    39089125     1787757    -51197393    -51197393   0/57
+P2  30m + wick                      69107 16.7%     +152664    11930293      609740    -17331332    -17331332   0/57
+P3  30m + ATR(14)x2.0               35751 16.7%     +178006     1918110      660451     -3196877     -3264952   8/57
+P4  4H  + wick                      11048 18.6%    +1376462      579205      276337      +286306       +14540  31/57
+P5  4H  + ATR(14)x2.0                4493 17.4%     +347639       76252      235293        +4949      -119699  29/57
+
+════════════════════════════════════════════════════════════════════════════════════════════
+  Verdict guide:
+  • NET >= 0 with profit/total >= 28/57: real candidate, deep-dive next.
+  • NET near 0 with mixed profit/total: marginal — sweep target_rr or refine.
+  • NET deeply negative everywhere: signal family doesn't beat costs at any geometry.
+  • 'nontriv' counts symbols with > 20 trades: low values mean signal is too sparse to trust.
+════════════════════════════════════════════════════════════════════════════════════════════

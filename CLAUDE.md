@@ -1,0 +1,455 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Current state (2026-05-05, post-battery)
+
+| Layer | What is it | Where |
+|---|---|---|
+| **Strategy A (primary)** | **P4-Combined** — 4H EMA9×EMA21 cross, wick stop, `target_rr=6.0`, `--side-filter short`, `--max-hold-hours 336`, `--funding-csv-dir data/funding`, `--fee-bps 10 --stop-slippage-bps 5`. **Cost-survivor battery validated 2026-05-05:** robust to slip ∈ {5, 15, 25} bp; train-only target_rr sweep independently picked rr=6 (honest OOS); survives top-5 drop (+$751k) and late-listing exclusion (+$926k). Realistic-slip range: **+$369k to +$710k over 5y** ($74k–$142k/yr). | `results/p4_combined_2026-05-05.txt`, `results/battery_2026-05-05/` |
+| **Strategy B (conservative fallback)** | **P4-Shorts-Only** — same as A but **no `--max-hold-hours`**. Lower headline but most slip-elastic and avoids the unmodeled max-hold-force-close-slippage bug (`pkg/execution/stub.go:236`). 5,809 trades vs A's 7,772. Realistic-slip range: **+$168k to +$415k over 5y** ($34k–$83k/yr). | `results/battery_2026-05-05/shorts_only_slip*.txt` |
+| **Live engines (VPS)** | **RUNNING — 32 engines on Strategy B since 2026-05-05 20:06 UTC.** Forward-paper-validation clock started. ExecStart per `deploy/systemd/paper-live@.service`: `--signal-tf 4H --target-rr 6.0 --side-filter short --funding-csv-dir /opt/trading-engine/data/funding --fee-bps 10 --stop-slippage-bps 5 --funding-bps-per-day 0`. Funding CSVs loaded at startup for all 32 symbols. Watchdog + digest timers re-enabled. BTCUSDT (persistent loser per OOS) excluded. | journal: `/var/log/paper-live/journal/*.jsonl`, logs: `/var/log/paper-live/*.log` |
+| **Migration to Strategy A** | **Done at the engineering layer; deferred at the operational layer.** All 7 prerequisites resolved. Strategy B chosen as initial deploy because Strategy A's `--max-hold-hours 336` exposes the unmodeled-force-close-slippage bug at `pkg/execution/stub.go:236`. Promote to Strategy A by adding `--max-hold-hours 336` to ExecStart after the stub.go fix, OR by running it now if you accept the caveat. | — |
+
+**Deployed shortlist (32 OOS-validated, running on Strategy B as of 2026-05-05 20:06 UTC):** ROSE, MKR, GRT, 1INCH, ADA, KAVA, 1000SHIB, ENS, XLM, ETC, RUNE, AVAX, IMX, DOT, BCH, FTM, FIL, SOL, CRV, AAVE, APT, SNX, NEAR, APE, MANA, AXS, GALA, ETH, ENJ, LINK, VET, LDO. **REST polling cap note:** under steady-state WebSocket the REST budget is unused. During fallback storms (sustained WS outage) 32 × 6s × 20 weight = 3840/min would exceed the 2400/min cap; engines self-throttle on 429 (60s backoff per CLAUDE.md invariant) — accept the fallback-storm risk for paper.
+
+**Headline numbers carry these still-open caveats** (`## Known unmodeled risks`): unmodeled max-hold force-close slippage (Strategy A only), 6s REST polling lag, forward funding-regime risk, no real-money execution test. Eight prior caveats were defused by the 2026-05-05 cost-survivor battery (see `## Cost-survivor battery (2026-05-05)`).
+
+**2026-05-06 train-only-shortlist diagnostic (`## Train-only shortlist diagnostic (2026-05-06)`):** the deployed-32 list was selected by requiring positive PnL in BOTH train AND test halves — symbol-layer look-ahead. Quantified: deployed-32 test_NET is inflated by **+26% at slip=5bp, +34% at slip=15bp, +70% at slip=25bp** vs honest top-32-by-train. Strategy still PASSES at every slip level. **Honest forward-PnL expectation is $69k/yr at slip=25bp** (low end of original $74-142k/yr range), not the middle. Anchor go/no-go criteria to the honest number — see `## Forward-paper go/no-go criteria`.
+
+## Build & Run
+
+```bash
+# Build
+go build ./...
+
+# Run backtest (single month)
+go run ./cmd/backtest --config configs/btcusdt.yaml
+
+# Override date without editing config
+go run ./cmd/backtest --config configs/btcusdt.yaml --year 2024 --month 06
+
+# Run live engine (paper trading via Binance WebSocket)
+go run ./cmd/engine --config configs/btcusdt.yaml
+
+# Run all tests
+go test ./...
+
+# Run tests for a specific package
+go test ./pkg/execution/...
+go test ./pkg/marketdata/...
+```
+
+## Per-Symbol Configs
+
+Each of the original 8 instruments has a dedicated YAML in `configs/` (`btcusdt.yaml`, `ethusdt.yaml`, `bnbusdt.yaml`, `solusdt.yaml`, `xrpusdt.yaml`, `linkusdt.yaml`, `ltcusdt.yaml`, `dogeusdt.yaml`). They are pinned to `min_rr: 1.0`, `target_rr: 5.0`, `stake_usd: 1000` — i.e. the falsified Option C settings. The configs have **not** been migrated to P4-Combined yet; the candidate strategy runs via CLI overrides (`--signal-tf 4H --target_rr 6.0 --side-filter short --max-hold-hours 336 --funding-csv-dir data/funding`) on top of `configs/default.yaml`. `run_backtest.sh` still auto-detects per-symbol configs by name and is wired to the legacy strategy. New sweeps for P4-Combined go through `scripts/run_p4_variant.sh` and `scripts/p4_oos_persistence.sh`, which build their own per-symbol configs from `configs/default.yaml` and the merged data CSVs — they do not read the per-symbol YAMLs.
+
+## Paper-Live (VPS)
+
+The production run is on Hetzner CX23 at `178.105.24.230`. Use `deploy/` scripts to manage it.
+
+```bash
+# Sync code + rebuild + restart one symbol and tail log
+./deploy/redeploy.sh             # btcusdt (default)
+./deploy/redeploy.sh ethusdt     # specific symbol
+./deploy/redeploy.sh all         # all 8, no tail
+
+# Sync only (no restart)
+./deploy/sync.sh
+
+# Check all 8 engines
+ssh root@178.105.24.230 'systemctl status "paper-live@*.service" --no-pager | grep -E "●|Active:"'
+
+# Tail a log
+ssh root@178.105.24.230 'tail -f /var/log/paper-live/btcusdt.log'
+
+# View all trades (wins/losses/PnL summary) — passive monitoring
+./scripts/paper_live_trades.sh root@178.105.24.230
+
+# Run reconciliation (compares live journals vs backtest)
+./scripts/paper_live_report.sh
+```
+
+**Local paper-live scripts** (for running locally without VPS):
+```bash
+./scripts/paper_live_start.sh   # builds bin/engine, launches 8 background processes
+./scripts/paper_live_status.sh  # heartbeat count, last trade time
+./scripts/paper_live_stop.sh    # graceful SIGTERM
+```
+
+Trade journals land in `/var/log/paper-live/journal/{SYMBOL}-YYYY-MM.jsonl` on VPS (or `./logs/journal/` locally). The engine backfills 48h of 1m klines from `fapi.binance.com` on startup to prime `DailyLevels` before the first live tick.
+
+## Backtest Scripts
+
+```bash
+# Single symbol, one year — auto-uses configs/{symbol}.yaml
+./scripts/run_backtest.sh BTCUSDT 2024 01 12
+
+# Multi-year heatmap for one symbol (compiles once, sweeps min_rr)
+./scripts/full_analysis.sh BTCUSDT 2020 2025 04
+
+# Find optimal min_rr across multiple instruments simultaneously
+./scripts/cross_analysis.sh "BTCUSDT ETHUSDT SOLUSDT BNBUSDT" 2020 2025 04
+
+# Validate all 8 instruments using their per-symbol configs (no sweep — fixed settings)
+./scripts/validate_all.sh
+```
+
+**Script choice:**
+- Exploring one instrument → `full_analysis.sh`
+- Finding a universal min_rr → `cross_analysis.sh`
+- Confirming final per-symbol settings → `validate_all.sh`
+- Signal-level debugging → `run_backtest.sh`
+- **Continuous 5y sweep with realistic costs (deployment-decision baseline) → `realistic_sweep.sh`**
+- **Realistic target_rr sweep (parameter falsification with costs) → `realistic_targetrr_sweep.sh`**
+
+`continuous_sweep.sh` is preserved for historical reproducibility but produces gross-only PnL. New deployment decisions should use `realistic_sweep.sh`.
+
+## Architecture
+
+Event-driven channel pipeline. A single goroutine owns all mutable strategy state — no mutexes anywhere.
+
+```
+Tick source (CSV or Binance WS)
+    │
+    ▼ fan-out goroutine
+    ├──→ aggTicks ──→ Aggregator  (builds 5m/30m/4H candles)
+    │                     │
+    │              candle channels
+    │                     │
+    └──→ stratTicks ──→ Runner (strategy event loop)
+                          ├── BiasTracker   (4H → Long/Short/Neutral)
+                          ├── VWAP          (session, resets 00:00 UTC)
+                          ├── DailyLevels   (PDH/PDL, rolls at midnight UTC)
+                          └── EntryDetector (EMA9/EMA21 crossover; absorption+breakout toggleable)
+                                │
+                                ▼
+                          Executor (paper Stub)
+```
+
+The `Runner.Run` select loop handles four channels: `candle4H`, `candle30m`, `candle5m`, `ticks`. Channels are set to `nil` when exhausted so the select naturally drops them without blocking.
+
+## Strategy Logic
+
+**Candidate strategy (P4-Combined, post-fees backtest leader):** EMA9×EMA21 crossover on the **4H** signal timeframe, with a **wick-based stop** and **fixed 6:1 R:R** take-profit. A bearish 4H EMA cross opens a SHORT (longs are filtered out via `--side-filter short`). Any open short older than **336 hours (14 days)** is force-closed at the current tick price. Funding cost is accrued from per-symbol historical Binance funding-rate CSVs (`data/funding/{SYMBOL}.csv`) — longs pay positive funding, shorts receive it; net aggregate over the 5y sample is roughly zero, not a benefit.
+
+Cost-geometry rationale: on the 5m timeframe, wick stops are tight (~0.18% on BTC at p50) which forces ~500× implicit leverage to size each trade to a $1k stake, which makes round-trip taker fees eat the entire edge (Option C falsification). The 4H wick is wider, implicit leverage drops, fee per trade as a fraction of risked $ falls below the gross edge.
+
+**Live strategy (as of 2026-05-05):** the VPS engines are still running the falsified **Option C** — 5m EMA9×EMA21, `ema_mode: true`, `target_rr: 5.0`, both sides, no max-hold, no funding accrual. They are paper-only and produce no decision-grade signal until migrated.
+
+Two legacy entry types remain in code and are toggleable via `ema_mode: false` (neither is in the candidate or live path):
+
+- **Absorption (reversal):** N consecutive 5m candles near a key level with wick/body ≥ `wick_ratio`, body closing away from the level. Allowed in any 4H bias.
+- **Breakout (continuation):** 5m candle closes through a level with body/range ≥ `breakout_body_ratio`. Only taken aligned with 4H bias; blocked when bias is Neutral.
+
+Key levels (used by absorption/breakout only): PDH, PDL, and optional manual `zones` from config.
+
+## Telegram Notifier
+
+`pkg/notify/telegram.go` — opt-in startup/shutdown alerts. Reads `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` from env (set in `/etc/paper-live/env` on VPS). When either is unset, `Send` is a no-op — same pattern as `JournalPath`. Test: `pkg/notify/telegram_test.go`.
+
+## Key Invariants
+
+- **Exchange timestamps only.** `Candle` and `Tick` timestamps come from the exchange. `time.Now()` is never used for price data.
+- **`DataSource` is the only seam between backtest and live.** `cmd/backtest` uses `CSVReplay`; `cmd/engine` uses `BinanceFutures`. Everything downstream is identical.
+- **`expandKlineToTicks` is the canonical tick-expansion helper** (`pkg/marketdata/klines.go`). Both `CSVReplay` (backtest) and `BinanceFutures` (REST backfill on startup) call it so interpolation is identical in both paths. Do not inline a second copy.
+- **`BinanceFutures` backfills 48h of 1m klines on startup** by fetching `GET /fapi/v1/klines` from `fapi.binance.com` before opening the WebSocket. This primes `DailyLevels` (PDH/PDL) immediately. Backfill failure is non-fatal — engine logs a warning and proceeds blind for ~24h, same as before.
+- **`Stub.JournalPath` opt-in — journal writes only happen in live mode.** `cmd/engine` sets `JournalPath`; `cmd/backtest` does not. When `JournalPath == ""`, `appendJournal` is a no-op. This preserves backtest behaviour byte-for-byte.
+- **`stake_usd` must be set in config** for dollar PnL output. Without it, `total_pnl_usd` is not emitted and all `$1k` columns will show zero.
+- **`julianDay`** (`pkg/indicators/vwap.go`) is the shared helper for detecting UTC day boundaries (used by both VWAP and DailyLevels). Returns `year*1000 + yearDay`.
+- **Backfill channel buffer must exceed all backfill ticks.** `Subscribe` creates the tick channel before consumers start. At 1500 klines × 4 ticks = 6000 max ticks, the buffer is set to 8192. If `BackfillHours` ever increases past 25h (1500 klines), re-check this invariant.
+- **`http.DefaultClient` has no timeout — always use a custom client.** The backfill HTTP call uses `&http.Client{Timeout: 30 * time.Second}`. Without a timeout, a slow Binance response hangs `Subscribe` indefinitely with no log output.
+- **`BinanceFutures` falls back to REST aggTrade polling when WebSocket stalls.** `fstream.binance.com` resolves globally to AWS Tokyo servers that accept WebSocket connections but deliver zero data frames. After `wsMaxStalls=2` consecutive 90s read timeouts (~3 minutes), `readLoop` switches to `aggTradeLoop` which polls `GET /fapi/v1/aggTrades?fromId=<lastID>` every 6 seconds. `fromId` pagination guarantees zero gaps and zero duplicates.
+- **REST aggTrade rate limit: 6s poll interval × 12 symbols = 1200 weight/min (limit: 2400).** Never reduce below 6s without recalculating. On HTTP 418/429, back off 60s and retry — never exit the goroutine. Exiting closes the tick channel, which shuts down the strategy runner "cleanly" and triggers an infinite systemd restart loop.
+- **Any new strategy or RR comparison must be backtested with `--exact-fills --include-boundary` before any live decision.** The default backtest exits at synthetic-tick wick prices, which overstates 1:1 RR strategies by enough to flip a 57-sym sweep from +$8M to −$4.7M (verified 2026-05-04). See `scripts/audit_phase4_btc.sh` for the reference harness.
+- **Multi-year validation must use the continuous sweep, not monthly segments.** `scripts/continuous_sweep.sh` concatenates each symbol's 64 monthly CSVs and runs one Stub instance over the full 5y. Monthly-segmented sweeps force-close open positions at month-end last-known price (not at stop/target), inflating reported PnL by ~5% in aggregate (verified 2026-05-05: $7.09M segmented vs $6.77M continuous). The monthly approach is fine only for single-month debugging.
+- **Realistic fee/slippage modeling is mandatory for any deployment-decision backtest.** `Stub.FeeBps` charges round-trip taker fees on entry notional (`units × entry`); `Stub.StopSlippageBps` charges adverse slippage on losing trades only. Default 0 reproduces pre-fee behavior bit-exact. The CLI flags are `--fee-bps` and `--stop-slippage-bps`. **Use `--fee-bps=10 --stop-slippage-bps=5` for Binance USDT-M Futures Regular tier** (0.05% taker × 2 sides = 10 bp round-trip; user is "Not Qualified" for VIP — verified 2026-05-05 from the user's Binance fee dashboard). With BNB held to enable the 10% Futures discount this drops to 9 bp. Use `scripts/realistic_sweep.sh` instead of `continuous_sweep.sh` for any new sweep. **Position notional, not stake, is the fee base** — at p50 BTC stop_dist of 0.18%, $1k stake → $555k notional → $555 round-trip fee per trade at 10 bp. This is the dominant realistic cost and the reason Option C was falsified on 2026-05-05.
+
+## Test Coverage
+
+| File | What it tests |
+|------|--------------|
+| `pkg/marketdata/klines_test.go` | `expandKlineToTicks` — 4 ticks emitted, monotonic timestamps, volume split equally, first/last tick at open/close time |
+| `pkg/execution/stub_test.go` | Journal sink writes `open`+`close` JSONL lines; journal disabled (no files) when `JournalPath` is empty |
+| `pkg/notify/telegram_test.go` | POST body verified via httptest server; no-op when env unset; no-op when only one credential set |
+
+High-value gaps still missing: `EntryDetector` EMA crossover and absorption/breakout sequences, `DailyLevels` day-roll, `VWAP` session reset, `Stub.Summary` PnL math.
+
+## Known Bugs
+
+### Open
+
+- **Max-hold force-close skips slippage on winners** (`pkg/execution/stub.go:236`). Documented but **not fixed** — measurement on RUNEUSDT continuous 5y showed only 9 time_stops out of 154 trades (5.8%). Extrapolated impact across deployed-32: ~$3-17k over 5y depending on slip level (1-2% of Strategy A's NET). Cosmetic, not material. Fix would require ~75 min including baseline re-runs; deferred until forward-paper actually shows divergence.
+- `CSVReplay` double-close: stream goroutine defers `f.Close()` and `main.go` also calls `defer src.Close()`. Idempotent (second close returns harmless error). Skip.
+- `run_backtest.sh` runs the binary twice per month (display + accumulate). Use `full_analysis.sh` for multi-month runs. Performance only.
+
+### Fixed
+
+- ~~`go.mod` declared `go 1.26.2`~~ — turns out **1.26.2 is the actual installed Go version**; the prior "invalid" claim was stale. No change needed.
+- ~~All `go.mod` dependencies marked `// indirect`~~ — fixed 2026-05-06 via `go mod tidy`. Markers removed.
+- ~~`tradeResult.fundingUSDT` field comment said "always non-negative"~~ — fixed 2026-05-06. Comment now correctly reflects that the value is signed when using the Historical provider.
+- ~~Funding-CSV staleness for forward trades~~ — partially addressed 2026-05-06 via `scripts/refresh_funding.sh` and `INCREMENTAL=1` mode of `download_funding.sh`. Recommended: weekly refresh during forward-paper-validation. Engines pick up refreshed CSVs on next restart.
+- ~~`cmd/engine` did not wire `EMAMode`/`TargetRR` into `EntryConfig`~~ — fixed 2026-05-04. Always add new `EntryConfig` fields to **both** `cmd/backtest/main.go` and `cmd/engine/main.go`.
+- ~~`cmd/engine` did not wire P4 fields (SideFilter, MaxHoldHours, FundingProvider, FeeBps, StopSlippageBps, target-rr, signal-tf)~~ — fixed 2026-05-05. CLI flags mirror cmd/backtest.
+- ~~Watchdog symbol list pinned to old deployed-16~~ — fixed 2026-05-05. Now matches the deployed-32. Stale `alerted.state` cleared.
+- ~~**Bug 2 — Wick-exit pricing**~~: `Stub.OnTick` closed at `tick.Price` (synthetic wick extreme) instead of `sig.StopLoss`/`sig.TakeProfit`. Inflated all R:R ≤ 2 results; at 1:1 RR the entire 57-sym edge was artifact (+$8M → −$4.7M). Fixed via `--exact-fills` flag.
+- ~~**Bug 3α — Aggregator boundary-tick exclusion**~~: routed boundary tick into next candle. Corrected via `--include-boundary` flag; effect at target_rr=5.0 is +10.6%.
+- **Bug 3β — Same-bar resolution**: synthetic open→high→low→close ordering means LONG positions always score TARGET when both stop and target lie within a single 1m kline range. `--pessimistic-ambiguous` flag detects and reclassifies these. At target_rr=5.0, ZERO ambiguous bars detected across 1,345 BTC winning trades — immaterial. Check again if target_rr is ever reduced below 2.
+
+## Timeframe sweep (2026-05-06)
+
+After the 2026-05-05 cost-survivor battery confirmed Strategy B works on 4H, we extended the aggregator to support 1H, 2H, and 1D (previously only 5m/30m/4H were wired) and ran a full comparison sweep. Outputs in `results/battery_2026-05-06/`. **Verdict: 4H is empirically optimal — no challenger meets the 20%-better threshold.**
+
+| TF | slip=5 | slip=15 | slip=25 | Trades | Profitable |
+|---|---:|---:|---:|---:|---:|
+| 1H | **−$3,128,863** | **−$6,101,684** | **−$9,074,506** | 24,780 | 11/57 |
+| 2H | **−$624,889** | **−$1,821,906** | **−$3,018,923** | 12,651 | 20/57 |
+| **4H** | **+$1,051,624** | **+$710,280** | **+$368,936** | 7,772 | **45/57** |
+| 1D | +$96,084 | +$82,363 | +$68,643 | 735 | 28/57 |
+
+Two competing forces determine total NET: **per-trade economics** (which improve as TF gets coarser because wider stops mean less leverage and lower fees) and **trade frequency** (which decreases as TF gets coarser). 4H is the sweet spot — first TF where per-trade is positive ($+135/trade) AND volume is high enough (~7,800 trades / 5y / 57 sym) to compound. 1D has even better per-trade economics ($+130) but only 735 trades total. 1H/2H trade enough but per-trade is negative due to fee burden.
+
+**This DEFUSES one of the prior open caveats** — 4H is now confirmed empirically optimal, not just the best of a small tested set.
+
+## Train-only shortlist diagnostic (2026-05-06)
+
+The deployed-32 list was selected by requiring positive PnL in **both** train (2020-2022) AND test (2023-2025). That uses test data as a filter — symbol-layer look-ahead. The train-only-shortlist diagnostic re-runs OOS persistence at slip ∈ {5, 15, 25} bp, then partitions the 57-symbol universe into selection cohorts to quantify the bias. Outputs in `results/honest_oos_slip{5,15,25}_2026-05-06.txt` and `results/slip_stress_diagnostic_2026-05-06.txt`. **Verdict: PASS at every slip level. Honest forward-PnL expectation is $69-184k/yr depending on slip realization.**
+
+### Test-period NET ($, total) by selection rule
+
+| slip | all-57 | deployed-32 (look-ahead) | top-32-by-train (honest) | train-positive (honest, n=var) |
+|:---:|---:|---:|---:|---:|
+| 5bp | +$619,862 | **+$559,434** | +$444,166 | +$488,304 (n=36) |
+| 15bp | +$406,385 | **+$437,773** | +$327,295 | +$346,630 (n=35) |
+| 25bp | +$192,910 | **+$301,367** | +$177,520 | +$177,520 (n=32) |
+
+### Look-ahead inflation in deployed-32 (vs same-size honest top-32-by-train)
+
+| slip | absolute $ | % of honest | $/yr inflated |
+|:---:|---:|---:|---:|
+| 5bp | +$115,268 | +26.0% | +$49,401/yr |
+| 15bp | +$110,478 | +33.8% | +$47,348/yr |
+| 25bp | +$123,847 | **+69.8%** | +$53,077/yr |
+
+The fixed dollar bias (~$115-124k on test) is constant across slip; as honest test PnL shrinks under cost pressure, the percentage inflation grows. **The deployed list's claim is most inflated under the most realistic friction.**
+
+### Honest annualised test PnL (2.33yr period)
+
+| slip | honest top-32-by-train | honest train-positive | deployed-32 (look-ahead) |
+|:---:|---:|---:|---:|
+| 5bp | $190,357/yr | $209,273/yr | $239,757/yr |
+| 15bp | $140,269/yr | $148,556/yr | $187,617/yr |
+| 25bp | **$76,080/yr** | $76,080/yr | $129,157/yr |
+
+Note: split-OOS aggregates run 3-9% above continuous (CLAUDE.md "monthly approach inflates by ~5%" effect). Adjusted honest annual ≈ **$184k / $134k / $69k/yr** at slip 5/15/25.
+
+### Symbol swap that explains the bias
+
+Going from honest top-32-by-train to deployed-32 swaps 3 names. At slip=5bp:
+
+| Direction | Symbols | train_NET sum | test_NET sum |
+|---|---|---:|---:|
+| Removed (regime flippers excluded by look-ahead) | DOGE, DYDX, ICP | +$72,261 | **−$51,909** |
+| Added (lower-train but test-positive) | LDO, LINK, VET | +$7,596 | **+$63,359** |
+| Net swap value (the look-ahead) | | | **+$115,268** |
+
+### Recoveries cohort — structural blind spot
+
+15 symbols (ARB, ATOM, BLUR, BNB, GMX, HBAR, IOTA, LDO, OP, PYTH, SEI, SUI, TIA, WLD, ZIL at slip=5) have train_NET ≤ 0 but test_NET > 0. Their test contribution is **+$236,409 at slip=5, +$201,026 at slip=15, +$207,110 at slip=25**. They are INVISIBLE to any train-only filter, including the deployed-32. A rolling-shortlist policy was tested as a fix — see next section.
+
+### Rolling-shortlist test (2026-05-06) — naive policy underperforms
+
+Tested a quarterly-rebalanced rolling shortlist with trailing 4-quarter (12-mo) lookback, top-32 by trailing NET. Inputs: `results/p4_quarterly_slip15_2026-05-06.tsv` (per-symbol per-quarter NET at slip=15bp). Forward window: 2021-Q1 → 2025-Q1 (4.25yr).
+
+| Selection rule | forward NET | $/yr |
+|---|---:|---:|
+| Rolling shortlist (trailing 4Q, top-32) | +$404,125 | +$95,088 |
+| Deployed-32 (fixed) | **+$802,124** | **+$188,735** |
+| All-57 (no selection) | +$555,211 | +$130,638 |
+
+Rolling DID capture more recoveries ($56,674 vs deployed-32's $7,988) — confirms the qualitative hypothesis that a rolling policy sees recovery-cohort symbols earlier. **But it underperforms the fixed deployed-32 by $398k (-50%) over 4.25yr.** Why: in 2021-Q1 the trailing-4Q window only qualifies 6 symbols; in 2021-Q2 only 12. Quarterly turnover is 17-42% in early years (Jaccard similarity). Stability matters more than recovery-capture for a 4-quarter lookback.
+
+**Conclusion:** the recoveries cohort is a real blind spot, but a naive rolling shortlist is not the fix. Possible refinements (untested): longer lookback (8 quarters), hybrid (train-only base + add-only-after-N-positive-quarters), or minimum-trades thresholds. For now: **stick with deployed-32 and accept the recoveries gap** (~$200k of test PnL we structurally don't capture, ~$87k/yr forgone at slip=15).
+
+Outputs: `scripts/p4_quarterly.sh`, `scripts/rolling_shortlist.py`, `results/p4_quarterly_slip15_2026-05-06.tsv`, `results/rolling_shortlist_diagnostic_2026-05-06.txt`.
+
+### Implications
+
+1. **Don't reshuffle the running 32.** Look-ahead is a property of the backtest test_NET, not a property of forward data. Reshuffling now changes nothing in expected forward PnL.
+2. **Anchor expectations to the honest annual.** Forward-paper criteria should compare live PnL to ~$69k/yr at slip=25bp, not to the inflated $129k/yr deployed-claim or the $147k/yr all-57 headline.
+3. **Strategy itself survives** — sign of test_NET stays positive under every honest selection rule at every slip level. The look-ahead inflated magnitude, not direction.
+
+## Cost-survivor battery (2026-05-05)
+
+A 21-cell falsification battery run on 2026-05-05 to test whether P4-Combined is a real edge or fee-illusion. Outputs in `results/battery_2026-05-05/`. **Verdict: real edge under realistic slippage, dies at extreme slippage.**
+
+### Slippage stress matrix (5y × 57 sym, fee=10bp, CSV funding)
+
+| Variant | slip=5bp | slip=15bp | slip=25bp | slip=40bp |
+|---|---:|---:|---:|---:|
+| **P4-Combined** (shorts+336h+CSV) | **+$1,051,624** | **+$710,280** | **+$368,936** | **−$143,079** |
+| Max-hold-only (no shorts) | +$1,012,337 | +$413,307 | −$185,724 | −$1,084,270 |
+| **P4-Shorts-Only** (no max-hold) | +$661,612 | +$414,798 | +$167,984 | −$202,237 |
+| Longs-Combined (sanity flip) | +$30,591 | −$363,801 | −$758,194 | −$1,349,782 |
+
+**Findings:**
+- P4-Combined survives to slip=25bp (+$369k = $74k/yr). Cliff at slip=40bp.
+- Max-hold-only is **fragile** — looks tied at slip=5 but its 13k-trade volume amplifies every cost shock.
+- Shorts-Only is the **most slip-elastic** (5,809 trades = lowest fee/slip surface). The "boring" alternative.
+- Longs-Combined (the inverse-side sanity check) is structurally negative across all slip levels — confirms the shorts-only filter is doing real work, not regime-fitting.
+
+### Honest OOS — train-only target_rr selection
+
+Sweep target_rr ∈ {3..8} on TRAIN ONLY (2020-2022), pick winner by train_NET, evaluate on TEST (2023-2025) once.
+
+| target_rr | train_NET | test_NET | train#prof | test#prof | ρ |
+|:---:|---:|---:|:---:|:---:|---:|
+| 3 | +$145k | +$314k | 31/57 | 37/57 | 0.079 |
+| 4 | +$190k | +$450k | 32/57 | 41/57 | 0.090 |
+| 5 | +$308k | +$542k | 29/57 | 41/57 | 0.123 |
+| **6** | **+$465k** 🥇 | **+$620k** | **36/57** | **47/57** | 0.242 |
+| 7 | +$352k | +$680k | 31/57 | 42/57 | 0.300 |
+| 8 | +$412k | +$861k | 31/57 | 46/57 | 0.373 |
+
+**Findings:**
+- **Train-only pick was rr=6** — the same value the original (full-5y-contaminated) sweep chose. Test confirmed +$620k. The OOS contamination caveat is partially defused.
+- **All six rr values are positive in BOTH halves** — robust plateau, not knife-edge optimum.
+- rr=8 has higher test_NET (+$861k) than rr=6 (+$620k) and higher Spearman; could be Strategy A-prime, but rr=6 is the honest train-pick. Spearman ρ rises monotonically with rr (0.08 → 0.37): higher RR → more symbol-persistent.
+
+### Concentration cuts (analytical, from `proto_oos_combined`)
+
+| Cut | NET (train+test sum) | Profitable |
+|---|---:|---:|
+| Full 57 sym | +$1,085k | 46/57 |
+| **Drop top-5 winners** (MKR, GRT, ROSE, ENS, AVAX) | **+$751k** | 41/52 |
+| Drop top-10 winners | +$511k | 36/47 |
+| **Drop 8 late-listings** (PYTH, WLD, TIA, SUI, SEI, GMX, BLUR, ARB) | **+$926k** | 38/49 |
+| Drop both top-5 AND late-listings | +$561k | ~33/44 |
+
+**Findings:**
+- 31% concentration in top-5, but the remaining 52 symbols still produce +$751k. Strategy isn't 5 lucky picks.
+- Late-listings inflated test by $159k. **Honest framing: train ≈ test ($465k vs $461k after late-listing exclusion)**, not "test > train."
+
+### Caveat resolution
+
+| Original caveat | Status |
+|---|---|
+| OOS contamination at parameter level | ✅ Defused — train-only rr sweep independently picks rr=6 |
+| Top-5 concentration ≈ 31% | ✅ Defused — +$751k remains after dropping top-5 |
+| Late-listing inflation | ✅ Defused — train ≈ test after exclusion |
+| 5bp slip optimistic | ✅ Defused — survives slip=15 and slip=25 |
+| Three "orthogonal levers" not ablated | ✅ Defused — single-lever ablation + slip stress shows shorts is load-bearing under realistic friction |
+| "Funding 0" framing oversells | ✅ Acknowledged — funding is neutral, not a profit lever |
+| Shorts-only regime-conditioned | ✅ Defused — longs-combined is structurally negative across all slip levels |
+| No baseline comparison | ✅ Defused — longs-combined as inverse baseline confirms shorts-side edge |
+| Max-hold force-close skips slippage (`stub.go:236`) | ⚠️ **Still open** — Strategy B (no max-hold) is the hedge against this |
+| 6s REST polling lag unmodeled | ⚠️ **Still open** — live-execution risk, not testable in backtest |
+| Funding-CSV silent fallback | ⚠️ **Audit pending** — verify all 57 symbols loaded a Historical provider |
+| Funding-CSV staleness for forward trades | ⚠️ **Architecture decision** — accept zero-funding-past-CSV-end, or build live fetcher |
+| `tradeResult.fundingUSDT` field comment is stale | 📌 Minor doc-only fix — not load-bearing |
+
+## Candidate Pool — P4-Combined (post-fees, $1k stake, continuous 5y)
+
+Source: `results/p4_combined_2026-05-05.txt` and `results/proto_oos_combined_2026-05-05.txt`. Flags: `--exact-fills --include-boundary --pessimistic-ambiguous --fee-bps 10 --stop-slippage-bps 5 --funding-bps-per-day 0 --tax-rate-pct 0 --funding-csv-dir data/funding --signal-tf 4H --target_rr 6.0 --side-filter short --max-hold-hours 336`.
+
+**Aggregate (57 symbols):** NET **+$1,051,624**, 7,772 trades, 20.64% WR, 45/57 profitable. Long_NET=$0 (filtered out), Short_NET=+$1,051,624. After 30% tax estimate ≈ $735k / 5y ≈ $147k/year.
+
+**OOS split (train 2020-2022 / test 2023-2025):** train +$465k (36/57 profitable) → test +$620k (47/57 profitable). 32/57 persistent winners (positive both halves). Spearman ρ=+0.243 (weak — implies symbol selection is mostly noise; the strategy itself carries the edge).
+
+**Deploy candidate — 32 OOS-validated persistent winners** (positive train AND test under post-fees stack):
+
+ROSE, MKR, GRT, 1INCH, ADA, KAVA, 1000SHIB, ENS, XLM, ETC, RUNE, AVAX, IMX, DOT, BCH, FTM, FIL, SOL, CRV, AAVE, APT, SNX, NEAR, APE, MANA, AXS, GALA, ETH, ENJ, LINK, VET, LDO.
+
+**Top-5 PnL contributors (concentration risk):** MKR +$79k, GRT +$69k, ROSE +$66k, ENS +$58k, AVAX +$58k. Sum ≈ $330k = ~31% of NET. Two regime flips erase half the alpha.
+
+**Persistent losers — DO NOT deploy:** BTC −$69k, TRX −$62k, XRP −$38k, SAND −$36k, UNI, CHZ. Negative in both train and test.
+
+**Regime-flip casualties** (positive train, negative test under post-fees stack — exclude): DYDXUSDT, ICPUSDT, DOGEUSDT, INJUSDT.
+
+**Late-listing recoveries** (no train data; test-only): WLD, TIA, SUI, SEI, PYTH, GMX, BLUR, ARB, IOTA, BNB, OP, HBAR, LTC, ZIL, ATOM. Positive test-only signal but zero pre-2023 evidence — treat as exploratory, not validated.
+
+**REST-poll capacity ceiling:** 32 symbols at 6s polling = 3200 weight/min — exceeds Binance Futures Regular ceiling (2400 weight/min). Either rotate, raise poll interval to ≥8s, or deploy a subset (~22 symbols max at 6s).
+
+## Migration prerequisites — what's needed before P4-Combined can run live
+
+The live wiring lags the backtest. Each item below must be resolved before any forward-paper-validation clock starts.
+
+1. ~~**Wire P4 fields into `cmd/engine/main.go`.**~~ ✅ **DONE 2026-05-05.** Added CLI flags: `--fee-bps`, `--stop-slippage-bps`, `--funding-bps-per-day`, `--side-filter`, `--max-hold-hours`, `--funding-csv-dir`, `--target-rr` (overrides YAML when >0), `--signal-tf` (overrides YAML when set). Defaults preserve legacy behavior; passing flags activates Strategy A/B. Funding-CSV loader mirrors cmd/backtest:130-144.
+2. ~~**Decide flag plumbing.**~~ ✅ **DONE — chose CLI flags via systemd ExecStart.** Mirrors cmd/backtest. Strategy params visible in unit file, single place to change. Per-symbol YAMLs unchanged. `deploy/systemd/paper-live@.service` now has Strategy B as default ExecStart with Strategy A as a commented one-line switch.
+3. ~~**Ship `data/funding/*.csv` to VPS.**~~ ✅ **DONE — `deploy/sync.sh` updated.** Funding CSVs now ship as a separate rsync after the main sync (data/ is otherwise excluded due to market-data CSV size). Refresh cadence: re-run `scripts/download_funding.sh` periodically, then `./deploy/sync.sh`. Binance appends funding history every 8h.
+4. **Resolve forward funding-CSV staleness.** The CSVs end at the last historical fetch. Live trades held past CSV-end get `$0` funding charges. **Recommendation: accept the limitation for now** (backtest's net-funding ≈ $0 over 5y suggests funding is not load-bearing), monitor in forward-paper, build live fetcher if a regime spike materializes. Decision: **OPEN, recommend accept-and-monitor.**
+5. **Pick deployment symbol set under REST-poll capacity.** P4-Combined candidate is 32 OOS-validated names. 32 × 6s polling = 3200 weight/min > 2400 Binance Regular cap. Options: (a) deploy 22-symbol subset at 6s (=2200 weight/min), (b) deploy 32 at 8s polling, (c) split into two engine groups. **Decision: OPEN — needs your input.**
+6. ~~**Migrate per-symbol YAMLs.**~~ ✅ **AVOIDED — chose CLI override path.** Per-symbol YAMLs untouched (still `target_rr: 5.0`). `--target-rr 6.0` in systemd ExecStart overrides at runtime. Reduces churn (16 file edits avoided) and keeps strategy params in one place (the systemd unit). YAMLs revert to symbol-level data only.
+7. ~~**Run the Phase 2 ablation grid first.**~~ ✅ **DONE 2026-05-05.** See `## Cost-survivor battery (2026-05-05)`. Ablation + slippage stress + honest-OOS confirmed P4-Combined as Strategy A and P4-Shorts-Only as Strategy B fallback.
+
+**Status (2026-05-05 20:06 UTC):** all 7 items resolved. Item 4 (forward funding-CSV staleness) accepted as-is per backtest's near-zero net funding finding — monitor in forward-paper. Item 5 (deployment symbol set) chose option (b) — all 32 OOS-validated names at 6s polling, accepting fallback-storm risk for paper. **Engines deployed and running.**
+
+Restoration command (rolls back today's stop):
+```bash
+ssh root@178.105.24.230 'systemctl enable --now paper-live@btcusdt.service paper-live@ethusdt.service ...'
+ssh root@178.105.24.230 'systemctl enable --now paper-live-watchdog.timer paper-live-digest.timer'
+```
+
+## Forward-paper go/no-go criteria
+
+Forward-paper validation started 2026-05-05 20:06 UTC (32 Strategy B engines). The deployed-32 list backtested at +$129k/yr at slip=25bp, but the train-only-shortlist diagnostic shows +70% look-ahead inflation at that slip level. **Anchor expectations to the honest annual: ≈ $69k/yr at slip=25bp**, not the deployed-claim or all-57 headline.
+
+### Statistical-power floor (before reading any signal)
+
+P4-Combined backtests at WR 20.64% with 6:1 R:R. Breakeven WR ≈ 14.3% — only ~6.3pp cushion. To bound observed WR within ±10pp at 95% CI requires ~63 trades; ±5pp requires ~250 trades. Strategy B at 5,809/5y × 32/57 sym ≈ 1.8 trades/day → 60 days ≈ 108 trades = ~±7pp resolution. **Do not draw conclusions from < 60 calendar days of forward data.**
+
+### Deploy real money (small tranche, 1/10th notional) only if ALL true
+
+- ≥150 live trades accumulated
+- Realized round-trip taker fees ≤ 12 bp (vs 10 bp modeled — 20% slack)
+- Realized stop-side slippage ≤ 20 bp on the losing-trade subsample (vs 5-25 bp modeled range)
+- ≥60 calendar days net-positive in dollar terms
+- Live PnL ≥ 60% of pro-rated honest-annual ($69k/yr × elapsed-fraction × 0.60)
+- Live PnL beats `BTC HODL with $32k notional` over the same window
+- No single symbol contributes >40% of cumulative live PnL
+
+### Kill the strategy if ANY true
+
+- First 60 days net-negative
+- Realized stop-side slippage > 25 bp (the cliff edge)
+- Realized WR < 14% over ≥150 trades (below breakeven)
+- Single symbol contributes >40% of live PnL (concentration risk realized)
+- Train-only-shortlist diagnostic re-run on rolling forward data shows non-positive honest test
+- Two consecutive 30-day windows underperform BTC-HODL benchmark by >$5k each
+
+### Initial real-money sizing
+
+Open with **$100/trade** (1/10th of backtest stake), not $1k. Cost of being wrong is bounded; cost of being right is just slower scaling. Promote to $1k/trade only after 6 months of forward evidence meeting all deploy-criteria.
+
+### Things to NOT do during forward-paper
+
+- Don't reshuffle the deployed-32 mid-flight. Look-ahead is in backtest test_NET, not forward data.
+- Don't promote to Strategy A (Strategy A's max-hold-force-close-slippage bug `stub.go:236` is documented cosmetic but doesn't help here).
+- Don't add symbols. Trade-count throughput is currently 1.8/day; adding symbols increases REST-poll load against the 2400 weight/min Binance Regular cap.
+- Don't tune target_rr, signal_tf, or side-filter. Every additional sweep cell consumes statistical degrees of freedom you've already spent.
+- Don't read into wins/losses inside the 60-day power floor. The natural shorts-only hit-rate is 20.6% — variance is enormous at low n.
+
+## Historical strategies (kept for context — do not use to decide)
+
+**Option C (EMA9×EMA21, 5m, target_rr=5.0)** — falsified 2026-05-05. Continuous 5y × 57 symbols at 8 bp fees + 5 bp slip = **NET −$143.76M, 0/57 profitable**. Required WR 22.9% vs observed 17.0%. Pre-fees the same sweep was +$6.77M (40/57 profitable) — a fee-illusion edge of 0.3pp above breakeven WR. Output: `results/option_c_57sym_realistic_2026-05-05.txt`. Live VPS engines are still paper-trading this strategy as of 2026-05-05 — see *Current state* table at top.
+
+**Absorption + breakout (PDH/PDL, min_rr=1.0)** — original strategy, superseded 2026-05-04. Code remains live and toggleable via `ema_mode: false` in any per-symbol YAML. README.md still describes this strategy in the "Strategy" / "Backtest Results" / "Cross-Instrument Summary" sections; those sections are stale and pending rewrite once a successor is forward-validated.
+
+## Known unmodeled risks
+
+After the 2026-05-05 cost-survivor battery and 2026-05-06 follow-up work, the original 13 caveats are now reduced to 3 still-open:
+
+- **6 s REST polling lag is unmodeled.** Adverse on every entry and every stop. Live-only risk — not testable in backtest. Mitigation: monitor live vs backtest signal-to-execution gap during forward-paper.
+- **Funding-CSV staleness drift.** Even with the new `refresh_funding.sh` mechanism, engines pick up refreshed CSVs only on restart. Between restarts, trades held past the CSV's last entry get $0 funding. Bounded by time-since-last-restart; weekly refresh + restart caps drift at ~7 days. Net funding ≈ $0 in steady state per backtest, so divergence is small in practice.
+- **No real-money execution test.** Forward-paper with realistic position sizing, exchange position limits, margin reuse, and concurrent-trade interaction is unmodeled. Honest backtest projection is $69-184k/yr depending on slip (see `## Train-only shortlist diagnostic`); the original $74-142k/yr framing was based on the deployed-32 list which carries +26-70% look-ahead inflation.
+
+**Resolved or downgraded since 2026-05-05:**
+- ~~Max-hold force-close slippage (`stub.go:236`)~~ → measured 2026-05-06: only 5.8% of trades hit time_stop on RUNE; extrapolated impact is ~$3-17k over 5y depending on slip = 1-2% of Strategy A NET. **Cosmetic.** Documented in Known Bugs.
+- ~~Funding-CSV silent fallback~~ → verified clean at deploy 2026-05-05 (all 32 engines logged "loaded historical funding"). The remaining concern is staleness, addressed above.
+- ~~`tradeResult.fundingUSDT` comment was stale~~ → fixed 2026-05-06.
+- ~~Symbol-selection look-ahead in deployed-32~~ → measured 2026-05-06 via train-only-shortlist diagnostic at slip ∈ {5, 15, 25} bp. Inflation is +26-70%, fixed dollar bias ~$115-124k on test, sign of test_NET preserved at every honest selection rule. **Quantified, not eliminated** — incorporated into go/no-go expectations.
+
+## Dead Code
+
+- `DailyLevels.LevelDirection` (`pkg/indicators/levels.go`) — defined but never called.
+- `bias.Allows(side, false)` in `checkAbsorption` (`pkg/strategy/entry.go`) — always returns `true`; no-op. (Absorption path is not the live strategy but remains in code.)

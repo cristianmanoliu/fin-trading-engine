@@ -1,0 +1,12 @@
+[Unit]
+Description=Paper-live daily PnL digest sent to Telegram
+
+[Service]
+Type=oneshot
+User=paperlive
+WorkingDirectory=/opt/trading-engine
+EnvironmentFile=/etc/paper-live/env
+Environment=PAPER_LIVE_JOURNAL_DIR=/var/log/paper-live/journal
+ExecStart=/opt/trading-engine/scripts/paper_live_digest.sh
+StandardOutput=journal
+StandardError=journal

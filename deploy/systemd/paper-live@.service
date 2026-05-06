@@ -1,0 +1,26 @@
+[Unit]
+Description=Paper-live trading engine for %i
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=paperlive
+WorkingDirectory=/opt/trading-engine
+EnvironmentFile=/etc/paper-live/env
+Environment=PAPER_LIVE_JOURNAL_DIR=/var/log/paper-live/journal
+# Strategy B (P4-Shorts-Only) — conservative first-deploy default.
+# Avoids the unmodeled max-hold-force-close slippage at pkg/execution/stub.go:236.
+# Switch to Strategy A (P4-Combined, higher expected NET) by appending: --max-hold-hours 336
+ExecStart=/opt/trading-engine/bin/engine --config /opt/trading-engine/configs/%i.yaml \
+    --signal-tf 4H --target-rr 6.0 \
+    --side-filter short \
+    --funding-csv-dir /opt/trading-engine/data/funding \
+    --fee-bps 10 --stop-slippage-bps 5 --funding-bps-per-day 0
+StandardOutput=append:/var/log/paper-live/%i.log
+StandardError=append:/var/log/paper-live/%i.log
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=paper-live.target

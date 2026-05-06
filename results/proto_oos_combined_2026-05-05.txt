@@ -1,0 +1,82 @@
+
+════════════════════════════════════════════════════════════════════════════════════════
+  P4 OOS PERSISTENCE  signal_tf=4H  atr=0  target_rr=6.0
+  Train: 2020-01 → 2022-12
+  Test:  2023-01 → 2025-04
+  Costs: --fee-bps=10  --stop-slippage-bps=5  --funding-bps-per-day=0  --tax-rate-pct=0
+════════════════════════════════════════════════════════════════════════════════════════
+
+Symbol              Train_NET   Test_NET Verdict
+────── ───────── ──────── ───────
+ROSEUSDT           +    51867 +    14512  ✓ PERSISTENT_WIN
+MKRUSDT            +    46465 +    33005  ✓ PERSISTENT_WIN
+GRTUSDT            +    44268 +    27767  ✓ PERSISTENT_WIN
+1INCHUSDT          +    37514 +     6988  ✓ PERSISTENT_WIN
+ADAUSDT            +    36741 +    15524  ✓ PERSISTENT_WIN
+KAVAUSDT           +    33088 +    12463  ✓ PERSISTENT_WIN
+DYDXUSDT           +    32269     -5989  ✗ TRAIN-WIN_TEST-LOSS  (regime flip)
+1000SHIBUSDT       +    27603 +    10679  ✓ PERSISTENT_WIN
+ENSUSDT            +    26409 +    31774  ✓ PERSISTENT_WIN
+XLMUSDT            +    25059 +     7650  ✓ PERSISTENT_WIN
+ICPUSDT            +    24755    -11654  ✗ TRAIN-WIN_TEST-LOSS  (regime flip)
+ETCUSDT            +    23754 +     9143  ✓ PERSISTENT_WIN
+RUNEUSDT           +    22185 +     6419  ✓ PERSISTENT_WIN
+AVAXUSDT           +    21787 +    36221  ✓ PERSISTENT_WIN
+IMXUSDT            +    21091 +     2710  ✓ PERSISTENT_WIN
+DOTUSDT            +    20248 +    25324  ✓ PERSISTENT_WIN
+BCHUSDT            +    20177 +     3340  ✓ PERSISTENT_WIN
+FTMUSDT            +    19221 +    23844  ✓ PERSISTENT_WIN
+FILUSDT            +    18894 +     9845  ✓ PERSISTENT_WIN
+DOGEUSDT           +    15237    -34266  ✗ TRAIN-WIN_TEST-LOSS  (regime flip)
+SOLUSDT            +    14976 +    26372  ✓ PERSISTENT_WIN
+CRVUSDT            +    14485 +    37484  ✓ PERSISTENT_WIN
+AAVEUSDT           +    13302 +    19927  ✓ PERSISTENT_WIN
+APTUSDT            +    13185 +    13498  ✓ PERSISTENT_WIN
+SNXUSDT            +    12736 +    13335  ✓ PERSISTENT_WIN
+NEARUSDT           +    10890 +    32199  ✓ PERSISTENT_WIN
+APEUSDT            +    10817 +    19234  ✓ PERSISTENT_WIN
+MANAUSDT           +    10161 +      668  ✓ PERSISTENT_WIN
+AXSUSDT            +     9966 +     5044  ✓ PERSISTENT_WIN
+GALAUSDT           +     8513 +    15835  ✓ PERSISTENT_WIN
+ETHUSDT            +     7130 +    15306  ✓ PERSISTENT_WIN
+ENJUSDT            +     6016 +    19965  ✓ PERSISTENT_WIN
+LINKUSDT           +     4306 +    17913  ✓ PERSISTENT_WIN
+VETUSDT            +     3069 +    32444  ✓ PERSISTENT_WIN
+INJUSDT            +      635    -19221  ✗ TRAIN-WIN_TEST-LOSS  (regime flip)
+LDOUSDT            +      221 +    13002  ✓ PERSISTENT_WIN
+WLDUSDT            +        0 +    20567  ↗ TRAIN-LOSS_TEST-WIN  (recovery)
+TIAUSDT            +        0 +     9743  ↗ TRAIN-LOSS_TEST-WIN  (recovery)
+SUIUSDT            +        0 +    21947  ↗ TRAIN-LOSS_TEST-WIN  (recovery)
+SEIUSDT            +        0 +    23383  ↗ TRAIN-LOSS_TEST-WIN  (recovery)
+PYTHUSDT           +        0 +    23857  ↗ TRAIN-LOSS_TEST-WIN  (recovery)
+GMXUSDT            +        0 +    14281  ↗ TRAIN-LOSS_TEST-WIN  (recovery)
+BLURUSDT           +        0 +      971  ↗ TRAIN-LOSS_TEST-WIN  (recovery)
+ARBUSDT            +        0 +    44341  ↗ TRAIN-LOSS_TEST-WIN  (recovery)
+IOTAUSDT                -538 +    20082  ↗ TRAIN-LOSS_TEST-WIN  (recovery)
+BNBUSDT                -1745 +     5189  ↗ TRAIN-LOSS_TEST-WIN  (recovery)
+UNIUSDT                -2746     -6084  ✗ persistent_loss
+CHZUSDT                -8746     -5526  ✗ persistent_loss
+OPUSDT                -13989 +    17761  ↗ TRAIN-LOSS_TEST-WIN  (recovery)
+SANDUSDT              -14551    -21254  ✗ persistent_loss
+HBARUSDT              -19529 +    21692  ↗ TRAIN-LOSS_TEST-WIN  (recovery)
+LTCUSDT               -20567 +     4183  ↗ TRAIN-LOSS_TEST-WIN  (recovery)
+XRPUSDT               -24817    -13908  ✗ persistent_loss
+ZILUSDT               -28960 +     2418  ↗ TRAIN-LOSS_TEST-WIN  (recovery)
+ATOMUSDT              -34321 +     5994  ↗ TRAIN-LOSS_TEST-WIN  (recovery)
+TRXUSDT               -35766    -26185  ✗ persistent_loss
+BTCUSDT               -37308    -31894  ✗ persistent_loss
+
+────────────────────────────────────────────────────────────────────
+Train aggregate: +465467$  (36/57 profitable)
+Test  aggregate: +619880$  (47/57 profitable)
+
+Persistence breakdown (train, test) signs:
+  ✓ Both positive:        32/57  (truly persistent — strategy generalizes)
+  ✗ Train+, Test-:        4/57  (regime-flip casualties)
+  ↗ Train-, Test+:        15/57  (late bloomers — possibly listed mid-period)
+  ✗ Both negative:        6/57  (consistent losers — drop)
+
+Spearman correlation (train PnL rank vs test PnL rank): ρ = +0.243
+  ρ ≈ +1: per-symbol selection from train would persist into test (ideal)
+  ρ ≈  0: per-symbol selection is noise — strategy IS the edge, not the symbol pick
+  ρ < 0:  per-symbol selection inverts — top train picks become test losers (worst case)

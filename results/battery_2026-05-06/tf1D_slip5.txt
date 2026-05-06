@@ -1,0 +1,34 @@
+
+════════════════════════════════════════════════════════════════════════════════════════
+  P4 variant: tf1D_slip5
+  Args:  --signal-tf 1D  --target_rr=6.0  --side-filter short
+  Costs: fee=10bp slip=5bp funding=0bp/day tax=0%
+════════════════════════════════════════════════════════════════════════════════════════
+
+TOTAL  57 sym  735 trades  14.97% WR
+  Gross +119656  Fees 16711  Funding 0  →  NET +96084  | 28/57 profitable
+  Long_NET +0   Short_NET +96084
+
+Top 15 by NET:
+  APEUSDT               10 trades     4 wins  net    +22932  long       +0  short   +22932
+  SOLUSDT               20 trades     6 wins  net    +21272  long       +0  short   +21272
+  BNBUSDT               18 trades     5 wins  net    +16818  long       +0  short   +16818
+  DOTUSDT               15 trades     4 wins  net    +12563  long       +0  short   +12563
+  1000SHIBUSDT          14 trades     3 wins  net    +12123  long       +0  short   +12123
+  FILUSDT               13 trades     3 wins  net    +11968  long       +0  short   +11968
+  ZILUSDT                9 trades     3 wins  net    +11707  long       +0  short   +11707
+  DYDXUSDT              16 trades     4 wins  net    +11557  long       +0  short   +11557
+  MANAUSDT              14 trades     3 wins  net    +10713  long       +0  short   +10713
+  SANDUSDT              16 trades     3 wins  net     +8173  long       +0  short    +8173
+  VETUSDT               19 trades     4 wins  net     +8104  long       +0  short    +8104
+  AXSUSDT                6 trades     2 wins  net     +7933  long       +0  short    +7933
+  WLDUSDT                6 trades     2 wins  net     +7767  long       +0  short    +7767
+  HBARUSDT              11 trades     2 wins  net     +7488  long       +0  short    +7488
+  ETCUSDT               18 trades     3 wins  net     +6623  long       +0  short    +6623
+
+Bottom 5 by NET:
+  ETHUSDT               21 trades     0 wins  net    -21812  long       +0  short   -21812
+  SNXUSDT               18 trades     1 wins  net    -11333  long       +0  short   -11333
+  CHZUSDT               17 trades     1 wins  net    -10512  long       +0  short   -10512
+  GMXUSDT                8 trades     0 wins  net     -8273  long       +0  short    -8273
+  AAVEUSDT              21 trades     2 wins  net     -7637  long       +0  short    -7637

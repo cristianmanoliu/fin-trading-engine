@@ -1,0 +1,17 @@
+[Unit]
+Description=All paper-live trading engines
+Wants=paper-live@ethusdt.service
+Wants=paper-live@runeusdt.service
+Wants=paper-live@linkusdt.service
+Wants=paper-live@xlmusdt.service
+Wants=paper-live@ldousdt.service
+Wants=paper-live@solusdt.service
+Wants=paper-live@apeusdt.service
+Wants=paper-live@enjusdt.service
+Wants=paper-live@opusdt.service
+Wants=paper-live@zilusdt.service
+Wants=paper-live@btcusdt.service
+Wants=paper-live@tiausdt.service
+
+[Install]
+WantedBy=multi-user.target
