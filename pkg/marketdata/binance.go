@@ -180,8 +180,19 @@ func parseRawFloat(r json.RawMessage) (float64, error) {
 }
 
 // aggTradeMsg is the Binance aggTrade WebSocket message shape.
+//
+// EventTime is non-obvious but load-bearing. Binance includes BOTH "e":"aggTrade"
+// and "E":<timestamp> in every payload. Without an explicit field for "E", Go's
+// encoding/json case-insensitive fallback tries to assign the numeric "E" value
+// into the string-typed EventType field tagged "e", returning a non-nil error
+// from Unmarshal AND silently dropping the tick at readLoop's `if err != nil
+// { continue }` (line 254). Discovered 2026-05-06 via the multi-engine refactor —
+// the per-symbol live engines had been silently relying on REST aggTrade fallback
+// for live ticks because every WS message was being dropped. Adding this field
+// fixes the WS path with zero behavior change for callers.
 type aggTradeMsg struct {
 	EventType string `json:"e"`
+	EventTime int64  `json:"E"` // see type comment — required to prevent case-insensitive json collision with "e"
 	TradeTime int64  `json:"T"`
 	Price     string `json:"p"`
 	Qty       string `json:"q"`
