@@ -8,11 +8,15 @@ set -uo pipefail
 ENV_FILE="/etc/paper-live/env"
 STATE_FILE="/var/lib/paper-live/alerted.state"
 LOG_DIR="/var/log/paper-live"
-# Deployed set last updated 2026-05-06: 16 train-only top-K on Strategy A
-# (P4-Combined with --max-hold-hours 336). Selected via scripts/select_16_engines.py:
-# deployed-32 → robustness gate (train_NET > 0 at slip=25bp drops ETH/LINK/VET/LDO)
-# → top-16 by train_NET at slip=15bp. See CLAUDE.md ## Current state for context.
-SYMBOLS=(roseusdt mkrusdt grtusdt 1inchusdt adausdt kavausdt 1000shibusdt ensusdt xlmusdt imxusdt etcusdt runeusdt avaxusdt ftmusdt dotusdt filusdt)
+# Deployed set last updated 2026-05-06 (post-swap): 16 train-only top-K on
+# Strategy A (P4-Combined with --max-hold-hours 336). Selected via
+# scripts/select_16_engines.py: deployed-32 → robustness gate (train_NET > 0
+# at slip=25bp drops ETH/LINK/VET/LDO) → top-K by train_NET at slip=15bp.
+#
+# Swap 2026-05-06 11:30 UTC: MKR + FTM removed (Binance Futures status SETTLING,
+# both delisted: MKR Sept-2025, FTM Jan-2025) — replaced by next train-rank
+# candidates BCH (rank 17) + APT (rank 18). See CLAUDE.md ## Current state.
+SYMBOLS=(roseusdt bchusdt grtusdt 1inchusdt adausdt kavausdt 1000shibusdt ensusdt xlmusdt imxusdt etcusdt runeusdt avaxusdt aptusdt dotusdt filusdt)
 
 # ── Load credentials ──────────────────────────────────────────────────────────
 if [[ -f "$ENV_FILE" ]]; then
