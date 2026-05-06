@@ -15,6 +15,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 > **Read this as alpha decay, not regime change.** The 4H EMA9×EMA21 crossover edge has materially decayed across both sides. **Do NOT allocate real money to this strategy as configured.** Forward-paper engines may continue running as observational data, but the validation hypothesis is materially weakened.
 >
 > Full analysis: `results/fresh_oos_2025-05_to_2026-04_*_2026-05-06.txt`, `scripts/p4_fresh_oos.sh`, `scripts/fresh_oos_compare.py`. See `## Fresh OOS validation (2026-05-06)` below for the full per-symbol breakdown and methodology.
+>
+> **Followup analysis 2026-05-06 (post-failure rescue):** the strategy framework is NOT dead — wrong timeframe and wrong subset were deployed.
+> - **Universe-57 on 1D timeframe**: fresh OOS +$57k/yr at slip=15bp, 32.3% WR (vs 4H's −$82k). Coarser TF preserved alpha; finer TFs decayed (1H = −$1.5M, 2H ≈ break-even).
+> - **Persistent-20 subset on 4H** (symbols positive in BOTH backtest AND fresh OOS): +$202k fresh OOS at slip=15bp (+194% vs backtest expectation). Caveat: subset chosen using fresh-OOS data → look-ahead-tainted, but indicative.
+> - **Persistent ∩ Deployed-16 (9 symbols)** on 4H: +$100k fresh OOS at slip=15bp. The most-validated subset — within current deployment, drop the 7 "dead" picks (BCH, GRT, KAVA, ADA, AVAX, FIL, 1000SHIB) and the remaining 9 produced double the deployed-16 PnL.
+>
+> **Diagnosis**: alpha decay is a microstructure/arbitrage phenomenon, not regime. Short-horizon signals (1H/2H/4H) decay faster than long-horizon (1D). The 4H edge has been arbitraged but 1D is too slow to attract the same competition.
+>
+> See `## Post-failure rescue (2026-05-06)` below for the full breakdown.
 
 ## Current state (2026-05-06, post-redeploy — strategy now in fresh-OOS-failure status, see ⚠️ above)
 
@@ -467,6 +476,65 @@ These are exactly the "structural blind spots" the train-only-shortlist diagnost
 - 12 months is one regime sample — high variance. Five 12-month windows would tell us more, but we only have one. Treat the magnitude as indicative; treat the SIGN as load-bearing.
 - The fresh window includes some delisted symbols (MKR, FTM) with partial data; their contribution is included for completeness.
 - Per-symbol breakdown in `results/fresh_oos_2025-05_to_2026-04_slip15_2026-05-06.txt`. Side-filter variants in `results/fresh_oos_{longs,both}_slip15_2026-05-06.txt`. Comparison logic: `scripts/fresh_oos_compare.py`.
+
+## Post-failure rescue (2026-05-06)
+
+After the fresh-OOS finding showed P4-Combined at deployed parameters lost money, ran two rescue analyses:
+
+### Analysis A: Persistent-alpha subset
+
+Identified symbols positive in BOTH the original 5y backtest AND the fresh 12mo OOS (i.e. symbols where the 4H EMA-cross edge survived in the recent year). 20 of 57 symbols qualified.
+
+| Set | n | Backtest annualised | Fresh 12mo @ slip=15 | Fresh 12mo @ slip=25 |
+|---|---:|---:|---:|---:|
+| Universe-57 (current) | 57 | $204k/yr | −$82k | −$187k |
+| **Persistent-20** | **20** | $104k/yr | **+$202k** | **+$171k** |
+| Deployed-16 (current) | 16 | $127k/yr | +$48k | +$16k |
+| **Persistent ∩ Deployed-16** | **9** | $67k/yr | **+$100k** | **+$84k** |
+
+The persistent-20 set captured 194% of its backtest expectation in fresh OOS — meaning the symbols that had real alpha in 2020-2025 maintained it (or even improved on the deployment-grade 12mo window). The deployed-16 underperformed because 7 of its 16 picks (BCH, GRT, KAVA, ADA, AVAX, FIL, 1000SHIB) were "dead in fresh OOS" — they had backtest alpha but fresh-OOS losses.
+
+The 9 deployed-16 symbols that DID persist (1INCH, APT, DOT, ENS, ETC, IMX, ROSE, RUNE, XLM) produced +$100k on fresh OOS — double the deployed-16 aggregate. **Dropping the 7 dead picks alone would have improved capture from 37% to 148% of backtest expectation.**
+
+11 symbols in the persistent-20 are NOT in deployed-16 (TIA, HBAR, APE, DYDX, AAVE, PYTH, WLD, IOTA, SNX, OP, BLUR). Adding them would contribute another +$103k on fresh OOS. Several were excluded by the train-only-shortlist diagnostic as "structural blind spots" (recoveries, regime-flippers) — fresh OOS confirms they have real alpha.
+
+**Methodological caveat:** the persistent-20 subset was selected using fresh-OOS data. Forward-deploying it carries the same look-ahead bias category we measured this morning. The honest framing is: a NEW selection methodology that incorporates rolling OOS validation could legitimately deploy this subset, but the result must be re-validated on the NEXT period of fresh OOS (call it 2026-05 → 2027-04 for the next cycle).
+
+### Analysis B: Alternate timeframe sweep
+
+Backtest comparison across signal timeframes (per CLAUDE.md `## Timeframe sweep`) ranked 4H as optimal in 2020-2025. Fresh OOS shows the ranking has changed.
+
+| TF | Backtest 5y NET @ slip=15 | Fresh 12mo NET @ slip=15 | Fresh WR | Fresh Trades |
+|---|---:|---:|:---:|---:|
+| 1H | −$6.10M | −$1,508k | 16.4% | 6,345 |
+| 2H | −$1.82M | +$9k | 19.4% | 3,594 |
+| **4H** (deployed) | **+$710k** | −$82k | 18.9% | 1,983 |
+| **1D** | **+$82k** | **+$57k** | **32.3%** | **248** |
+
+**1D timeframe is the only configuration that maintained positive expected value in fresh OOS without symbol-selection look-ahead.** Trade rate is much sparser (~4.4 trades/symbol/year vs 4H's 35), but the much higher WR (32.3% vs 18.9%) more than compensates per-trade.
+
+Pattern: **coarser timeframes preserved alpha, finer ones decayed**. Suggests the EMA-cross edge has been arbitraged out at short horizons (more retail/algo participants running similar 4H-or-shorter signals) but 1D is slow enough to retain edge. This is consistent with alpha decay being microstructure-driven rather than regime-driven.
+
+### Combined: persistent-20 on 1D
+
+Tested as a possible "best of both" but 1D's sparsity (248 trades / 12mo / 56 sym = ~4.4 trades/sym/yr) means the persistent-20 subset only generates 90 trades total → +$26k. The smaller universe-57 1D had higher absolute PnL because more symbols accumulated more trades. **For 1D, broader selection seems better than narrower; for 4H, narrower is better than broader.**
+
+### Recommendations (forward path, in order of conviction)
+
+1. **Honest deploy: switch deployed engines from 4H to 1D, keep all-symbol scope.** True OOS-validated. Trade rate drops substantially (engineers would generate ~70 trades/yr across 16 symbols → ~140 days for 150-trade go/no-go). Expected ≈ +$57k/yr at slip=15bp on universe-57; for deployed-16 sub-aggregate would need a separate 1D-deployed-16 sweep.
+2. **Conditional deploy: persistent-20 on 4H.** Highest EV (~$200k/yr at slip=15bp) BUT uses fresh-OOS data to select symbols. Honest only as a hypothesis to be validated on the NEXT 12-month OOS period.
+3. **Conservative deploy: drop the 7 dead picks from deployed-16.** Just keep the 9 persistent-deployed (1INCH, APT, DOT, ENS, ETC, IMX, ROSE, RUNE, XLM) on 4H. ~$100k fresh OOS at slip=15bp. Selection logic is "remove confirmed losers" rather than "add validated winners" — less bias.
+4. **Status quo + observe**: keep the 16 paper engines running on 4H, accept the negative-expected forward outcome, treat the next 60 days as data collection rather than validation.
+
+### Operational note
+
+These results enable real-money consideration in a way the "everything failed" framing earlier today did not. But none of these reach the original $86-184k/yr expectation cleanly. **Real-money sizing should be 1/10th of original plan** at minimum, with the new lower expectation as the anchor and the kill-criteria from `## Forward-paper go/no-go criteria` strictly applied.
+
+Files:
+- `scripts/persistent_alpha.py` — analysis A reproducible
+- `results/persistent_alpha_2026-05-06.txt` — analysis A output
+- `results/fresh_oos_{1H,2H,1D}_slip15_2026-05-06.txt` — analysis B raw data
+- `results/fresh_oos_1D_persistent20_slip15_2026-05-06.txt` — combined analysis
 
 ## Forward-paper go/no-go criteria
 

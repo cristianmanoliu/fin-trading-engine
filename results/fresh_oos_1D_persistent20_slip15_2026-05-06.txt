@@ -1,0 +1,34 @@
+
+════════════════════════════════════════════════════════════════════════════════════════
+  FRESH OOS  window=2025-05_to_2026-04  signal_tf=1D  target_rr=6.0
+  Costs: --fee-bps=10  --stop-slippage-bps=15  funding=CSV  side=short  max_hold=336h
+════════════════════════════════════════════════════════════════════════════════════════
+
+Symbol           Trades  Wins    WR%    Gross_$     Fees_$   Long_NET  Short_NET HoldHr
+────── ────── ──── ─── ──────── ────── ──────── ───────── ──────
+SNXUSDT               4     3  75.0%    +11151        72        +0    +11050 248.1h   net +11050
+ROSEUSDT              8     4  50.0%     +6113       127        +0     +5864 229.2h   net +5864
+XLMUSDT               5     2  40.0%     +5106       202        +0     +4710 206.3h   net +4710
+AAVEUSDT              3     2  66.7%     +4072        42        +0     +4007 238.8h   net +4007
+ENSUSDT               5     2  40.0%     +4000       105        +0     +3797 167.4h   net +3797
+DYDXUSDT              4     1  25.0%     +3000        77        +0     +2843 119.0h   net +2843
+OPUSDT                4     1  25.0%     +3000        87        +0     +2810 166.5h   net +2810
+ETCUSDT               4     1  25.0%     +3000       122        +0     +2775 127.6h   net +2775
+APTUSDT               5     3  60.0%     +2670        58        +0     +2577 281.6h   net +2577
+APEUSDT               6     2  33.3%     +1257        89        +0     +1074 245.3h   net +1074
+IOTAUSDT              6     3  50.0%     +1061       128        +0      +772 257.2h   net +772
+BLURUSDT              0     0   —%        +0         0        +0        +0   0.0h   net +0
+TIAUSDT               4     1  25.0%       +67        47        +0       -31 251.2h   net -31
+RUNEUSDT              2     1  50.0%      -654        27        +0      -704 226.6h   net -704
+IMXUSDT               5     1  20.0%      -526       155        +0      -897 135.7h   net -897
+DOTUSDT               8     2  25.0%     -1361       132        +0     -1655 165.8h   net -1655
+HBARUSDT              2     0   0.0%     -2000        35        +0     -2088  39.1h   net -2088
+1INCHUSDT             4     1  25.0%     -2901        88        +0     -3117 114.2h   net -3117
+WLDUSDT               6     1  16.7%     -2935        77        +0     -3118 203.6h   net -3118
+PYTHUSDT              5     0   0.0%     -4091        80        +0     -4293 130.1h   net -4293
+
+────────────────────────────────────────────────────────────────────────────────────
+TOTAL  19 sym (with trades)  90 trades  34.44% WR
+  Gross +30031  Fees 1759  Funding 0  →  NET +26377  | 11/19 sym profitable
+  Long_NET total: +0  (0/19 sym positive on long side)
+  Short_NET total: +26377  (11/19 sym positive on short side)

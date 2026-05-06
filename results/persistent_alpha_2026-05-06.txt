@@ -1,0 +1,98 @@
+
+====================================================================================================
+  PERSISTENT-ALPHA ANALYSIS
+  Backtest: 2020-01..2025-04 (5.33y, slip=5bp)
+  Fresh OOS: 2025-05..2026-04 (1y, slip=15bp + slip=25bp)
+====================================================================================================
+
+  PERSISTENT ALPHA  (positive in both backtest AND fresh OOS)  — n=20
+  These are the strongest candidates for a survivable subset deploy.
+
+  symbol              5y NET     5y ann   fresh@15   fresh@25  in_dep_16
+  --------------- ---------- ---------- ---------- ----------  ---------
+  ROSEUSDT        $  +66,379 $  +12,454 $  +16,398 $  +15,360  ✓ deployed
+  1INCHUSDT       $  +44,502 $   +8,349 $  +11,798 $  +10,147  ✓ deployed
+  AAVEUSDT        $  +33,229 $   +6,234 $   +7,249 $   +6,154  
+  ETCUSDT         $  +32,897 $   +6,172 $  +23,300 $  +20,913  ✓ deployed
+  XLMUSDT         $  +32,709 $   +6,137 $  +23,236 $  +21,888  ✓ deployed
+  APEUSDT         $  +30,051 $   +5,638 $  +15,369 $  +14,096  
+  APTUSDT         $  +26,683 $   +5,006 $  +11,748 $  +10,289  ✓ deployed
+  DYDXUSDT        $  +26,280 $   +4,931 $  +14,075 $  +12,998  
+  DOTUSDT         $  +45,572 $   +8,550 $   +4,542 $   +2,504  ✓ deployed
+  PYTHUSDT        $  +23,857 $   +4,476 $   +5,356 $   +3,930  
+  ENSUSDT         $  +58,183 $  +10,916 $   +4,380 $   +2,942  ✓ deployed
+  WLDUSDT         $  +20,567 $   +3,859 $   +5,611 $   +4,199  
+  IOTAUSDT        $  +19,544 $   +3,667 $   +5,075 $   +3,410  
+  RUNEUSDT        $  +28,604 $   +5,367 $   +3,538 $     +534  ✓ deployed
+  SNXUSDT         $  +26,071 $   +4,891 $   +1,884 $     +570  
+  TIAUSDT         $   +9,743 $   +1,828 $  +22,070 $  +20,812  
+  IMXUSDT         $  +23,801 $   +4,465 $     +731 $     -460  ✓ deployed
+  OPUSDT          $   +3,772 $     +708 $   +6,510 $   +5,115  
+  HBARUSDT        $   +2,163 $     +406 $  +14,516 $  +12,368  
+  BLURUSDT        $     +971 $     +182 $   +4,784 $   +3,113  
+
+  PERSISTENT-20 SUB-AGGREGATE
+  ----------------------------------------------------------------------------------
+    Backtest annualised:           $  +104,236/yr
+    Fresh 12mo NET @ slip=15bp:    $  +202,170
+    Fresh 12mo NET @ slip=25bp:    $  +170,882
+    Capture vs backtest @ 15bp:    +194%
+
+  DEPLOYED-16 SUB-AGGREGATE  (for comparison)
+  ----------------------------------------------------------------------------------
+    Backtest annualised:           $  +127,153/yr
+    Fresh 12mo NET @ slip=15bp:    $   +47,595
+    Fresh 12mo NET @ slip=25bp:    $   +16,140
+    Capture vs backtest @ 15bp:    +37%
+
+  PERSISTENT ∩ DEPLOYED-16  (the most-validated subset)  — n=9
+  Symbols: ['1INCHUSDT', 'APTUSDT', 'DOTUSDT', 'ENSUSDT', 'ETCUSDT', 'IMXUSDT', 'ROSEUSDT', 'RUNEUSDT', 'XLMUSDT']
+  ----------------------------------------------------------------------------------
+    Backtest annualised:           $   +67,417/yr
+    Fresh 12mo NET @ slip=15bp:    $   +99,671
+    Fresh 12mo NET @ slip=25bp:    $   +84,117
+
+  RISING — negative/zero backtest, positive fresh OOS  (n=4)
+  These are the 'structural blind spots' the train-only filter missed.
+  Inclusion in a future deploy would be honest only if a NEW selection
+  methodology supports it (not retrofitting from fresh OOS).
+  ----------------------------------------------------------------------------------
+    XRPUSDT         5y=   -38725  fresh=   +14762
+    ATOMUSDT        5y=   -28327  fresh=    +5303
+    CHZUSDT         5y=   -14272  fresh=    +4564
+    DOGEUSDT        5y=   -19029  fresh=     +455
+    Total rising fresh PnL contribution: $   +25,084
+
+  DEAD — positive backtest, negative fresh OOS (decay casualties)  (n=26)
+  ----------------------------------------------------------------------------------
+    LDOUSDT         5y=   +13223  fresh=   -31195
+    GMXUSDT         5y=   +14281  fresh=   -31116
+    BCHUSDT         5y=   +23517  fresh=   -20449 ✗ in deployed-16
+    CRVUSDT         5y=   +51969  fresh=   -17686
+    MKRUSDT         5y=   +79470  fresh=   -17318
+    ENJUSDT         5y=   +25981  fresh=   -16576
+    ICPUSDT         5y=   +13101  fresh=   -11914
+    SUIUSDT         5y=   +21947  fresh=   -11798
+    ETHUSDT         5y=   +22436  fresh=   -11438
+    GRTUSDT         5y=   +72035  fresh=    -8205 ✗ in deployed-16
+    GALAUSDT        5y=   +24348  fresh=    -7612
+    KAVAUSDT        5y=   +45551  fresh=    -6896 ✗ in deployed-16
+    VETUSDT         5y=   +35513  fresh=    -6882
+    FILUSDT         5y=   +28739  fresh=    -6779 ✗ in deployed-16
+    SOLUSDT         5y=   +41348  fresh=    -5351
+
+  CONFIRMED LOSERS — negative both periods  (n=7)
+  ----------------------------------------------------------------------------------
+    BTCUSDT
+    INJUSDT
+    LTCUSDT
+    SANDUSDT
+    TRXUSDT
+    UNIUSDT
+    ZILUSDT
+
+  CATEGORY SUMMARY
+    persistent       20/57
+    rising            4/57
+    dead             26/57
+    confirmed_loser   7/57
