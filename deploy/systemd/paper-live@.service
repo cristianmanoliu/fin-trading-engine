@@ -9,14 +9,21 @@ User=paperlive
 WorkingDirectory=/opt/trading-engine
 EnvironmentFile=/etc/paper-live/env
 Environment=PAPER_LIVE_JOURNAL_DIR=/var/log/paper-live/journal
-# Strategy B (P4-Shorts-Only) — conservative first-deploy default.
-# Avoids the unmodeled max-hold-force-close slippage at pkg/execution/stub.go:236.
-# Switch to Strategy A (P4-Combined, higher expected NET) by appending: --max-hold-hours 336
+# Strategy A (P4-Combined) with mh504 (21d max-hold) + 2 shadow strategies.
+# Pre-registered 6-window validation 2026-05-06 EOS:
+#   - mh504 wins 6/6 vs mh336 → STRONG → adopted as live config
+#   - 5/15 EMA wins 4/6 vs 9/21 → WEAK → run as shadow for forward validation
+# Shadow strategies receive identical market data but write to separate journals
+# at /var/log/paper-live/journal/shadow/<label>/. Compare live vs shadow PnL
+# after sufficient forward time accumulates to test the WEAK signals on real data.
+# Rollback: drop --shadow flag (live unaffected); change --max-hold-hours 504 → 336.
 ExecStart=/opt/trading-engine/bin/engine --config /opt/trading-engine/configs/%i.yaml \
     --signal-tf 4H --target-rr 6.0 \
     --side-filter short \
     --funding-csv-dir /opt/trading-engine/data/funding \
-    --fee-bps 10 --stop-slippage-bps 5 --funding-bps-per-day 0
+    --fee-bps 10 --stop-slippage-bps 5 --funding-bps-per-day 0 \
+    --max-hold-hours 504 \
+    --shadow alt5-15-336:5-15-336,alt5-15-504:5-15-504
 StandardOutput=append:/var/log/paper-live/%i.log
 StandardError=append:/var/log/paper-live/%i.log
 Restart=always

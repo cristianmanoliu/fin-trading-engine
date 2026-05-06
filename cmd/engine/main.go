@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -33,6 +34,9 @@ func main() {
 	targetRROverride := flag.Float64("target-rr", 0, "override YAML target_rr when > 0")
 	signalTFOverride := flag.String("signal-tf", "", "override YAML signal_tf when set (5m | 30m | 4H)")
 	fundingFilterMaxBpsPerDay := flag.Float64("funding-filter-max-bps-per-day", 0, "skip SHORT signals when current funding rate × 3 (per-day in bps) exceeds this threshold; 0 = disabled. Requires --funding-csv-dir. e.g. 5 = exclude only extreme bull regimes; 0.1 = exclude all positive funding.")
+	shadowFlag := flag.String("shadow", "", "comma-separated shadow strategy specs to run alongside live: 'label1:ema_fast-ema_slow-max_hold,label2:...'. Shadow strategies see identical market data but write to /var/log/paper-live/journal/shadow/<label>/. Used to test parameter variants forward without changing the live config.")
+	emaFastPeriod := flag.Int("ema-fast-period", 0, "fast EMA period for live strategy (default 9 when EMAMode is true)")
+	emaSlowPeriod := flag.Int("ema-slow-period", 0, "slow EMA period for live strategy (default 21 when EMAMode is true)")
 	flag.Parse()
 
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
@@ -115,6 +119,8 @@ func main() {
 		VWAPDeviationMode: cfg.Strategy.VWAPDeviationMode,
 		VWAPDeviationPct:  cfg.Strategy.VWAPDeviationPct,
 		EMAMode:           cfg.Strategy.EMAMode,
+		EMAFastPeriod:     *emaFastPeriod,
+		EMASlowPeriod:     *emaSlowPeriod,
 		ATRStopMult:       cfg.Strategy.ATRStopMult,
 		ATRPeriod:         cfg.Strategy.ATRPeriod,
 		SignalTimeframe:   models.Timeframe(cfg.Strategy.SignalTimeframe),
@@ -152,14 +158,29 @@ func main() {
 		}
 	}
 
+	// Parse shadow specs first so we know how many runners to fan-out to.
+	shadowSpecs, err := strategy.ParseShadowSpecs(*shadowFlag)
+	if err != nil {
+		slog.Error("invalid --shadow spec", "err", err)
+		os.Exit(1)
+	}
+
+	// Fan-out: live runner = index 0, shadow runners = indices 1..N.
+	// When no shadows are configured, fan-out is a no-op that just rebroadcasts
+	// 1→1, adding negligible overhead vs the prior direct subscription.
+	totalRunners := 1 + len(shadowSpecs)
+	c4hChans := marketdata.FanOutCandles(ctx, agg.Chan4H(), totalRunners)
+	c30mChans := marketdata.FanOutCandles(ctx, agg.Chan30m(), totalRunners)
+	c5mChans := marketdata.FanOutCandles(ctx, agg.Chan5m(), totalRunners)
+	c1hChans := marketdata.FanOutCandles(ctx, agg.Chan1H(), totalRunners)
+	c2hChans := marketdata.FanOutCandles(ctx, agg.Chan2H(), totalRunners)
+	c1dChans := marketdata.FanOutCandles(ctx, agg.Chan1D(), totalRunners)
+	tickChans := marketdata.FanOutTicks(ctx, stratTicks, totalRunners)
+
 	runner := strategy.NewRunner(
-		agg.Chan4H(),
-		agg.Chan30m(),
-		agg.Chan5m(),
-		agg.Chan1H(),
-		agg.Chan2H(),
-		agg.Chan1D(),
-		stratTicks,
+		c4hChans[0], c30mChans[0], c5mChans[0],
+		c1hChans[0], c2hChans[0], c1dChans[0],
+		tickChans[0],
 		cfg.ModelZones(),
 		entryCfg,
 		exec,
@@ -178,6 +199,43 @@ func main() {
 		} else {
 			slog.Warn("--funding-filter-max-bps-per-day requires --funding-csv-dir to load Historical provider; filter ignored")
 		}
+	}
+
+	// Build shadow runners: each gets its own EntryConfig override (EMA periods),
+	// its own Stub (with shadow-prefixed JournalPath and per-spec MaxHoldHours),
+	// and its own slot in the fan-out arrays.
+	shadowRunners := make([]*strategy.Runner, len(shadowSpecs))
+	for i, spec := range shadowSpecs {
+		shadowEntryCfg := entryCfg
+		shadowEntryCfg.EMAFastPeriod = spec.EMAFastPeriod
+		shadowEntryCfg.EMASlowPeriod = spec.EMASlowPeriod
+
+		shadowExec := &execution.Stub{
+			StakeUSDT:        cfg.Strategy.StakeUSDT,
+			JournalPath:      filepath.Join(journalDir, "shadow", spec.Label),
+			Symbol:           cfg.Symbol,
+			FeeBps:           *feeBps,
+			StopSlippageBps:  *stopSlippageBps,
+			FundingBpsPerDay: *fundingBpsPerDay,
+			MaxHoldHours:     spec.MaxHoldHours,
+			FundingProvider:  exec.FundingProvider, // share — provider is read-only
+		}
+
+		idx := i + 1 // live = 0, shadows = 1..N
+		shadowRunners[i] = strategy.NewRunner(
+			c4hChans[idx], c30mChans[idx], c5mChans[idx],
+			c1hChans[idx], c2hChans[idx], c1dChans[idx],
+			tickChans[idx],
+			cfg.ModelZones(),
+			shadowEntryCfg,
+			shadowExec,
+		)
+		slog.Info("shadow strategy registered",
+			"label", spec.Label,
+			"ema_fast", spec.EMAFastPeriod,
+			"ema_slow", spec.EMASlowPeriod,
+			"max_hold_hours", spec.MaxHoldHours,
+			"journal_path", shadowExec.JournalPath)
 	}
 
 	hb := marketdata.NewHeartbeat(cfg.Symbol)
@@ -219,6 +277,14 @@ func main() {
 		runner.Run(gctx)
 		return nil
 	})
+
+	for i := range shadowRunners {
+		sr := shadowRunners[i] // capture for closure
+		g.Go(func() error {
+			sr.Run(gctx)
+			return nil
+		})
+	}
 
 	g.Go(func() error {
 		hb.Run(gctx, 60*time.Second)
