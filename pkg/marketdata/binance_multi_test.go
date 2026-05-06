@@ -26,3 +26,33 @@ func TestCombinedEnvelopeUnmarshal(t *testing.T) {
 		t.Errorf("unexpected trade: %+v", trade)
 	}
 }
+
+func TestBuildCombinedURL(t *testing.T) {
+	tests := []struct {
+		name    string
+		base    string
+		symbols []string
+		want    string
+	}{
+		{
+			name:    "single symbol",
+			base:    "wss://fstream.binance.com",
+			symbols: []string{"BTCUSDT"},
+			want:    "wss://fstream.binance.com/stream?streams=btcusdt@aggTrade",
+		},
+		{
+			name:    "three symbols, mixed case",
+			base:    "wss://fstream.binance.com",
+			symbols: []string{"BTCUSDT", "ethusdt", "SolUsdT"},
+			want:    "wss://fstream.binance.com/stream?streams=btcusdt@aggTrade/ethusdt@aggTrade/solusdt@aggTrade",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := buildCombinedURL(tt.base, tt.symbols)
+			if got != tt.want {
+				t.Errorf("got %q want %q", got, tt.want)
+			}
+		})
+	}
+}
