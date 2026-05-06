@@ -1,0 +1,27 @@
+[Unit]
+Description=Paper-live multi-symbol trading engine
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=paperlive
+WorkingDirectory=/opt/trading-engine
+EnvironmentFile=/etc/paper-live/env
+Environment=PAPER_LIVE_JOURNAL_DIR=/var/log/paper-live/journal
+# Strategy A (P4-Combined, OOS-validated 2026-05-05).
+# 16 honest train-only top-K from deployed-32 (see CLAUDE.md ## Forward-paper go/no-go criteria).
+ExecStart=/opt/trading-engine/bin/engine \
+    --config /opt/trading-engine/configs/ \
+    --symbols ROSEUSDT,MKRUSDT,GRTUSDT,1INCHUSDT,ADAUSDT,KAVAUSDT,1000SHIBUSDT,ENSUSDT,XLMUSDT,IMXUSDT,ETCUSDT,RUNEUSDT,AVAXUSDT,FTMUSDT,DOTUSDT,FILUSDT \
+    --signal-tf 4H --target-rr 6.0 \
+    --side-filter short --max-hold-hours 336 \
+    --funding-csv-dir /opt/trading-engine/data/funding \
+    --fee-bps 10 --stop-slippage-bps 5 --funding-bps-per-day 0
+StandardOutput=append:/var/log/paper-live/multi.log
+StandardError=append:/var/log/paper-live/multi.log
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target
