@@ -182,6 +182,7 @@ func parseRawFloat(r json.RawMessage) (float64, error) {
 // aggTradeMsg is the Binance aggTrade WebSocket message shape.
 type aggTradeMsg struct {
 	EventType string `json:"e"`
+	EventTime int64  `json:"E"` // event time; without this field, Go's case-insensitive json fallback tries to assign E (a number) into EventType (a string), failing the entire Unmarshal
 	TradeTime int64  `json:"T"`
 	Price     string `json:"p"`
 	Qty       string `json:"q"`
