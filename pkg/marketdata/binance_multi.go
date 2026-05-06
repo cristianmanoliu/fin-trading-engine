@@ -223,6 +223,8 @@ func (b *BinanceFuturesMulti) readLoop(
 	const zeroFrameTimeout = 60 * time.Second
 	connectTime := time.Now()
 	gotFirstMsg := false
+	firstMsgRetries := 0
+	const maxFirstMsgRetries = 5
 
 	for {
 		if ctx.Err() != nil {
@@ -231,8 +233,15 @@ func (b *BinanceFuturesMulti) readLoop(
 
 		// Zero-frame check.
 		if !gotFirstMsg && time.Since(connectTime) > zeroFrameTimeout {
+			firstMsgRetries++
+			if firstMsgRetries >= maxFirstMsgRetries {
+				slog.Error("multi: zero-frame backend persisted across retries — terminating to allow restart",
+					"retries", firstMsgRetries)
+				return
+			}
 			slog.Warn("multi: zero-frame backend detected, forcing reconnect",
-				"connect_age", time.Since(connectTime).Round(time.Second))
+				"connect_age", time.Since(connectTime).Round(time.Second),
+				"retry", firstMsgRetries)
 			b.connMu.Lock()
 			if b.conn != nil {
 				b.conn.Close()
@@ -277,6 +286,12 @@ func (b *BinanceFuturesMulti) readLoop(
 			// CRITICAL: gorilla/websocket panics with "repeated read on failed websocket
 			// connection" if we call ReadMessage twice on a failed conn without closing.
 			if !gotFirstMsg {
+				firstMsgRetries++
+				if firstMsgRetries >= maxFirstMsgRetries {
+					slog.Error("multi: failed to receive first WS message after retries — terminating to allow restart",
+						"retries", firstMsgRetries)
+					return
+				}
 				b.connMu.Lock()
 				if b.conn != nil {
 					b.conn.Close()
@@ -316,6 +331,7 @@ func (b *BinanceFuturesMulti) readLoop(
 		}
 
 		gotFirstMsg = true
+		firstMsgRetries = 0 // reset on successful data
 		consecutiveStalls = 0
 		backoff = time.Second
 
