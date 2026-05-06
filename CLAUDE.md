@@ -23,6 +23,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 > **Re-validation status (post-fix runs completed 2026-05-06):**
 > - **Funding-regime correlation: HOLDS.** Re-ran 1425-cell quarterly TSV with corrected funding (`results/p4_quarterly_slip15_postfix_2026-05-06.tsv`). Pearson r shifted from **−0.1750 (PRE-fix) to −0.1678 (POST-fix), Δr = +0.0071** — barely moved. Both highly significant (t≈−5.8 to −6.0, p<0.001). Funding income is too small per-cell (~$50-300) to materially change the correlation. The "strategy works in BEAR/neutral, fails in BULL" interpretation survives at QUARTER level. Quartile bins essentially unchanged: Q1 (negative funding) 62.8% positive, Q4 (positive funding) 40.8% positive.
 > - **BUT trade-level funding filter REJECTED.** Walk-forward sweep at filter thresholds {1, 2, 5, 10} bps/day on 4H short universe-57 — every level UNDERPERFORMS the no-filter baseline (`results/funding_filter_sweep_2026-05-06.txt`). Baseline +$532k 3yr; best filter (filt10) +$461k; strict filter (filt1) catastrophically −$210k. Quarter-level regime correlation does NOT translate to trade-level edge — the filter removes too many winners along with the regime-aligned losers. Filter code (pkg/strategy/funding_filter.go) remains dormant; not wired live; do NOT deploy.
+>
+> **Refreshed quarterly mechanism + 1D both-sides walk-forward (post-fix, 2026-05-06 EOS):**
+> - Quarterly mean annualized: **+$105k/yr → +$130k/yr** (matches original backtest expectation +$142k more closely)
+> - Bootstrap 95% CI: **[−$131k, +$337k] → [−$111k, +$372k]** (lower bound improved by +$20k; CI still includes negative — irreducible uncertainty persists)
+> - Max drawdown: **−$527k → −$503k** (modest improvement)
+> - Per-symbol skill: still 0/57 pass Bonferroni (funding is symbol-agnostic) ✓
+> - Time-trend slope: t=+0.82 → t=+0.85 (still not significant) ✓
+> - Final cumulative: +$656k → +$812k over 6.25y
+> - **1D both-sides walk-forward: barely changed by funding fix** (Δ ≈ −$4k per slip level — longs pay funding, shorts receive, ~cancels across both-sides). Post-fix slip=15: 3/3 positive (W1 +$103k, W2 +$83k, W3 +$3k), STRONG verdict preserved. Slip=5: +$216k STRONG. Slip=25: +$163k SUPPORTIVE.
+> - **4H shorts vs 1D both-sides trade-off (post-fix):** 4H shorts +$532k sum (+$177k/yr) with SUPPORTIVE 2/3 + slip-fragile + regime-conditioned. 1D both-sides +$189k sum (+$63k/yr) with STRONG 3/3 + slip-robust + regime-balanced. **3× lower magnitude but 3× more robust.** The funding-fix asymmetry (4H gained +$94k from fix; 1D both-sides gained nothing) shows 4H shorts' headline depends on funding income; 1D both-sides earnings come from gross PnL alone.
 > - Walk-forward 4H short verdicts persist (SUPPORTIVE) at +20% magnitude.
 > - Quarterly bootstrap CI shifts upward but variance pattern unchanged.
 >

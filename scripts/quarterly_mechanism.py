@@ -84,9 +84,19 @@ def bootstrap_ci(values: list[float], n_iter: int = 5000, ci: float = 0.95) -> t
 def main() -> None:
     root = Path(__file__).resolve().parent.parent
     # Prefer the extended (full) TSV if present
-    tsv_full = root / "results/p4_quarterly_slip15_full_2026-05-06.tsv"
-    tsv_orig = root / "results/p4_quarterly_slip15_2026-05-06.tsv"
-    tsv = tsv_full if tsv_full.exists() else tsv_orig
+    if len(sys.argv) > 1:
+        tsv = Path(sys.argv[1])
+    else:
+        # Default search order: postfix > full > orig (newest data first)
+        tsv_postfix = root / "results/p4_quarterly_slip15_postfix_2026-05-06.tsv"
+        tsv_full = root / "results/p4_quarterly_slip15_full_2026-05-06.tsv"
+        tsv_orig = root / "results/p4_quarterly_slip15_2026-05-06.tsv"
+        if tsv_postfix.exists():
+            tsv = tsv_postfix
+        elif tsv_full.exists():
+            tsv = tsv_full
+        else:
+            tsv = tsv_orig
     if not tsv.exists():
         print(f"FAIL: TSV not found ({tsv})", file=sys.stderr)
         sys.exit(1)
