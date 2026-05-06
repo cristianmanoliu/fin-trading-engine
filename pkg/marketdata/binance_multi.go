@@ -1,13 +1,16 @@
 package marketdata
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/cristianmanoliu/trading-engine/pkg/models"
+	"github.com/gorilla/websocket"
 )
 
 // combinedEnvelope wraps every payload on the Binance combined-streams endpoint.
@@ -81,6 +84,58 @@ func routeEnvelope(raw []byte, channels map[string]chan<- models.Tick) error {
 	case ch <- tick:
 	default:
 		// TODO(task-6): channel full — surface drop counter via slog in readLoop layer.
+	}
+	return nil
+}
+
+// BinanceFuturesMulti opens a single combined-streams WebSocket for N symbols
+// and demuxes ticks into per-symbol channels. Replaces N separate
+// BinanceFutures instances with one connection.
+//
+// Unlike BinanceFutures, this type does NOT fall back to per-symbol REST
+// aggTrade polling on stall — that fallback is the cause of the 2026-05-06
+// IP ban (synchronized REST cap overshoot). Stalls trigger WS reconnect only;
+// data gaps during outages are accepted.
+type BinanceFuturesMulti struct {
+	wsURL         string
+	restURL       string
+	symbols       []string
+	backfillHours int
+	conn          *websocket.Conn
+	connMu        sync.Mutex
+}
+
+func NewBinanceFuturesMulti(wsURL, restURL string, symbols []string, backfillHours int) *BinanceFuturesMulti {
+	return &BinanceFuturesMulti{
+		wsURL:         wsURL,
+		restURL:       restURL,
+		symbols:       append([]string(nil), symbols...),
+		backfillHours: backfillHours,
+	}
+}
+
+// SubscribeMulti opens the combined-streams WebSocket, performs a per-symbol
+// REST kline backfill (sequential), and returns a read-only tick channel per
+// symbol. All channels are closed when ctx is cancelled or the upstream
+// connection terminates permanently.
+//
+// Symbol keys in the returned map are uppercase (matching the input format).
+// Buffer size per channel: 8192 — same as single-symbol BinanceFutures, sized
+// to hold full backfill (1500 klines × 4 ticks = 6000) with headroom.
+func (b *BinanceFuturesMulti) SubscribeMulti(ctx context.Context) (map[string]<-chan models.Tick, error) {
+	// Implementation in Task 5 + Task 6.
+	return nil, fmt.Errorf("not implemented")
+}
+
+// Close shuts down the underlying WebSocket connection. Safe to call multiple
+// times.
+func (b *BinanceFuturesMulti) Close() error {
+	b.connMu.Lock()
+	defer b.connMu.Unlock()
+	if b.conn != nil {
+		err := b.conn.Close()
+		b.conn = nil
+		return err
 	}
 	return nil
 }
