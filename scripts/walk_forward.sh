@@ -37,6 +37,10 @@ MAX_HOLD_HOURS="${MAX_HOLD_HOURS:-336}"
 FUNDING_FILTER_BPS="${FUNDING_FILTER_BPS:-0}"
 EMA_FAST="${EMA_FAST:-0}"  # 0 → backtest defaults to 9
 EMA_SLOW="${EMA_SLOW:-0}"  # 0 → backtest defaults to 21
+VWAP_DEV_PCT="${VWAP_DEV_PCT:-0}"  # 0 → VWAP fade disabled; e.g. 0.02 = 2% deviation
+RSI_MODE="${RSI_MODE:-0}"          # 1 → enable RSI cross-50 strategy
+RSI_PERIOD="${RSI_PERIOD:-0}"      # 0 → defaults to 14
+PDH_PDL_MODE="${PDH_PDL_MODE:-0}"  # 1 → enable PDH/PDL break strategy
 
 # Label embeds the filter level only when active so unfiltered runs keep their
 # existing filename (no churn for the deployed config baseline).
@@ -46,6 +50,15 @@ if [[ "$FUNDING_FILTER_BPS" != "0" ]]; then
 fi
 if [[ "$EMA_FAST" != "0" ]] || [[ "$EMA_SLOW" != "0" ]]; then
     LABEL="${LABEL}_ema${EMA_FAST}-${EMA_SLOW}"
+fi
+if [[ "$VWAP_DEV_PCT" != "0" ]]; then
+    LABEL="${LABEL}_vwap${VWAP_DEV_PCT}"
+fi
+if [[ "$RSI_MODE" == "1" ]]; then
+    LABEL="${LABEL}_rsi${RSI_PERIOD}"
+fi
+if [[ "$PDH_PDL_MODE" == "1" ]]; then
+    LABEL="${LABEL}_pdhpdl"
 fi
 OUT="${1:-results/walk_forward_${LABEL}_$(date +%F).txt}"
 WORKDIR=$(mktemp -d /tmp/wf-XXXXXXXX)
@@ -57,11 +70,24 @@ N_SYM=$(echo "$SYMBOLS" | wc -w | tr -d ' ')
 
 # Walk-forward windows: non-overlapping 12-month chunks.
 # Each entry: "label start_year start_month end_year end_month"
-WINDOWS=(
-    "W1_2023-05_to_2024-04 2023 5 2024 4"
-    "W2_2024-05_to_2025-04 2024 5 2025 4"
-    "W3_2025-05_to_2026-04 2025 5 2026 4"
-)
+# Default = 3 most recent windows. Set N_WINDOWS=6 to extend back to 2020-05.
+N_WINDOWS="${N_WINDOWS:-3}"
+if [[ "$N_WINDOWS" == "6" ]]; then
+    WINDOWS=(
+        "W-2_2020-05_to_2021-04 2020 5 2021 4"
+        "W-1_2021-05_to_2022-04 2021 5 2022 4"
+        "W0_2022-05_to_2023-04  2022 5 2023 4"
+        "W1_2023-05_to_2024-04  2023 5 2024 4"
+        "W2_2024-05_to_2025-04  2024 5 2025 4"
+        "W3_2025-05_to_2026-04  2025 5 2026 4"
+    )
+else
+    WINDOWS=(
+        "W1_2023-05_to_2024-04 2023 5 2024 4"
+        "W2_2024-05_to_2025-04 2024 5 2025 4"
+        "W3_2025-05_to_2026-04 2025 5 2026 4"
+    )
+fi
 
 echo "→ Walk-forward sweep"
 echo "  Config: signal_tf=${SIGNAL_TF}  side=${SIDE_FILTER}  target_rr=${TARGET_RR}  slip=${SLIP_BPS}bp  fee=${FEE_BPS}bp  max_hold=${MAX_HOLD_HOURS}h"
@@ -85,6 +111,8 @@ for win in "${WINDOWS[@]}"; do
     SLIP_BPS="$SLIP_BPS" FEE_BPS="$FEE_BPS" MAX_HOLD_HOURS="$MAX_HOLD_HOURS" \
     FUNDING_FILTER_BPS="$FUNDING_FILTER_BPS" \
     EMA_FAST="$EMA_FAST" EMA_SLOW="$EMA_SLOW" \
+    VWAP_DEV_PCT="$VWAP_DEV_PCT" \
+    RSI_MODE="$RSI_MODE" RSI_PERIOD="$RSI_PERIOD" PDH_PDL_MODE="$PDH_PDL_MODE" \
     START_YEAR="$sy" START_MONTH="$sm" END_YEAR="$ey" END_MONTH="$em" \
     "${ROOT}/scripts/p4_fresh_oos.sh" "$win_out" > /dev/null 2>&1
 

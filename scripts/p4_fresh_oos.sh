@@ -100,6 +100,21 @@ run_symbol() {
         ema_arg="$ema_arg --ema-slow-period ${EMA_SLOW}"
     fi
 
+    local vwap_arg=""
+    if [[ -n "${VWAP_DEV_PCT:-}" ]] && [[ "${VWAP_DEV_PCT}" != "0" ]]; then
+        vwap_arg="--vwap-deviation-mode --vwap-deviation-pct ${VWAP_DEV_PCT}"
+    fi
+
+    local mode_arg=""
+    if [[ "${RSI_MODE:-0}" == "1" ]]; then
+        mode_arg="--rsi-mode"
+        if [[ -n "${RSI_PERIOD:-}" ]] && [[ "${RSI_PERIOD}" != "0" ]]; then
+            mode_arg="$mode_arg --rsi-period ${RSI_PERIOD}"
+        fi
+    elif [[ "${PDH_PDL_MODE:-0}" == "1" ]]; then
+        mode_arg="--pdh-pdl-break-mode"
+    fi
+
     local result
     result=$("$BINARY" --config "$cfg" \
         --exact-fills --include-boundary --pessimistic-ambiguous \
@@ -108,6 +123,8 @@ run_symbol() {
         $funding_arg \
         $filter_arg \
         $ema_arg \
+        $vwap_arg \
+        $mode_arg \
         --signal-tf "$SIGNAL_TF" \
         --side-filter "$SIDE_FILTER" --max-hold-hours "$MAX_HOLD_HOURS" 2>&1 \
         | jq -r 'select(.msg | test("SUMMARY")) | [.total_trades, .wins, (.total_pnl_usd // 0), (.gross_pnl_usd // 0), (.total_fees_usd // 0), (.total_funding_usd // 0), (.long_net_usd // 0), (.short_net_usd // 0), (.avg_hold_hours // 0)] | @tsv' \
@@ -120,7 +137,7 @@ run_symbol() {
     printf '%s\t%s\n' "$symbol" "$result"
 }
 export -f run_symbol
-export ROOT BINARY WORKDIR FEE_BPS SLIP_BPS SIGNAL_TF TARGET_RR SIDE_FILTER MAX_HOLD_HOURS FUNDING_DIR START_YEAR START_MONTH END_YEAR END_MONTH FUNDING_FILTER_BPS EMA_FAST EMA_SLOW
+export ROOT BINARY WORKDIR FEE_BPS SLIP_BPS SIGNAL_TF TARGET_RR SIDE_FILTER MAX_HOLD_HOURS FUNDING_DIR START_YEAR START_MONTH END_YEAR END_MONTH FUNDING_FILTER_BPS EMA_FAST EMA_SLOW VWAP_DEV_PCT RSI_MODE RSI_PERIOD PDH_PDL_MODE
 
 RAW=$(printf '%s\n' $SYMBOLS \
     | xargs -P "$NCPU" -I{} bash -c 'run_symbol "{}"')

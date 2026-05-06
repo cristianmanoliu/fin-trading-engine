@@ -39,6 +39,11 @@ func main() {
 	fundingFilterMaxBpsPerDay := flag.Float64("funding-filter-max-bps-per-day", 0, "skip SHORT signals when current funding rate × 3 (per-day in bps) exceeds this threshold; 0 = disabled. Requires --funding-csv-dir. e.g. 5 = exclude only extreme bull regimes; 0.1 = exclude all positive funding.")
 	emaFastPeriod := flag.Int("ema-fast-period", 0, "fast EMA period for EMA-cross signal (default 9 when EMAMode is true)")
 	emaSlowPeriod := flag.Int("ema-slow-period", 0, "slow EMA period for EMA-cross signal (default 21 when EMAMode is true)")
+	vwapDevMode := flag.Bool("vwap-deviation-mode", false, "enable VWAP deviation fade strategy (mean-reversion). Overrides --ema-mode in YAML when true.")
+	vwapDevPct := flag.Float64("vwap-deviation-pct", 0, "fractional distance from VWAP to trigger fade entry (e.g. 0.02 = 2%). Required when --vwap-deviation-mode.")
+	rsiMode := flag.Bool("rsi-mode", false, "enable RSI-cross-50 strategy (momentum). Overrides EMA mode when true.")
+	rsiPeriod := flag.Int("rsi-period", 0, "RSI period (default 14)")
+	pdhPdlMode := flag.Bool("pdh-pdl-break-mode", false, "enable PDH/PDL breakdown strategy (momentum, fixed-RR variant). Overrides EMA mode when true.")
 	flag.Parse()
 
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
@@ -110,11 +115,14 @@ func main() {
 		MinRR:             cfg.Strategy.MinRR,
 		TargetRR:          cfg.Strategy.TargetRR,
 		MomentumMode:      cfg.Strategy.MomentumMode,
-		VWAPDeviationMode: cfg.Strategy.VWAPDeviationMode,
-		VWAPDeviationPct:  cfg.Strategy.VWAPDeviationPct,
-		EMAMode:           cfg.Strategy.EMAMode,
+		VWAPDeviationMode: cfg.Strategy.VWAPDeviationMode || *vwapDevMode,
+		VWAPDeviationPct:  func() float64 { if *vwapDevPct > 0 { return *vwapDevPct }; return cfg.Strategy.VWAPDeviationPct }(),
+		EMAMode:           cfg.Strategy.EMAMode && !(*vwapDevMode) && !(*rsiMode) && !(*pdhPdlMode),
 		EMAFastPeriod:     *emaFastPeriod,
 		EMASlowPeriod:     *emaSlowPeriod,
+		RSIMode:           *rsiMode,
+		RSIPeriod:         *rsiPeriod,
+		PDHPDLBreakMode:   *pdhPdlMode,
 		ATRStopMult:       *atrStopMult,
 		ATRPeriod:         *atrPeriod,
 		SignalTimeframe:   tf,

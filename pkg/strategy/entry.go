@@ -22,6 +22,10 @@ type EntryDetector struct {
 
 	// ATR-based stop state (used only when ATRStopMult > 0)
 	atr *indicators.ATR
+
+	// RSI state (used only when RSIMode=true)
+	rsi     *indicators.RSI
+	prevRSI float64
 }
 
 // EntryConfig holds the tunable parameters for entry detection.
@@ -43,6 +47,17 @@ type EntryConfig struct {
 	// detector internals (prevEma9, ema21) for git-blame continuity but accept any periods.
 	EMAFastPeriod int // 0 → defaults to 9
 	EMASlowPeriod int // 0 → defaults to 21
+
+	// PDHPDLBreakMode: when true, enter on PDH/PDL breakdown using the same
+	// fixed-TargetRR exit framework as EMA mode (wick stop, 6:1 target by default,
+	// max-hold cap). Independent of the legacy absorption+breakout strategy which
+	// uses VWAP as target. Cat A: PDH/PDL break test (2026-05-06 EOS).
+	PDHPDLBreakMode bool
+
+	// RSIMode: enter on RSI crossing 50 from above (short) or below (long).
+	// Same exit framework as EMA mode. Cat A: RSI test (2026-05-06 EOS).
+	RSIMode   bool
+	RSIPeriod int // 0 → defaults to 14
 
 	// ATRStopMult: when > 0 (and EMAMode), place stop at last.Close ± ATRStopMult × ATR(period).
 	// 0 keeps the legacy wick-based stop (last.Low or last.High with StopBufferPct).
@@ -84,6 +99,13 @@ func NewEntryDetector(cfg EntryConfig) *EntryDetector {
 		}
 		d.atr = indicators.NewATR(period)
 	}
+	if cfg.RSIMode {
+		period := cfg.RSIPeriod
+		if period <= 0 {
+			period = 14
+		}
+		d.rsi = indicators.NewRSI(period)
+	}
 	return d
 }
 
@@ -98,6 +120,10 @@ func (e *EntryDetector) AddCandle(c models.Candle) {
 	}
 	if e.atr != nil {
 		e.atr.Update(c)
+	}
+	if e.cfg.RSIMode && e.rsi != nil {
+		e.prevRSI = e.rsi.Value()
+		e.rsi.Update(c.Close)
 	}
 
 	e.window = append(e.window, c)
@@ -130,6 +156,24 @@ func (e *EntryDetector) Evaluate(levels []float64, vwap float64, bias *BiasTrack
 
 	if e.cfg.EMAMode {
 		return e.checkEMACrossover(last, bias)
+	}
+
+	if e.cfg.RSIMode {
+		return e.checkRSIBreakdown(last, bias)
+	}
+
+	if e.cfg.PDHPDLBreakMode {
+		// Iterate levels to find the most recently breached one and emit a
+		// fixed-RR signal. Different from legacy checkBreakout which uses VWAP target.
+		for _, level := range levels {
+			if level == 0 {
+				continue
+			}
+			if sig := e.checkPDHPDLBreakFixedRR(last, level, bias); sig != nil {
+				return sig
+			}
+		}
+		return nil
 	}
 
 	if len(e.window) < e.cfg.AbsorptionCandles {
@@ -212,6 +256,128 @@ func (e *EntryDetector) checkMomentum(last models.Candle, bias *BiasTracker) *mo
 		Timestamp:  last.CloseTime,
 		Reason: fmt.Sprintf("momentum %s | bias=%s | body=%.0f%% | rr=%.1f",
 			side, bias.Direction(), bodySize/candleRange*100, targetMult),
+	}
+}
+
+// checkRSIBreakdown fires when RSI crosses 50 from above (bearish — short)
+// or from below (bullish — long). Uses the same fixed-TargetRR exit framework
+// as EMAMode: wick stop, target = TargetRR × stop distance, side filter applied.
+// Cat A: RSI test 2026-05-06 EOS.
+func (e *EntryDetector) checkRSIBreakdown(last models.Candle, bias *BiasTracker) *models.Signal {
+	if e.rsi == nil || !e.rsi.Primed() {
+		return nil
+	}
+	if e.prevRSI == 0 {
+		return nil // need previous value
+	}
+	cur := e.rsi.Value()
+
+	bullishCross := e.prevRSI <= 50 && cur > 50
+	bearishCross := e.prevRSI >= 50 && cur < 50
+	if !bullishCross && !bearishCross {
+		return nil
+	}
+
+	var side models.Direction
+	if bullishCross {
+		side = models.Long
+	} else {
+		side = models.Short
+	}
+	if !bias.Allows(side, true) {
+		return nil
+	}
+
+	var stopLoss float64
+	if side == models.Long {
+		stopLoss = last.Low * (1 - e.cfg.StopBufferPct)
+	} else {
+		stopLoss = last.High * (1 + e.cfg.StopBufferPct)
+	}
+
+	risk := math.Abs(last.Close - stopLoss)
+	if risk == 0 {
+		return nil
+	}
+	rr := e.cfg.TargetRR
+	if rr <= 0 {
+		rr = 6.0
+	}
+	var takeProfit float64
+	if side == models.Long {
+		takeProfit = last.Close + risk*rr
+	} else {
+		takeProfit = last.Close - risk*rr
+	}
+
+	return &models.Signal{
+		Symbol:     last.Symbol,
+		Side:       side,
+		EntryPrice: last.Close,
+		StopLoss:   stopLoss,
+		TakeProfit: takeProfit,
+		Timestamp:  last.CloseTime,
+		Reason: fmt.Sprintf("rsi_cross_50 %s | prev=%.1f cur=%.1f | rr=%.1f",
+			side, e.prevRSI, cur, rr),
+	}
+}
+
+// checkPDHPDLBreakFixedRR fires when the candle breaks through PDH/PDL on a
+// strong-body close. Same exit framework as EMA mode (wick stop, fixed TargetRR
+// target). Independent of legacy checkBreakout which uses VWAP target.
+// Cat A: PDH/PDL break test 2026-05-06 EOS.
+func (e *EntryDetector) checkPDHPDLBreakFixedRR(last models.Candle, level float64, bias *BiasTracker) *models.Signal {
+	bullishBreak := last.Close > level && last.Open < level
+	bearishBreak := last.Close < level && last.Open > level
+	if !bullishBreak && !bearishBreak {
+		return nil
+	}
+	candleRange := last.High - last.Low
+	if candleRange == 0 {
+		return nil
+	}
+	bodySize := math.Abs(last.Close - last.Open)
+	if bodySize/candleRange < e.cfg.BreakoutBodyRatio {
+		return nil
+	}
+
+	var side models.Direction
+	var stopLoss float64
+	if bullishBreak {
+		side = models.Long
+		stopLoss = level * (1 - e.cfg.StopBufferPct)
+	} else {
+		side = models.Short
+		stopLoss = level * (1 + e.cfg.StopBufferPct)
+	}
+	if !bias.Allows(side, true) {
+		return nil
+	}
+
+	risk := math.Abs(last.Close - stopLoss)
+	if risk == 0 {
+		return nil
+	}
+	rr := e.cfg.TargetRR
+	if rr <= 0 {
+		rr = 6.0
+	}
+	var takeProfit float64
+	if side == models.Long {
+		takeProfit = last.Close + risk*rr
+	} else {
+		takeProfit = last.Close - risk*rr
+	}
+
+	return &models.Signal{
+		Symbol:     last.Symbol,
+		Side:       side,
+		EntryPrice: last.Close,
+		StopLoss:   stopLoss,
+		TakeProfit: takeProfit,
+		Timestamp:  last.CloseTime,
+		Reason: fmt.Sprintf("pdh_pdl_break %s | level=%.4f | body_ratio=%.2f | rr=%.1f",
+			side, level, bodySize/candleRange, rr),
 	}
 }
 

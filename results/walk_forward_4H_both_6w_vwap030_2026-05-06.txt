@@ -1,0 +1,31 @@
+
+════════════════════════════════════════════════════════════════════════════════════════
+  WALK-FORWARD VALIDATION  4H_both_rr6.0_slip15_vwap0.03
+  Config: signal_tf=4H  side=both  target_rr=6.0  slip=15bp
+  Costs: --fee-bps=10  --stop-slippage-bps=15  funding=CSV  max_hold=336h
+  Universe: 57 symbols
+════════════════════════════════════════════════════════════════════════════════════════
+
+Window                            NET   Trades      WR%  Profitable
+------                            ---   ------      ---  ----------
+W-2_2020-05_to_2021-04         +44429      391   40.66%  20/36 sym profitable
+W-1_2021-05_to_2022-04        -163719      441   25.17%  12/45 sym profitable
+W0_2022-05_to_2023-04         -133531      303   24.75%  7/48 sym profitable
+W1_2023-05_to_2024-04          -45213      243   31.69%  18/50 sym profitable
+W2_2024-05_to_2025-04          -59730      315   33.33%  17/55 sym profitable
+W3_2025-05_to_2026-04          -12271      209   34.45%  20/48 sym profitable
+
+  Aggregate
+  ────────────────────────────────────────────────────────────────────────────
+    Sum NET across 6 windows: -370035
+    Mean NET per window:       -61672
+    Positive windows:          1/6
+
+  Verdict
+  ────────────────────────────────────────────────────────────────────────────
+    REJECTED — mean NET < 0 across windows
+
+  Caveat: each window is ONE regime sample. With n=6 windows, a
+  STRONG/SUPPORTIVE verdict is HYPOTHESIS-STRENGTH evidence — not proof of
+  forward edge. Multiple-comparison adjustment applies when many configs are
+  tested. The framework is designed to REJECT, not to validate.
