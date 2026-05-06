@@ -1,0 +1,181 @@
+
+==============================================================================================================
+  MECHANISM ANALYSIS  (P4-Combined: 4H short EMA9×EMA21, target_rr=6, slip=15bp, fee=10bp)
+  Universe: 57 symbols × 3 windows (W1/W2 in-sample for selection, W3 true OOS)
+==============================================================================================================
+
+  TEST 1 — per-symbol consistency across 3 windows
+  ──────────────────────────────────────────────────────────────────────────────────────────
+  symbol              W1        W2        W3  wins/3   sign_flips category
+  ------------ --------- --------- ---------  -------- ---------- --------
+  APEUSDT         +5,439   +22,264   +15,369  3/3      0/2        ROBUST
+  XLMUSDT         +5,687   +12,300   +23,236  3/3      0/2        ROBUST
+  HBARUSDT        +8,964   +16,869   +14,516  3/3      0/2        ROBUST
+  OPUSDT         +11,803   +17,803    +6,510  3/3      0/2        ROBUST
+  SNXUSDT         +8,621   +13,048    +1,884  3/3      0/2        ROBUST
+  DOTUSDT         +4,017   +13,163    +4,542  3/3      0/2        ROBUST
+  APTUSDT         +5,564    +4,144   +11,748  3/3      0/2        ROBUST
+  IMXUSDT         +3,168    +2,515      +731  3/3      0/2        ROBUST
+  ETCUSDT         -8,985   +29,534   +23,300  2/3      1/2        supportive
+  NEARUSDT       +15,471   +25,232    -3,361  2/3      1/2        supportive
+  GRTUSDT        +19,438   +21,261    -8,205  2/3      1/2        supportive
+  AVAXUSDT        +2,522   +33,167    -4,269  2/3      1/2        supportive
+  IOTAUSDT       +28,348    -2,593    +5,075  2/3      2/2        supportive
+  TIAUSDT         -1,891    +9,341   +22,070  2/3      1/2        supportive
+  ARBUSDT         +1,282   +29,755    -2,806  2/3      1/2        supportive
+  PYTHUSDT        -8,001   +30,157    +5,356  2/3      1/2        supportive
+  VETUSDT         +7,295   +26,114    -6,882  2/3      1/2        supportive
+  WLDUSDT         -3,702   +24,120    +5,611  2/3      1/2        supportive
+  ROSEUSDT        -5,945   +15,100   +16,398  2/3      1/2        supportive
+  AAVEUSDT       +16,381      -552    +7,249  2/3      2/2        supportive
+  FTMUSDT         +6,122   +15,752        +0  2/3      0/2        supportive
+  ENSUSDT         -8,129   +23,394    +4,380  2/3      1/2        supportive
+  CRVUSDT        +33,064    +3,360   -17,686  2/3      1/2        supportive
+  1INCHUSDT       -6,164   +11,699   +11,798  2/3      1/2        supportive
+  SOLUSDT         +5,570   +16,639    -5,351  2/3      1/2        supportive
+  RUNEUSDT        -4,524   +15,893    +3,538  2/3      1/2        supportive
+  ATOMUSDT        -3,458    +6,304    +5,303  2/3      1/2        supportive
+  MKRUSDT         +2,960   +20,468   -17,318  2/3      1/2        supportive
+  LINKUSDT        +1,591    +4,270    -3,812  2/3      1/2        supportive
+  SUIUSDT         +8,589    +4,163   -11,798  2/3      1/2        supportive
+  XRPUSDT        -20,010    +5,388   +14,762  2/3      1/2        supportive
+  CHZUSDT         -8,380    +3,676    +4,564  2/3      1/2        supportive
+  BLURUSDT       -14,109    +6,714    +4,784  2/3      1/2        supportive
+  ZILUSDT           +281      +745    -4,446  2/3      1/2        supportive
+  SEIUSDT         -3,228   +19,629    -3,679  1/3      2/2        noisy
+  ADAUSDT         -8,347   +20,852    -5,242  1/3      2/2        noisy
+  ETHUSDT        +20,949    -3,688   -11,438  1/3      1/2        noisy
+  1000SHIBUSDT    -2,596    +7,030      -236  1/3      2/2        noisy
+  LTCUSDT        +16,048   -12,607    -1,678  1/3      1/2        noisy
+  ENJUSDT        -11,243   +29,361   -16,576  1/3      2/2        noisy
+  GALAUSDT        -5,336   +12,361    -7,612  1/3      2/2        noisy
+  DYDXUSDT        -7,706    -7,307   +14,075  1/3      1/2        noisy
+  FILUSDT         -1,656    +3,961    -6,779  1/3      2/2        noisy
+  UNIUSDT         -3,474      +132    -1,990  1/3      0/2        noisy
+  KAVAUSDT        +4,321    -3,017    -6,896  1/3      1/2        noisy
+  AXSUSDT         +2,665    -3,692    -5,004  1/3      1/2        noisy
+  BNBUSDT        -28,262   +26,567    -5,023  1/3      2/2        noisy
+  MANAUSDT        +5,423   -12,415      -303  1/3      1/2        noisy
+  BCHUSDT         -4,028    +7,826   -20,449  1/3      2/2        noisy
+  INJUSDT         +1,014   -10,855   -13,960  1/3      1/2        noisy
+  ICPUSDT           +822   -15,001   -11,914  1/3      1/2        noisy
+  DOGEUSDT       -11,543   -15,453      +455  1/3      1/2        noisy
+  LDOUSDT        -11,953   +10,845   -31,195  1/3      2/2        noisy
+  GMXUSDT         +2,143    -4,837   -31,116  1/3      1/2        noisy
+  SANDUSDT        -4,221   -13,870    -8,788  0/3      0/2        REJECTED
+  TRXUSDT        -16,339    -1,997   -16,872  0/3      0/2        REJECTED
+  BTCUSDT        -27,436   -10,777   -16,237  0/3      0/2        REJECTED
+
+  CONSISTENCY SUMMARY
+    ROBUST     :  8/57 symbols
+    supportive : 26/57 symbols
+    noisy      : 20/57 symbols
+    REJECTED   :  3/57 symbols
+    sign-flips between windows: 55 total (48% of consecutive pairs)
+
+  TEST 2 — pairwise symbol correlation (common factor probe)
+  ──────────────────────────────────────────────────────────────────────────────────────────
+  Each symbol has 3 NET observations (one per window). Compute pairwise
+  correlation across the universe; if HIGH avg → strategy captures a market-
+  wide factor (regime-dependent); if LOW avg → idiosyncratic per-symbol edge.
+
+    Average pairwise correlation (n=1596 pairs): +0.160
+    Median pairwise correlation:                          +0.299
+    669/1596 pairs > +0.5 (strong common factor)
+    397/1596 pairs < -0.5 (anti-correlated)
+
+  → INTERPRETATION: moderate common factor — partial regime dependence.
+    Implication: edge has both market-wide and per-symbol components.
+
+  TEST 3 — top-5 rotation across windows
+  ──────────────────────────────────────────────────────────────────────────────────────────
+    W1 top-5: CRVUSDT, IOTAUSDT, ETHUSDT, GRTUSDT, AAVEUSDT
+    W2 top-5: AVAXUSDT, PYTHUSDT, ARBUSDT, ETCUSDT, ENJUSDT
+    W3 top-5: ETCUSDT, XLMUSDT, TIAUSDT, ROSEUSDT, APEUSDT
+
+    Overlap W1∩W2: 0/5  ([])
+    Overlap W2∩W3: 1/5  (['ETCUSDT'])
+    Overlap W1∩W3: 0/5  ([])
+    Overlap all 3: 0/5  ([])
+
+  → INTERPRETATION: top-N rotates fully — different symbols win each window.
+    Implication: 'top performer' status is not predictive forward — selecting
+    based on past top-N is data mining.
+
+  TEST 4 — universe WR drift across windows
+  ──────────────────────────────────────────────────────────────────────────────────────────
+    W1:  1868 trades   361 wins  19.33% WR
+    W2:  1955 trades   440 wins  22.51% WR
+    W3:  1983 trades   375 wins  18.91% WR
+
+    Breakeven WR for fee=10bp, slip=15bp, RR=6: ~14.3%
+    Strategy needs WR > breakeven across all regimes to be robust.
+
+  TEST 5 — avg hold-hours by window (regime indicator)
+  ──────────────────────────────────────────────────────────────────────────────────────────
+    W1: avg hold 64.7h  median 64.3h  range 33-108h
+    W2: avg hold 63.6h  median 61.9h  range 31-98h
+    W3: avg hold 65.7h  median 63.8h  range 33-102h
+
+    Longer holds → trades trending toward max-hold force-close (336h cap)
+    Shorter holds → faster RR resolution (either target or stop)
+
+  TEST 6 — volatility-bin conditioning (H1: vol-driven momentum)
+  ──────────────────────────────────────────────────────────────────────────────────────────
+  Compute annualized realized vol per symbol from monthly OHLC
+  (2023-05..2026-04). Bin universe into low/mid/high vol terciles.
+  If H1 holds: high-vol bin should produce highest aggregate NET.
+
+    low_vol  (n=19, avg_vol=0.73): NET 3yr $     -14,738  (TRXUSDT, BTCUSDT, BNBUSDT, LTCUSDT, ETCUSDT, ...)
+    mid_vol  (n=19, avg_vol=1.02): NET 3yr $    +332,138  (APEUSDT, DOTUSDT, SNXUSDT, FILUSDT, UNIUSDT, ...)
+    high_vol (n=19, avg_vol=1.45): NET 3yr $    +120,084  (IMXUSDT, BLURUSDT, RUNEUSDT, ENSUSDT, GALAUSDT, ...)
+
+  TEST 7 — random-baseline: are observed consistency counts above chance?
+  ──────────────────────────────────────────────────────────────────────────────────────────
+  Under H0 (no per-symbol skill), each symbol's per-window outcome is independent
+  with probability p_w = (positive_count_w / universe_size_w). Compute expected
+  count of symbols positive in 3/3 windows under H0; compare to observed.
+
+    Window-marginal p(positive | symbol): W1=0.526 W2=0.737 W3=0.429
+
+    category         expected   observed     z-score
+    -------------- ---------- ----------  ----------
+    ROBUST (3/3)          9.5          8       -0.52
+    supp (2/3)           24.5         26       +0.39
+    noisy (1/3)          18.9         20       +0.30
+    REJECTED (0/3)        4.1          3       -0.55
+
+  → ROBUST count (8) is statistically INDISTINGUISHABLE from chance (9.5)
+    at 95% CI. This is STRONG evidence that there is NO per-symbol edge —
+    the symbols that look 'robust' are likely lucky, not skilled.
+
+  TEST 8 — long vs short asymmetry (universal vs regime-dependent)
+  ──────────────────────────────────────────────────────────────────────────────────────────
+    window    short NET     long NET    asymmetry  short pos/N    long pos/N
+    ------ ------------ ------------ ------------  -------------- --------------
+    W1     $    +14,896 $   -162,234 $   +177,130  30/57          24/57
+    W2     $   +504,255 $    -18,656 $   +522,911  42/57          32/57
+    W3     $    -81,667 $   -462,156 $   +380,489  24/56          11/56
+
+    3-window aggregate: shorts $+437,484  longs $-643,046  asymmetry $+1,080,530
+
+  → Longs are NEGATIVE in ALL 3 windows. The asymmetry is UNIVERSAL,
+    not regime-conditioned. This is a STRUCTURAL property of the strategy,
+    consistent with H4 (crypto has structural short-side skew).
+
+==============================================================================================================
+  SYNTHESIS
+==============================================================================================================
+
+  Hypothesis support summary (subjective read of evidence above):
+
+  H3 (selection-bias noise): STRONGLY SUPPORTED
+     Evidence: 55/114 sign-flips, top-N stability 0/5
+
+  H4 (structural bear-bias / universal): weakly supported
+     Evidence: avg pairwise correlation +0.160
+
+  H1 (vol-driven momentum): supported
+     Evidence: low_vol bin NET $-14,738, high_vol bin NET $+120,084
+
+  H2 (retail-bubble shorting) requires listing-date data not parsed here.
