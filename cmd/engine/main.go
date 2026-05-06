@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -32,11 +33,39 @@ func main() {
 	fundingCSVDir    := flag.String("funding-csv-dir", "", "directory of per-symbol funding CSVs (e.g. data/funding/); replaces --funding-bps-per-day with historical Binance rates")
 	targetRROverride := flag.Float64("target-rr", 0, "override YAML target_rr when > 0")
 	signalTFOverride := flag.String("signal-tf", "", "override YAML signal_tf when set (5m | 30m | 4H)")
+	symbolsCSV       := flag.String("symbols", "", "comma-separated list of symbols for multi-symbol mode (e.g. ROSEUSDT,MKRUSDT,GRTUSDT). When set, --config is interpreted as a directory and per-symbol configs are loaded as <symbol-lowercase>.yaml from it.")
 	flag.Parse()
 
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
 	})))
+
+	if *symbolsCSV != "" {
+		symbols := splitCSV(*symbolsCSV)
+		if len(symbols) == 0 {
+			slog.Error("--symbols is empty")
+			os.Exit(1)
+		}
+		multiFlags := multiFlagSet{
+			configDir:        *cfgPath,
+			feeBps:           *feeBps,
+			stopSlippageBps:  *stopSlippageBps,
+			fundingBpsPerDay: *fundingBpsPerDay,
+			sideFilter:       *sideFilter,
+			maxHoldHours:     *maxHoldHours,
+			fundingCSVDir:    *fundingCSVDir,
+			targetRROverride: *targetRROverride,
+			signalTFOverride: *signalTFOverride,
+		}
+		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer cancel()
+		if err := runMulti(ctx, symbols, multiFlags); err != nil {
+			slog.Error("multi engine error", "err", err)
+			os.Exit(1)
+		}
+		slog.Info("multi engine stopped")
+		return
+	}
 
 	notifier := notify.FromEnv()
 
@@ -216,4 +245,15 @@ func main() {
 
 	slog.Info("engine stopped")
 	notifier.Send(context.Background(), fmt.Sprintf("🔴 *%s* engine stopped (clean)", cfg.Symbol)) //nolint:errcheck
+}
+
+func splitCSV(s string) []string {
+	var out []string
+	for _, p := range strings.Split(s, ",") {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, strings.ToUpper(p))
+		}
+	}
+	return out
 }
