@@ -81,6 +81,9 @@ func TestRouteEnvelope(t *testing.T) {
 		if tick.Price != 3500.50 {
 			t.Errorf("price: got %v want 3500.50", tick.Price)
 		}
+		if tick.Volume != 0.5 {
+			t.Errorf("volume: got %v want 0.5", tick.Volume)
+		}
 		want := time.UnixMilli(1748128765400).UTC()
 		if !tick.Timestamp.Equal(want) {
 			t.Errorf("timestamp: got %v want %v", tick.Timestamp, want)
@@ -103,5 +106,23 @@ func TestRouteEnvelopeUnknownSymbolDropped(t *testing.T) {
 	// don't subscribe to (we shouldn't, but be defensive).
 	if err := routeEnvelope(raw, channels); err != nil {
 		t.Errorf("expected nil error for unknown symbol, got %v", err)
+	}
+}
+
+func TestRouteEnvelopeMalformedJSONErrors(t *testing.T) {
+	// Only branch that returns a non-nil error: unparseable envelope JSON.
+	raw := []byte(`not json at all`)
+	err := routeEnvelope(raw, nil)
+	if err == nil {
+		t.Fatal("expected error for malformed envelope JSON, got nil")
+	}
+}
+
+func TestRouteEnvelopeStreamWithoutAtSignSkipped(t *testing.T) {
+	// Stream name lacking the @ separator should be silently dropped (no error).
+	raw := []byte(`{"stream":"weirdname","data":{"e":"aggTrade","T":1,"p":"1.0","q":"1"}}`)
+	err := routeEnvelope(raw, map[string]chan<- models.Tick{})
+	if err != nil {
+		t.Errorf("expected nil error for malformed stream name, got %v", err)
 	}
 }

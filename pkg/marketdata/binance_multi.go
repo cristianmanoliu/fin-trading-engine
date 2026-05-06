@@ -34,7 +34,7 @@ func buildCombinedURL(base string, symbols []string) string {
 // defensive — Binance can occasionally echo extras around connection lifecycle).
 //
 // Returns an error only on unparseable JSON; routing decisions and parse
-// failures on individual fields are logged and skipped.
+// failures on individual fields are skipped (logging deferred to Task 6's readLoop).
 func routeEnvelope(raw []byte, channels map[string]chan<- models.Tick) error {
 	var env combinedEnvelope
 	if err := json.Unmarshal(raw, &env); err != nil {
@@ -42,24 +42,11 @@ func routeEnvelope(raw []byte, channels map[string]chan<- models.Tick) error {
 	}
 
 	// Stream name format: "<symbol-lowercase>@aggTrade". Extract symbol.
-	at := -1
-	for i, c := range env.Stream {
-		if c == '@' {
-			at = i
-			break
-		}
-	}
+	at := strings.IndexByte(env.Stream, '@')
 	if at <= 0 {
 		return nil // malformed stream name — skip
 	}
-	sym := env.Stream[:at]
-	symUpper := ""
-	for _, c := range sym {
-		if c >= 'a' && c <= 'z' {
-			c = c - 'a' + 'A'
-		}
-		symUpper += string(c)
-	}
+	symUpper := strings.ToUpper(env.Stream[:at])
 
 	ch, ok := channels[symUpper]
 	if !ok {
@@ -93,7 +80,7 @@ func routeEnvelope(raw []byte, channels map[string]chan<- models.Tick) error {
 	select {
 	case ch <- tick:
 	default:
-		// channel full — drop tick rather than block. Log via slog at higher level.
+		// TODO(task-6): channel full — surface drop counter via slog in readLoop layer.
 	}
 	return nil
 }
