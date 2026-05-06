@@ -36,7 +36,13 @@ type EntryConfig struct {
 	MomentumMode      bool    // when true: ignore levels, enter only on 5m momentum candles in 4H bias direction
 	VWAPDeviationMode bool    // when true: fade price stretched ≥ VWAPDeviationPct from session VWAP; target = VWAP
 	VWAPDeviationPct  float64 // minimum fractional distance from VWAP to trigger a deviation entry
-	EMAMode           bool    // when true: enter on EMA9/EMA21 crossover aligned with 4H bias; fixed TargetRR
+	EMAMode           bool    // when true: enter on EMA fast/slow crossover aligned with bias; fixed TargetRR
+
+	// EMAFastPeriod / EMASlowPeriod: configurable EMA periods (only used when EMAMode is true).
+	// Defaults preserve legacy behavior: 9 (fast) and 21 (slow). Field names retain "9/21" in
+	// detector internals (prevEma9, ema21) for git-blame continuity but accept any periods.
+	EMAFastPeriod int // 0 → defaults to 9
+	EMASlowPeriod int // 0 → defaults to 21
 
 	// ATRStopMult: when > 0 (and EMAMode), place stop at last.Close ± ATRStopMult × ATR(period).
 	// 0 keeps the legacy wick-based stop (last.Low or last.High with StopBufferPct).
@@ -60,8 +66,16 @@ type EntryConfig struct {
 func NewEntryDetector(cfg EntryConfig) *EntryDetector {
 	d := &EntryDetector{cfg: cfg}
 	if cfg.EMAMode {
-		d.ema9 = indicators.NewEMA(9)
-		d.ema21 = indicators.NewEMA(21)
+		fast := cfg.EMAFastPeriod
+		if fast <= 0 {
+			fast = 9
+		}
+		slow := cfg.EMASlowPeriod
+		if slow <= 0 {
+			slow = 21
+		}
+		d.ema9 = indicators.NewEMA(fast)
+		d.ema21 = indicators.NewEMA(slow)
 	}
 	if cfg.ATRStopMult > 0 {
 		period := cfg.ATRPeriod

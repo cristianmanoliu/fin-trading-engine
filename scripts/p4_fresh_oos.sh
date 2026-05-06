@@ -92,6 +92,14 @@ run_symbol() {
         filter_arg="--funding-filter-max-bps-per-day ${FUNDING_FILTER_BPS}"
     fi
 
+    local ema_arg=""
+    if [[ -n "${EMA_FAST:-}" ]] && [[ "${EMA_FAST}" != "0" ]]; then
+        ema_arg="--ema-fast-period ${EMA_FAST}"
+    fi
+    if [[ -n "${EMA_SLOW:-}" ]] && [[ "${EMA_SLOW}" != "0" ]]; then
+        ema_arg="$ema_arg --ema-slow-period ${EMA_SLOW}"
+    fi
+
     local result
     result=$("$BINARY" --config "$cfg" \
         --exact-fills --include-boundary --pessimistic-ambiguous \
@@ -99,6 +107,7 @@ run_symbol() {
         --funding-bps-per-day 0 \
         $funding_arg \
         $filter_arg \
+        $ema_arg \
         --signal-tf "$SIGNAL_TF" \
         --side-filter "$SIDE_FILTER" --max-hold-hours "$MAX_HOLD_HOURS" 2>&1 \
         | jq -r 'select(.msg | test("SUMMARY")) | [.total_trades, .wins, (.total_pnl_usd // 0), (.gross_pnl_usd // 0), (.total_fees_usd // 0), (.total_funding_usd // 0), (.long_net_usd // 0), (.short_net_usd // 0), (.avg_hold_hours // 0)] | @tsv' \
@@ -111,7 +120,7 @@ run_symbol() {
     printf '%s\t%s\n' "$symbol" "$result"
 }
 export -f run_symbol
-export ROOT BINARY WORKDIR FEE_BPS SLIP_BPS SIGNAL_TF TARGET_RR SIDE_FILTER MAX_HOLD_HOURS FUNDING_DIR START_YEAR START_MONTH END_YEAR END_MONTH FUNDING_FILTER_BPS
+export ROOT BINARY WORKDIR FEE_BPS SLIP_BPS SIGNAL_TF TARGET_RR SIDE_FILTER MAX_HOLD_HOURS FUNDING_DIR START_YEAR START_MONTH END_YEAR END_MONTH FUNDING_FILTER_BPS EMA_FAST EMA_SLOW
 
 RAW=$(printf '%s\n' $SYMBOLS \
     | xargs -P "$NCPU" -I{} bash -c 'run_symbol "{}"')

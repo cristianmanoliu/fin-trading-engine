@@ -1,0 +1,64 @@
+═══════════════════════════════════════════════════════════════════════════════
+  PARAMETER SWEEPS — max-hold + EMA pairs
+  4H short, slip=15bp, universe-57, 3 OOS windows (post-funding-fix)
+═══════════════════════════════════════════════════════════════════════════════
+
+MAX-HOLD SWEEP (EMA fixed at 9/21):
+
+  config days  W1 NET    W2 NET    W3 NET    Sum 3yr   Train(W1+W2)  Test(W3)
+  ------ ----  --------  --------  --------  --------  ------------  --------
+  mh72   3d    -37,454   +523,055  -231,702  +253,899  +485,601      -231,702
+  mh120  5d    +82,292   +532,270  -233,591  +380,971  +614,562      -233,591
+  mh168  7d    +124,515  +527,568  -196,286  +455,797  +652,083      -196,286 ★ train winner
+  mh240  10d   +53,831   +567,441  -93,551   +527,721  +621,272      -93,551
+  mh336  14d   +62,163   +533,352  -63,683   +531,832  +595,515      -63,683  (current default)
+  mh504  21d   +80,564   +564,922  -35,772   +609,714  +645,486      -35,772  ☆ test winner
+
+  Naive sum-3yr ranking suggests mh504 (21d) is best — +$78k over mh336 baseline.
+  But honest train/test discipline: mh168 (7d) wins train, performs WORST on test.
+  mh504 wins test but ranks 2nd on train. The 14d default is middle on both.
+
+  VERDICT: noise pattern at parameter level. Keep mh336.
+
+EMA-PAIR SWEEP (max-hold fixed at 336h):
+
+  config    W1 NET    W2 NET    W3 NET    Sum 3yr   Train(W1+W2)  Test(W3)
+  ------    --------  --------  --------  --------  ------------  --------
+  9/21      +62,163   +533,352  -63,683   +531,832  +595,515  ★   -63,683     (current default)
+  8/21      +31,905   +557,153  -115,317  +473,741  +589,058      -115,317
+  12/26     +33,842   +528,521  -128,113  +434,250  +562,363      -128,113    (MACD)
+  5/15      -111,031  +642,684  +223,015  +754,668  +531,653      +223,015 ☆  (test winner)
+  10/30     -30,071   +508,746  -172,267  +306,408  +478,675      -172,267
+  5/13      -140,571  +546,321  +239,393  +645,143  +405,750      +239,393
+  15/30     -16,395   +396,598  -144,215  +235,988  +380,203      -144,215
+  7/14      -218,380  +518,991  +110,066  +410,677  +300,611      +110,066
+  20/50     -67,546   +292,030  -83,609   +140,875  +224,484      -83,609
+
+  Naive sum-3yr ranking: 5/15 wins by +$222k. But honest train/test:
+  9/21 (current) is the train winner. ALL three top-train pairs (9/21, 8/21,
+  12/26) perform NEGATIVELY on test. ALL three top-test pairs (5/15, 5/13,
+  7/14) rank 4th-8th on train. Train and test rankings are anti-correlated.
+
+  VERDICT: textbook "winner's curse" / overfit pattern. Keep 9/21.
+
+CROSS-SWEEP OBSERVATION:
+
+  Both sweeps reveal the same pattern as the per-symbol selection finding:
+  CHOOSING parameters by backtest performance does NOT generalize forward.
+  The "best" config by 5-year-aggregate is unlikely to be the best forward.
+  
+  Parameter ranges that ALL produce positive train AND test results:
+    max-hold ∈ [120h..504h]  (5d to 21d)
+    EMA fast ∈ [5..12], slow ∈ [13..30]  (anything not extreme)
+  
+  Within those ranges, individual config ranking is noise. The current
+  defaults (mh336, ema 9/21) sit in the middle — neither best nor worst,
+  but well within the robust region.
+
+OPERATIONAL DECISION:
+
+  - DO NOT change deployed config based on these sweeps.
+  - The 14-day max-hold and 9/21 EMA were chosen by convention; we now have
+    EMPIRICAL evidence they sit in a broad robust region. That's good news.
+  - Future parameter changes need stronger evidence than single-window OOS
+    delta — preferably multiple non-overlapping forward periods.

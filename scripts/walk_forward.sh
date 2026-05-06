@@ -35,12 +35,17 @@ SLIP_BPS="${SLIP_BPS:-15}"
 FEE_BPS="${FEE_BPS:-10}"
 MAX_HOLD_HOURS="${MAX_HOLD_HOURS:-336}"
 FUNDING_FILTER_BPS="${FUNDING_FILTER_BPS:-0}"
+EMA_FAST="${EMA_FAST:-0}"  # 0 → backtest defaults to 9
+EMA_SLOW="${EMA_SLOW:-0}"  # 0 → backtest defaults to 21
 
 # Label embeds the filter level only when active so unfiltered runs keep their
 # existing filename (no churn for the deployed config baseline).
 LABEL="${SIGNAL_TF}_${SIDE_FILTER}_rr${TARGET_RR}_slip${SLIP_BPS}"
 if [[ "$FUNDING_FILTER_BPS" != "0" ]]; then
     LABEL="${LABEL}_filt${FUNDING_FILTER_BPS}"
+fi
+if [[ "$EMA_FAST" != "0" ]] || [[ "$EMA_SLOW" != "0" ]]; then
+    LABEL="${LABEL}_ema${EMA_FAST}-${EMA_SLOW}"
 fi
 OUT="${1:-results/walk_forward_${LABEL}_$(date +%F).txt}"
 WORKDIR=$(mktemp -d /tmp/wf-XXXXXXXX)
@@ -79,6 +84,7 @@ for win in "${WINDOWS[@]}"; do
     SIGNAL_TF="$SIGNAL_TF" SIDE_FILTER="$SIDE_FILTER" TARGET_RR="$TARGET_RR" \
     SLIP_BPS="$SLIP_BPS" FEE_BPS="$FEE_BPS" MAX_HOLD_HOURS="$MAX_HOLD_HOURS" \
     FUNDING_FILTER_BPS="$FUNDING_FILTER_BPS" \
+    EMA_FAST="$EMA_FAST" EMA_SLOW="$EMA_SLOW" \
     START_YEAR="$sy" START_MONTH="$sm" END_YEAR="$ey" END_MONTH="$em" \
     "${ROOT}/scripts/p4_fresh_oos.sh" "$win_out" > /dev/null 2>&1
 

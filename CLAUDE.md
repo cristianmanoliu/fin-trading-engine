@@ -33,6 +33,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 > - Final cumulative: +$656k → +$812k over 6.25y
 > - **1D both-sides walk-forward: barely changed by funding fix** (Δ ≈ −$4k per slip level — longs pay funding, shorts receive, ~cancels across both-sides). Post-fix slip=15: 3/3 positive (W1 +$103k, W2 +$83k, W3 +$3k), STRONG verdict preserved. Slip=5: +$216k STRONG. Slip=25: +$163k SUPPORTIVE.
 > - **4H shorts vs 1D both-sides trade-off (post-fix):** 4H shorts +$532k sum (+$177k/yr) with SUPPORTIVE 2/3 + slip-fragile + regime-conditioned. 1D both-sides +$189k sum (+$63k/yr) with STRONG 3/3 + slip-robust + regime-balanced. **3× lower magnitude but 3× more robust.** The funding-fix asymmetry (4H gained +$94k from fix; 1D both-sides gained nothing) shows 4H shorts' headline depends on funding income; 1D both-sides earnings come from gross PnL alone.
+>
+> **Parameter sweeps (2026-05-06 EOS) — max-hold + EMA pairs (`results/parameter_sweeps_2026-05-06.txt`):** Made EMA periods configurable (was hardcoded 9/21). Swept max-hold ∈ {72,120,168,240,336,504}h and EMA pairs ∈ {5/13, 5/15, 7/14, 8/21, 9/21, 10/30, 12/26, 15/30, 20/50}.
+> - **Honest train(W1+W2)/test(W3) reveals winner's-curse pattern at parameter level**, mirroring the per-symbol selection finding. Train winners ≠ test winners.
+>   - max-hold: train winner mh168 (7d) → worst on test (-$196k). Test winner mh504 (21d) → 2nd on train. Current 14d (mh336) is middle on both.
+>   - EMA: train winner = current 9/21; ALL top-3 train pairs (9/21, 8/21, 12/26) NEGATIVE on test. Test winner 5/15 ranks 4th on train. Train/test rankings essentially anti-correlated.
+> - **Robust region exists.** max-hold ∈ [120,504]h and EMA fast ∈ [5,12] / slow ∈ [13,30] all produce positive train AND test. Within the region, ranking is noise.
+> - **Decision: keep current defaults (mh336, ema 9/21).** They sit in the middle of the robust region — neither best nor worst. Choosing the test winner would be retroactive overfitting.
+> - **User intuition refuted:** "pump-and-dump should resolve fast → tighter max-hold helps" — opposite is true. mh72 (3d) is WORST (+$254k) and mh504 (21d) best (+$610k). Bear cascades take >5 days to fully play out. The 14d default has 15% headroom we don't currently capture, but the difference is well within walk-forward noise.
 > - Walk-forward 4H short verdicts persist (SUPPORTIVE) at +20% magnitude.
 > - Quarterly bootstrap CI shifts upward but variance pattern unchanged.
 >

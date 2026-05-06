@@ -37,6 +37,8 @@ func main() {
 	maxHoldHours         := flag.Float64("max-hold-hours", 0, "force-close any open position older than this many hours; 0 = no cap (default). Useful to trim funding-eaten tails.")
 	fundingCSVDir        := flag.String("funding-csv-dir", "", "directory of per-symbol funding CSVs (e.g. data/funding/). When set, replaces --funding-bps-per-day with actual historical Binance funding rates accrued per 8h event with correct per-side sign.")
 	fundingFilterMaxBpsPerDay := flag.Float64("funding-filter-max-bps-per-day", 0, "skip SHORT signals when current funding rate × 3 (per-day in bps) exceeds this threshold; 0 = disabled. Requires --funding-csv-dir. e.g. 5 = exclude only extreme bull regimes; 0.1 = exclude all positive funding.")
+	emaFastPeriod := flag.Int("ema-fast-period", 0, "fast EMA period for EMA-cross signal (default 9 when EMAMode is true)")
+	emaSlowPeriod := flag.Int("ema-slow-period", 0, "slow EMA period for EMA-cross signal (default 21 when EMAMode is true)")
 	flag.Parse()
 
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
@@ -111,6 +113,8 @@ func main() {
 		VWAPDeviationMode: cfg.Strategy.VWAPDeviationMode,
 		VWAPDeviationPct:  cfg.Strategy.VWAPDeviationPct,
 		EMAMode:           cfg.Strategy.EMAMode,
+		EMAFastPeriod:     *emaFastPeriod,
+		EMASlowPeriod:     *emaSlowPeriod,
 		ATRStopMult:       *atrStopMult,
 		ATRPeriod:         *atrPeriod,
 		SignalTimeframe:   tf,
