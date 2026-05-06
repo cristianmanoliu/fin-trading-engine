@@ -1,0 +1,35 @@
+
+==============================================================================================================
+  FUNDING-REGIME CORRELATION  (PRE-fix vs POST-fix funding-loader)
+  Symbol-quarter cells: pre=1153, post=1153
+==============================================================================================================
+
+  PRE-FIX  (funding=$0 due to quoted-rate ParseFloat bug)
+  ──────────────────────────────────────────────────────────────────────
+    n = 1153, Pearson r = -0.1750, t = -6.03
+    significance: HIGHLY SIGNIFICANT (p<0.001)
+    bin                             n     avg_funding    avg_NET       sum_NET   pos%
+    Q1 (most-negative funding)    288       -0.000118 $   +2,564 $    +738,466  62.5%
+    Q2                            288       +0.000034 $   +1,589 $    +457,664  57.3%
+    Q3                            288       +0.000084 $     -418 $    -120,443  46.9%
+    Q4 (most-positive funding)    289       +0.000298 $   -1,453 $    -420,057  38.8%
+
+  POST-FIX (real Binance funding accrued)
+  ──────────────────────────────────────────────────────────────────────
+    n = 1153, Pearson r = -0.1678, t = -5.77
+    significance: HIGHLY SIGNIFICANT (p<0.001)
+    bin                             n     avg_funding    avg_NET       sum_NET   pos%
+    Q1 (most-negative funding)    288       -0.000118 $   +2,653 $    +764,094  62.8%
+    Q2                            288       +0.000034 $   +1,688 $    +486,037  57.6%
+    Q3                            288       +0.000084 $     -279 $     -80,408  48.3%
+    Q4 (most-positive funding)    289       +0.000298 $   -1,239 $    -357,999  40.8%
+
+==============================================================================================================
+  INTERPRETATION
+==============================================================================================================
+
+  Pearson r shifted from -0.1750 (PRE) to -0.1678 (POST), Δr = +0.0071
+
+  → REGIME STORY HOLDS: even with real funding, NET is significantly negatively
+    correlated with funding rate. The strategy IS regime-conditioned. The funding
+    filter has a real motivation; worth wiring into cmd/engine and testing live.

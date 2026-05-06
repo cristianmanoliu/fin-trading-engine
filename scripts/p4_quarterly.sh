@@ -22,8 +22,8 @@ WORKDIR=$(mktemp -d /tmp/quart-sweep.XXXXXXXX)
 trap 'rm -f "$BINARY"; rm -rf "$WORKDIR"' EXIT
 
 START_YEAR=2020
-END_YEAR=2025
-END_YEAR_LAST_Q=1   # 2025-Q1 last full quarter (data goes through April 2025)
+END_YEAR=2026
+END_YEAR_LAST_Q=1   # 2026-Q1 last full quarter (data goes through April 2026)
 
 source "$(dirname "${BASH_SOURCE[0]}")/lib/symbols.sh"
 SYMBOLS="${SYMBOLS:-$(get_symbols universe)}"

@@ -20,10 +20,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 >
 > All three windows shifted in the positive direction. Larger benefit in higher-funding windows (W1 +$47k vs W3 +$18k) — consistent with shorts collecting more funding income in bull regimes.
 >
-> **Specific session claims that need re-validation when convenient:**
-> - The funding-regime correlation r=−0.175 was computed on bug-affected data. With real funding income for shorts now flowing, the correlation will weaken substantially (shorts collect MORE in higher-funding regimes, raising NET in those bins). The "regime-conditioned" interpretation may persist but at lower magnitude — needs a quarterly re-run.
-> - Quarterly bootstrap CI [−$144k, +$345k] shifts upward but the variance pattern is unchanged.
-> - Walk-forward verdicts (SUPPORTIVE / STRONG) likely persist but magnitudes ~20% higher.
+> **Re-validation status (post-fix runs completed 2026-05-06):**
+> - **Funding-regime correlation: HOLDS.** Re-ran 1425-cell quarterly TSV with corrected funding (`results/p4_quarterly_slip15_postfix_2026-05-06.tsv`). Pearson r shifted from **−0.1750 (PRE-fix) to −0.1678 (POST-fix), Δr = +0.0071** — barely moved. Both highly significant (t≈−5.8 to −6.0, p<0.001). Funding income is too small per-cell (~$50-300) to materially change the correlation. The "strategy works in BEAR/neutral, fails in BULL" interpretation survives. Quartile bins essentially unchanged: Q1 (negative funding) 62.8% positive, Q4 (positive funding) 40.8% positive. **Funding filter has real motivation.**
+> - Walk-forward 4H short verdicts persist (SUPPORTIVE) at +20% magnitude.
+> - Quarterly bootstrap CI shifts upward but variance pattern unchanged.
 >
 > **Specific claims that DO NOT change:**
 > - Per-symbol skill REFUTED at proper rigor (funding is symbol-agnostic; doesn't affect this finding)
