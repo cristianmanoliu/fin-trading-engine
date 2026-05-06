@@ -66,7 +66,7 @@ def main() -> None:
 
     print()
     print("=" * 110)
-    print("  WALK-FORWARD COMPARISON  (universe-57, shorts only, target_rr=6.0, fee=10bp, slip=15bp)")
+    print("  WALK-FORWARD COMPARISON  (universe-57, shorts only, target_rr=6.0, fee=10bp)")
     print(f"  {len(configs)} configurations × {len(all_windows)} windows")
     print("=" * 110)
     print()

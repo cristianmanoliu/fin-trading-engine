@@ -588,6 +588,24 @@ After the morning's "alpha decay" finding (n=1 OOS window) and the retracted "re
 
 5. **The strategy is highly variant under realistic costs.** 4H per-window range $-82k to $+504k illustrates why single-window OOS results — in either direction — are weak evidence. A pessimist looking at W3 would kill the strategy; an optimist looking at W2 would over-allocate. Both reads ignore the variance.
 
+### Slip-stress walk-forward (2026-05-06 follow-up)
+
+After the slip=15 baseline, ran 4H and 1D at slip=5 and slip=25 across the same 3 windows to test cost-robustness across windows (not just on the full 5y as the cost-survivor battery did).
+
+| TF | slip=5 | slip=15 | slip=25 |
+|---:|---|---|---|
+| **4H** | 3/3 pos, +$729k sum, **STRONG** | 2/3 pos, +$437k, SUPPORTIVE | 1/3 pos, +$146k, **REJECTED** |
+| **1D** | 2/3 pos, +$98k, SUPPORTIVE | 2/3 pos, +$85k, SUPPORTIVE | 2/3 pos, +$72k, SUPPORTIVE |
+
+**4H is slip-fragile.** STRONG at 5bp → SUPPORTIVE at 15bp → REJECTED at 25bp. The cost-survivor battery (full-5y, slip=25 +$369k) hid the per-window distribution: at slip=25 only W2 (in-sample, +$418k) carries the entire +$146k sum; W1 and W3 are both negative. So the deployed config's robustness depends on realized slippage landing closer to 5bp than to 25bp.
+
+**1D is slip-robust.** SUPPORTIVE at every slip level tested. Per-window magnitudes barely move ($24k → $33k as slip drops 25→5bp, vs 4H's $49k → $243k swing). 1D's lower per-trade cost surface (5x fewer trades, wider stops) absorbs cost shock far better than 4H.
+
+**What this means for sizing:**
+- Slip is a load-bearing assumption for 4H. If realized live slip exceeds 15bp the 4H deployment likely has no edge under multi-window scrutiny.
+- 1D would be a more conservative deployment alternative — lower magnitude (~$28k/yr expectation) but doesn't depend on hitting low-slip targets.
+- The cost-survivor battery's slip=25 finding was inflated relative to walk-forward because the 5y aggregate concealed the W1/W3 losses under the W2 win.
+
 ### What this changes vs the morning panic
 
 - **Doesn't change:** the deployed 4H configuration is NOT forward-validated, true OOS sample is still n=1, real-money allocation remains unjustified.
@@ -611,7 +629,8 @@ After the morning's "alpha decay" finding (n=1 OOS window) and the retracted "re
 - `scripts/walk_forward.sh` — multi-window runner (env-configurable TF/side/RR/slip)
 - `scripts/walk_forward_compare.py` — aggregates per-config results into comparison matrix
 - `results/walk_forward_{1H,2H,4H,1D}_short_rr6.0_slip15_2026-05-06.txt` — per-config raw output
-- `results/walk_forward_comparison_2026-05-06.txt` — combined comparison matrix
+- `results/walk_forward_{4H,1D}_short_rr6.0_slip{5,25}_2026-05-06.txt` — slip-stress raw output
+- `results/walk_forward_comparison_2026-05-06.txt` — combined 8-cell comparison matrix
 
 ## Forward-paper go/no-go criteria
 

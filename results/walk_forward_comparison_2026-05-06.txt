@@ -1,22 +1,30 @@
 
 ==============================================================================================================
-  WALK-FORWARD COMPARISON  (universe-57, shorts only, target_rr=6.0, fee=10bp, slip=15bp)
-  4 configurations × 3 windows
+  WALK-FORWARD COMPARISON  (universe-57, shorts only, target_rr=6.0, fee=10bp)
+  8 configurations × 3 windows
 ==============================================================================================================
 
   config                 sum_3yr    mean/yr  pos/N   2023-05_to_2024   2024-05_to_2025   2025-05_to_2026
   ------------------ ----------- ---------- ------  ----------------  ----------------  ----------------
   1D_short_rr6.0_slip15     +84,602    +28,200 2/3             -37,779           +65,093           +57,288
+  1D_short_rr6.0_slip25     +71,631    +23,877 2/3             -41,973           +60,594           +53,010
+  1D_short_rr6.0_slip5     +97,572    +32,524 2/3             -33,586           +69,592           +61,566
   1H_short_rr6.0_slip15  -5,283,419 -1,761,140 0/3          -2,122,085        -1,653,273        -1,508,061
   2H_short_rr6.0_slip15    -911,545   -303,849 1/3            -507,784          -412,732            +8,971
   4H_short_rr6.0_slip15    +437,496   +145,832 2/3             +14,897          +504,267           -81,668
+  4H_short_rr6.0_slip25    +145,511    +48,503 1/3             -85,427          +418,347          -187,409
+  4H_short_rr6.0_slip5    +729,479   +243,159 3/3            +115,221          +590,186           +24,072
 
   Verdict by configuration
   ------------------------------------------------------------------------------------------
     1D_short_rr6.0_slip15  2/3 positive, mean $+28,200/yr  →  SUPPORTIVE (positive majority + positive mean)
+    1D_short_rr6.0_slip25  2/3 positive, mean $+23,877/yr  →  SUPPORTIVE (positive majority + positive mean)
+    1D_short_rr6.0_slip5   2/3 positive, mean $+32,524/yr  →  SUPPORTIVE (positive majority + positive mean)
     1H_short_rr6.0_slip15  0/3 positive, mean $-1,761,140/yr  →  REJECTED (no window positive)
     2H_short_rr6.0_slip15  1/3 positive, mean $-303,849/yr  →  REJECTED (negative mean)
     4H_short_rr6.0_slip15  2/3 positive, mean $+145,832/yr  →  SUPPORTIVE (positive majority + positive mean)
+    4H_short_rr6.0_slip25  1/3 positive, mean $+48,503/yr  →  REJECTED (minority positive)
+    4H_short_rr6.0_slip5   3/3 positive, mean $+243,159/yr  →  STRONG (positive in ALL windows)
 
   Interpretation guide
   ------------------------------------------------------------------------------------------
