@@ -213,32 +213,69 @@ func (b *BinanceFuturesMulti) readLoop(
 	}()
 
 	consecutiveStalls := 0
-	const maxStalls = 5 // higher than single-symbol's 2 — combined stream represents
-	// 16 symbols, so giving up means everyone goes blind. Reconnect more aggressively.
+	const maxStalls = 5
 	backoff := time.Second
 	const maxBackoff = 30 * time.Second
+
+	// firstMsgGuard: after each (re)connect, if no message arrives within 60s,
+	// the connection landed on a zero-frame Tokyo backend. Force reconnect to
+	// re-roll DNS.
+	const zeroFrameTimeout = 60 * time.Second
+	connectTime := time.Now()
+	gotFirstMsg := false
 
 	for {
 		if ctx.Err() != nil {
 			return
 		}
 
+		// Zero-frame check.
+		if !gotFirstMsg && time.Since(connectTime) > zeroFrameTimeout {
+			slog.Warn("multi: zero-frame backend detected, forcing reconnect",
+				"connect_age", time.Since(connectTime).Round(time.Second))
+			b.connMu.Lock()
+			if b.conn != nil {
+				b.conn.Close()
+				b.conn = nil
+			}
+			b.connMu.Unlock()
+			if !b.reconnect(ctx) {
+				return
+			}
+			connectTime = time.Now()
+			gotFirstMsg = false
+			consecutiveStalls = 0
+			continue
+		}
+
 		b.connMu.Lock()
 		conn := b.conn
 		b.connMu.Unlock()
 		if conn == nil {
-			// Closed externally — reconnect.
 			if !b.reconnect(ctx) {
 				return
 			}
+			connectTime = time.Now()
+			gotFirstMsg = false
 			continue
 		}
 
-		conn.SetReadDeadline(time.Now().Add(wsReadDeadline))
+		// Use a short read deadline while waiting for first message so we
+		// re-check the zero-frame timer.
+		readTimeout := wsReadDeadline
+		if !gotFirstMsg {
+			readTimeout = 10 * time.Second
+		}
+		conn.SetReadDeadline(time.Now().Add(readTimeout))
 		_, msg, err := conn.ReadMessage()
 		if err != nil {
 			if ctx.Err() != nil {
 				return
+			}
+			// If we never received first msg, this might be the zero-frame
+			// case — let the top-of-loop check handle reconnect.
+			if !gotFirstMsg {
+				continue
 			}
 			consecutiveStalls++
 			slog.Warn("multi: ws read error",
@@ -248,7 +285,6 @@ func (b *BinanceFuturesMulti) readLoop(
 					"stalls", consecutiveStalls)
 				return
 			}
-			// Reconnect.
 			gapStart := time.Now()
 			b.connMu.Lock()
 			if b.conn != nil {
@@ -264,11 +300,14 @@ func (b *BinanceFuturesMulti) readLoop(
 			if !b.reconnect(ctx) {
 				return
 			}
+			connectTime = time.Now()
+			gotFirstMsg = false
 			slog.Info("multi: ws gap closed",
 				"duration", time.Since(gapStart).Round(time.Second))
 			continue
 		}
 
+		gotFirstMsg = true
 		consecutiveStalls = 0
 		backoff = time.Second
 
