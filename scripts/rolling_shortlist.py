@@ -20,6 +20,13 @@ from collections import defaultdict
 from pathlib import Path
 
 
+# DEPLOYED_32 is the persistent-winners-32 set from the 2026-05-05 cost-survivor
+# battery (symbols positive on both train AND test halves at slip=5bp). This is
+# an analysis snapshot used as the comparison baseline for the rolling-shortlist
+# experiment — NOT the current live deployed list (which is in configs/symbols.yaml
+# under `deployed`). The 32-name snapshot includes MKR and FTM which were later
+# delisted on Binance Futures (Sept 2025 and Jan 2025); their inclusion here is
+# historical, the live deploy uses the exchangeInfo-gated selection.
 DEPLOYED_32 = {
     "ROSEUSDT", "MKRUSDT", "GRTUSDT", "1INCHUSDT", "ADAUSDT", "KAVAUSDT",
     "1000SHIBUSDT", "ENSUSDT", "XLMUSDT", "ETCUSDT", "RUNEUSDT", "AVAXUSDT",

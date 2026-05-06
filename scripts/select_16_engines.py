@@ -18,11 +18,61 @@ Output: ranked 16 + cohort diagnostic.
 """
 from __future__ import annotations
 
+import json
+import os
 import re
 import sys
+import time
+import urllib.request
 from pathlib import Path
 
-DEPLOYED_32 = [
+
+def load_yaml_group(group: str, path: Path | None = None) -> list[str]:
+    """Read a named symbol group from configs/symbols.yaml.
+
+    Parser is deliberately dependency-free (no pyyaml) — handles only the simple
+    flat-list format we use. Mirrors scripts/lib/symbols.sh logic.
+    """
+    if path is None:
+        path = Path(__file__).resolve().parent.parent / "configs" / "symbols.yaml"
+    in_group = False
+    syms: list[str] = []
+    groups_seen: list[str] = []
+    for raw in path.read_text().splitlines():
+        line = raw.rstrip()
+        if "#" in line:
+            line = line[: line.index("#")].rstrip()
+        if not line.strip():
+            continue
+        if line[0] not in (" ", "\t") and line.rstrip().endswith(":"):
+            key = line.rstrip()[:-1]
+            groups_seen.append(key)
+            in_group = (key == group)
+            continue
+        if in_group:
+            stripped = line.strip()
+            if stripped.startswith("- "):
+                sym = stripped[2:].strip()
+                if sym:
+                    syms.append(sym)
+    if not syms and group not in groups_seen:
+        raise KeyError(f"group '{group}' not in {groups_seen}")
+    return syms
+
+
+# UNIVERSE is the full 57-symbol backtest pool (with comments documenting
+# delisted ones). Used for load_quarterly indexing.
+UNIVERSE = load_yaml_group("universe")
+
+# CANDIDATES is the persistent-winners-32 set: symbols with train+ AND test+
+# at slip=5bp in the 2026-05-05 cost-survivor battery. This is an analysis
+# snapshot, not current operational state — the train+test+ filter is itself
+# look-ahead but we accept it as the candidate pool here because (a) it
+# matches the existing deployed-16 selection and (b) "honest" rank-based
+# selection from the full universe would over-include regime flippers like
+# DYDX/ICP that have strongly-negative test halves. See
+# `## Train-only shortlist diagnostic (2026-05-06)` in CLAUDE.md.
+CANDIDATES = [
     "ROSEUSDT", "MKRUSDT", "GRTUSDT", "1INCHUSDT", "ADAUSDT", "KAVAUSDT",
     "1000SHIBUSDT", "ENSUSDT", "XLMUSDT", "ETCUSDT", "RUNEUSDT", "AVAXUSDT",
     "IMXUSDT", "DOTUSDT", "BCHUSDT", "FTMUSDT", "FILUSDT", "SOLUSDT",
@@ -30,6 +80,38 @@ DEPLOYED_32 = [
     "MANAUSDT", "AXSUSDT", "GALAUSDT", "ETHUSDT", "ENJUSDT", "LINKUSDT",
     "VETUSDT", "LDOUSDT",
 ]
+
+
+_TRADING_CACHE = Path("/tmp/binance_trading_symbols.json")
+_TRADING_TTL_SEC = 3600  # 1 hour
+
+
+def fetch_trading_symbols() -> dict[str, str]:
+    """Return {symbol: status} for all USDT-M futures contracts on Binance.
+
+    Cached on disk with 1h TTL so repeated runs don't hammer exchangeInfo.
+    Returns empty dict (no gating) if the API is unreachable — failure is
+    non-fatal so the operator can still iterate offline.
+    """
+    if _TRADING_CACHE.exists() and (time.time() - _TRADING_CACHE.stat().st_mtime) < _TRADING_TTL_SEC:
+        try:
+            return json.loads(_TRADING_CACHE.read_text())
+        except json.JSONDecodeError:
+            pass  # fall through and re-fetch
+
+    try:
+        with urllib.request.urlopen("https://fapi.binance.com/fapi/v1/exchangeInfo", timeout=10) as r:
+            data = json.loads(r.read())
+    except Exception as e:
+        sys.stderr.write(f"WARNING: exchangeInfo unreachable ({e}); skipping symbol-status gate\n")
+        return {}
+
+    statuses = {s["symbol"]: s["status"] for s in data.get("symbols", [])}
+    try:
+        _TRADING_CACHE.write_text(json.dumps(statuses))
+    except OSError:
+        pass  # cache write failure non-fatal
+    return statuses
 
 SYM_OOS = re.compile(
     r"^(?P<sym>[A-Z0-9]+USDT)\s+(?P<train>[+-]?\s*-?\d+)\s+(?P<test>[+-]?\s*-?\d+)\b"
@@ -62,7 +144,7 @@ def load_trade_counts(path: Path) -> dict[str, int]:
 
 def load_quarterly(path: Path) -> dict[str, list[int]]:
     """Returns {symbol: [net_q1, net_q2, ..., net_q21]}."""
-    out: dict[str, list[int]] = {s: [0] * 21 for s in DEPLOYED_32}
+    out: dict[str, list[int]] = {s: [0] * 21 for s in UNIVERSE}
     quarters = []
     for y in range(2020, 2026):
         last = 1 if y == 2025 else 4
@@ -99,8 +181,21 @@ def main() -> None:
     trades = load_trade_counts(root / "results/p4_combined_2026-05-05.txt")
     quarters = load_quarterly(root / "results/p4_quarterly_slip15_2026-05-06.tsv")
 
+    # exchangeInfo gate: drop any symbol that's not currently TRADING on Binance
+    # Futures (i.e. SETTLING, DELISTED, PENDING_TRADING). This prevents the
+    # 2026-05-06 MKR/FTM bug class where backtest-historical winners became
+    # silent failures in production after delisting.
+    trading_status = fetch_trading_symbols()
+    if trading_status:
+        excluded_by_gate = [s for s in CANDIDATES if trading_status.get(s, "UNKNOWN") != "TRADING"]
+        if excluded_by_gate:
+            print(f"  exchangeInfo gate excluded: {[(s, trading_status.get(s, 'UNKNOWN')) for s in excluded_by_gate]}")
+        candidates = [s for s in CANDIDATES if trading_status.get(s, "TRADING") == "TRADING"]
+    else:
+        candidates = list(CANDIDATES)
+
     rows = []
-    for sym in DEPLOYED_32:
+    for sym in candidates:
         tr5 = oos5.get(sym, (0, 0))[0]
         te5 = oos5.get(sym, (0, 0))[1]
         tr15 = oos15.get(sym, (0, 0))[0]

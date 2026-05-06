@@ -4,13 +4,9 @@
 #   Omit host to read from ./logs/journal/ locally.
 set -euo pipefail
 
-# 32 OOS-validated symbols deployed 2026-05-05 (Strategy B).
-SYMBOLS=(
-    ROSEUSDT MKRUSDT GRTUSDT 1INCHUSDT ADAUSDT KAVAUSDT 1000SHIBUSDT ENSUSDT
-    XLMUSDT ETCUSDT RUNEUSDT AVAXUSDT IMXUSDT DOTUSDT BCHUSDT FTMUSDT
-    FILUSDT SOLUSDT CRVUSDT AAVEUSDT APTUSDT SNXUSDT NEARUSDT APEUSDT
-    MANAUSDT AXSUSDT GALAUSDT ETHUSDT ENJUSDT LINKUSDT VETUSDT LDOUSDT
-)
+# Deployed symbol list — source of truth in configs/symbols.yaml `deployed`.
+source "$(dirname "${BASH_SOURCE[0]}")/lib/symbols.sh"
+read -ra SYMBOLS <<< "$(get_symbols deployed)"
 
 # Determine where journals live
 if [[ "${1:-}" == root@* ]] || [[ "${1:-}" == *@* ]]; then

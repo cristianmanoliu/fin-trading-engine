@@ -27,7 +27,11 @@ ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT / "data"
 OUT = ROOT / "results" / "symbol_characteristics.csv"
 
-SYMBOLS = "RUNEUSDT SOLUSDT BNBUSDT HBARUSDT IOTAUSDT TRXUSDT XLMUSDT LINKUSDT GRTUSDT FTMUSDT SNXUSDT APEUSDT BLURUSDT AAVEUSDT MKRUSDT VETUSDT ARBUSDT ATOMUSDT PYTHUSDT BTCUSDT ENJUSDT 1INCHUSDT NEARUSDT KAVAUSDT AVAXUSDT TIAUSDT ETHUSDT DOTUSDT XRPUSDT GMXUSDT BCHUSDT ZILUSDT LDOUSDT DYDXUSDT UNIUSDT DOGEUSDT SEIUSDT 1000SHIBUSDT IMXUSDT INJUSDT ROSEUSDT GALAUSDT MANAUSDT OPUSDT ICPUSDT AXSUSDT ENSUSDT SUIUSDT WLDUSDT ADAUSDT FILUSDT SANDUSDT CHZUSDT LTCUSDT APTUSDT ETCUSDT CRVUSDT".split()
+# Reuse the same dependency-free YAML reader as scripts/select_16_engines.py
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from select_16_engines import load_yaml_group  # noqa: E402
+
+SYMBOLS = load_yaml_group("universe")
 
 
 def read_symbol_daily(symbol: str) -> list[tuple[int, float, float, float]]:

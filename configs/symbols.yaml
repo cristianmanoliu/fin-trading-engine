@@ -1,0 +1,118 @@
+# Single source of truth for all symbol-list references in this repo.
+# Read by:
+#   - scripts/lib/symbols.sh (bash helper)
+#   - scripts/select_16_engines.py, scripts/rolling_shortlist.py (Python)
+#   - scripts/paper_live_watchdog.sh (via lib/symbols.sh)
+#   - All backtest/sweep scripts in scripts/ (via lib/symbols.sh)
+#
+# Update process when adding/removing symbols:
+#   1. Edit this file (only)
+#   2. Run scripts/select_16_engines.py to verify the deployed list still passes
+#      the exchangeInfo gate
+#   3. Restart affected systemd units on VPS if `deployed` changed
+
+# Universe used for backtests, sweeps, and as the candidate pool for selection.
+# Source: cost-survivor battery 2026-05-05, 57 symbols with ≥3y of Binance Futures
+# data. Includes some now-delisted symbols (MKR, FTM) — kept here for historical
+# backtest reproducibility. The exchangeInfo gate in select_16_engines.py
+# excludes delisted symbols from any DEPLOYED selection.
+universe:
+  - 1000SHIBUSDT
+  - 1INCHUSDT
+  - AAVEUSDT
+  - ADAUSDT
+  - APEUSDT
+  - APTUSDT
+  - ARBUSDT
+  - ATOMUSDT
+  - AVAXUSDT
+  - AXSUSDT
+  - BCHUSDT
+  - BLURUSDT
+  - BNBUSDT
+  - BTCUSDT
+  - CHZUSDT
+  - CRVUSDT
+  - DOGEUSDT
+  - DOTUSDT
+  - DYDXUSDT
+  - ENJUSDT
+  - ENSUSDT
+  - ETCUSDT
+  - ETHUSDT
+  - FILUSDT
+  - FTMUSDT      # delisted 2025-01 (Fantom→Sonic rebrand) — backtest only
+  - GALAUSDT
+  - GMXUSDT
+  - GRTUSDT
+  - HBARUSDT
+  - ICPUSDT
+  - IMXUSDT
+  - INJUSDT
+  - IOTAUSDT
+  - KAVAUSDT
+  - LDOUSDT
+  - LINKUSDT
+  - LTCUSDT
+  - MANAUSDT
+  - MKRUSDT      # delisted 2025-09 — backtest only
+  - NEARUSDT
+  - OPUSDT
+  - PYTHUSDT
+  - ROSEUSDT
+  - RUNEUSDT
+  - SANDUSDT
+  - SEIUSDT
+  - SNXUSDT
+  - SOLUSDT
+  - SUIUSDT
+  - TIAUSDT
+  - TRXUSDT
+  - UNIUSDT
+  - VETUSDT
+  - WLDUSDT
+  - XLMUSDT
+  - XRPUSDT
+  - ZILUSDT
+
+# Currently deployed on Hetzner CX23 paper-live VPS as paper-live@<symbol>.service
+# units. Selected via scripts/select_16_engines.py: train-only top-K from
+# universe with robustness gate (train_NET > 0 at slip=25bp) AND exchangeInfo
+# gate (status == TRADING). Last edit: 2026-05-06 swap MKR→BCH, FTM→APT after
+# both flagged SETTLING.
+deployed:
+  - ROSEUSDT
+  - BCHUSDT
+  - GRTUSDT
+  - 1INCHUSDT
+  - ADAUSDT
+  - KAVAUSDT
+  - 1000SHIBUSDT
+  - ENSUSDT
+  - XLMUSDT
+  - IMXUSDT
+  - ETCUSDT
+  - RUNEUSDT
+  - AVAXUSDT
+  - APTUSDT
+  - DOTUSDT
+  - FILUSDT
+
+# Persistent OOS losers (negative on both train 2020-2022 and test 2023-2025).
+# Excluded from any deployed selection.
+persistent_losers:
+  - BTCUSDT
+  - CHZUSDT
+  - SANDUSDT
+  - TRXUSDT
+  - UNIUSDT
+  - XRPUSDT
+
+# Train-WIN, Test-LOSS regime-flip casualties from 2026-05-06 train-only
+# diagnostic. Documentation only — already excluded by deployment selection
+# (which uses train+test+ filter or train-only ranking + slip-25 robustness).
+regime_flippers:
+  - DYDXUSDT
+  - ICPUSDT
+  - DOGEUSDT
+  - INJUSDT
