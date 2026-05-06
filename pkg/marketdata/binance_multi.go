@@ -272,9 +272,17 @@ func (b *BinanceFuturesMulti) readLoop(
 			if ctx.Err() != nil {
 				return
 			}
-			// If we never received first msg, this might be the zero-frame
-			// case — let the top-of-loop check handle reconnect.
+			// If we never received first msg, close the conn so the top-of-loop
+			// conn-nil check (or zero-frame check) triggers reconnect.
+			// CRITICAL: gorilla/websocket panics with "repeated read on failed websocket
+			// connection" if we call ReadMessage twice on a failed conn without closing.
 			if !gotFirstMsg {
+				b.connMu.Lock()
+				if b.conn != nil {
+					b.conn.Close()
+					b.conn = nil
+				}
+				b.connMu.Unlock()
 				continue
 			}
 			consecutiveStalls++
