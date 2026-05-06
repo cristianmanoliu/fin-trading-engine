@@ -70,7 +70,7 @@ for symbol in "${SYMBOLS[@]}"; do
     [[ -f "$log" ]] || continue
 
     # ── Stale heartbeat check ─────────────────────────────────────────────────
-    last_hb_line=$(grep '"heartbeat"' "$log" 2>/dev/null | tail -1 || true)
+    last_hb_line=$(grep '"msg":"heartbeat' "$log" 2>/dev/null | tail -1 || true)
     if [[ -n "$last_hb_line" ]]; then
         # last_tick_age is in nanoseconds in the JSON
         age_ns=$(echo "$last_hb_line" | grep -o '"last_tick_age":[0-9]*' | cut -d: -f2 || echo 0)
