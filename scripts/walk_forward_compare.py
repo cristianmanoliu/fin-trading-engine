@@ -51,10 +51,19 @@ def main() -> None:
         paths = sorted((root / "results").glob("walk_forward_*.txt"))
 
     configs = []
+    seen_labels: dict[str, int] = {}
     for p in paths:
         parsed = parse_one(p)
         if parsed:
             parsed["source"] = p.name
+            base_label = parsed["label"]
+            # Disambiguate identical labels by inferring universe from filename
+            # e.g. "walk_forward_4H_deployed16_slip15..." → "4H_short_rr6.0_slip15_deployed16"
+            for tag in ("deployed16", "universe57", "deployed", "universe"):
+                if tag in p.name:
+                    parsed["label"] = f"{base_label}_{tag}"
+                    break
+            seen_labels[parsed["label"]] = seen_labels.get(parsed["label"], 0) + 1
             configs.append(parsed)
 
     if not configs:

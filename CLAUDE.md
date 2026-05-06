@@ -588,6 +588,25 @@ After the morning's "alpha decay" finding (n=1 OOS window) and the retracted "re
 
 5. **The strategy is highly variant under realistic costs.** 4H per-window range $-82k to $+504k illustrates why single-window OOS results — in either direction — are weak evidence. A pessimist looking at W3 would kill the strategy; an optimist looking at W2 would over-allocate. Both reads ignore the variance.
 
+### Deployed-16 walk-forward (2026-05-06 follow-up)
+
+The above used universe-57. The actually-running engines are on the deployed-16 subset (train-only top-K + slip-25 robustness gate). Re-ran walk-forward on the deployed-16 to test whether the selection is operationally meaningful or just adds noise.
+
+| TF | W1 (in-sample) | W2 (in-sample) | W3 (true OOS) | sum 3yr | mean/yr | pos/3 | Verdict |
+|---:|---:|---:|---:|---:|---:|:---:|---|
+| **4H deployed-16** | −$5.7k | +$219k | **+$48k** | +$261k | **+$87k** | 2 | SUPPORTIVE |
+| 4H universe-57 | +$15k | +$504k | −$82k | +$437k | +$146k | 2 | SUPPORTIVE |
+| **1D deployed-16** | −$4.8k | +$21k | **+$36k** | +$52k | +$17k | 2 | SUPPORTIVE |
+| 1D universe-57 | −$38k | +$65k | +$57k | +$85k | +$28k | 2 | SUPPORTIVE |
+
+**Critical observation:** the deployed-16 subset POSITIVE on the true OOS W3 (+$48k at 4H, +$36k at 1D) — opposite sign from the universe-57 W3 result (−$82k at 4H). The selection's slip-25 robustness gate filtered out some of the W3 losers from the universe.
+
+**Caveat — this could be data mining:** the deployed-16 was selected with knowledge of 2020-2025 backtest data. The fact that it happened to also do well on the never-seen W3 is suggestive but not conclusive. With one true-OOS window we can't tell if this is "the selection captured robust signal" or "the selection got lucky on W3 specifically". Need more truly-OOS windows (i.e. calendar time) to distinguish.
+
+**Magnitude trade-off:** deployed-16 has 60% the mean PnL of universe-57 (4H: $87k vs $146k/yr) but appears more robust on W3. This is consistent with the original selection rationale — exclude high-variance/high-mean symbols in favor of robust-in-train ones.
+
+**Operational implication:** the running 16 engines have a SUPPORTIVE walk-forward verdict on both 4H (deployed config) and 1D (alternative). Trade rate calibration: 4H deployed-16 averages ~1.5 trades/day across all 16 (534/546/571 trades per 12-month window ÷ 365 days). At 1D it's ~0.18 trades/day — roughly one signal every 5-6 days across the entire deployed universe.
+
 ### Slip-stress walk-forward (2026-05-06 follow-up)
 
 After the slip=15 baseline, ran 4H and 1D at slip=5 and slip=25 across the same 3 windows to test cost-robustness across windows (not just on the full 5y as the cost-survivor battery did).

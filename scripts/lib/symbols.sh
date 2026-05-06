@@ -14,7 +14,19 @@
 # flat-list YAML format manually to keep this dependency-free).
 # Source: configs/symbols.yaml relative to repo root.
 
-_SYMBOLS_YAML="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/configs/symbols.yaml"
+# Resolve our own path in a shell-portable way. BASH_SOURCE only exists in bash;
+# in zsh ${(%):-%x} is the equivalent. Fall back to $0 (works when sourced from
+# a script with a known $0). We do this once at source time and cache the result.
+if [[ -n "${BASH_SOURCE[0]:-}" ]]; then
+    _SYMBOLS_LIB_SELF="${BASH_SOURCE[0]}"
+elif [[ -n "${ZSH_VERSION:-}" ]]; then
+    # zsh — %x expands to the path of the file currently being sourced
+    _SYMBOLS_LIB_SELF="${(%):-%x}"
+else
+    _SYMBOLS_LIB_SELF="$0"
+fi
+_SYMBOLS_YAML="$(cd "$(dirname "$_SYMBOLS_LIB_SELF")/../.." && pwd)/configs/symbols.yaml"
+unset _SYMBOLS_LIB_SELF
 
 get_symbols() {
     local group="${1:?get_symbols: group name required (universe | deployed | persistent_losers | regime_flippers)}"
