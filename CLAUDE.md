@@ -49,7 +49,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 > - Implication: the strategy is real (structural edge confirmed), stable (no decay), but uncertainty in magnitude is unavoidable. Real-money sizing must be conservative; forward-paper alone cannot resolve magnitude uncertainty.
 > See `## Quarterly mechanism analysis (2026-05-06)` below for tests, drawdown table, and bootstrap details.
 >
-> **6. Simulator code audit (2026-05-06):** independent audit of the backtest simulator (Categories A-G: PnL symmetry, EMA detection, wick stop, funding sign, fee/slippage, same-bar resolution, open-event accounting). **NO critical bugs found.** All long/short handling is symmetric. The shorts-vs-longs asymmetry is structural, not a code artifact. Reinforces confidence in load-bearing findings.
+> **6. Simulator code audit (2026-05-06):** independent audit of the backtest simulator (Categories A-G: PnL symmetry, EMA detection, wick stop, funding sign, fee/slippage, same-bar resolution, open-event accounting). **NO critical bugs found.** All long/short handling is symmetric. Reinforces confidence in load-bearing findings.
+>
+> **7. Funding-regime + 1D both-sides discoveries (2026-05-06):** two findings that materially change the strategy picture:
+> - **Funding-rate regime conditioning:** strategy NET correlates negatively with funding rate at r=−0.175, t=−6.03, p<0.0001 (1153 cells). Higher funding (BULL regime) → strategy loses; lower funding (BEAR/neutral) → strategy wins. The "structural shorts-asymmetry" interpretation is OVERTURNED — the strategy is actually REGIME-CONDITIONED bear-regime momentum following.
+> - **1D longs WORK** (REJECTED at 4H, SUPPORTIVE at 1D). 1D longs win in BULL regimes (W1 +$142k), shorts win in BEAR/neutral. **1D both-sides is regime-balanced: STRONG (3/3 positive) at slip≤15bp, SUPPORTIVE at slip=25.** First config to be W3-positive on universe-57 at slip=15. Lower magnitude (+$65k/yr vs +$146k for 4H shorts) but slip-robust and regime-balanced.
+> - **Strategic implication:** the deployed config (4H shorts) is a directional bet on bear/neutral regimes. **1D both-sides is a serious deployment alternative** — different magnitude/risk profile, more robust. Could also run both in paper to compare during forward window. Funding filter on 4H shorts (only enter when funding < threshold) is another untested option.
+> - See `## Funding-regime + 1D both-sides discoveries (2026-05-06)` below.
 
 ## Current state (2026-05-06, post-walk-forward — high-variance, see ⚠️ banner above for walk-forward re-framing)
 
@@ -833,6 +839,93 @@ Pairwise symbol correlation across 25 quarters: avg +0.182, median +0.190. With 
 ### Methodological note: simulator audit
 
 A code audit of the simulator was performed (Categories A-G: PnL symmetry, EMA crossover detection, wick stop computation, funding accrual, fee/slippage application, same-bar resolution, open-event accounting). **No critical bugs found.** All long/short handling is symmetric. The shorts-vs-longs asymmetry is structural (mechanistic), NOT a code artifact. The only documented "issues": max-hold force-close skips slippage on winners (cosmetic, ~1-2% of NET, affects both sides equally) and longs-only PessimisticAmbiguous protection (immaterial — zero ambiguous bars detected in practice). The bug audit reinforces confidence that the load-bearing findings are real.
+
+## Funding-regime + 1D both-sides discoveries (2026-05-06)
+
+After the quarterly mechanism analysis refuted decay and confirmed irreducible uncertainty, ran two more investigations that materially change the strategy picture: (a) funding-rate regime conditioning, (b) long-side at 1D timeframe.
+
+### Finding F1 — Strategy NET is significantly negatively correlated with funding rate
+
+Per-cell correlation (1153 symbol-quarter cells, 4H short P4-Combined):
+
+**Pearson r(funding_rate, NET) = −0.175, t = −6.03 (p < 0.0001)**
+
+| funding bin | n | avg funding | avg NET/cell | sum NET | pos % |
+|---|---:|---:|---:|---:|---:|
+| Q1 (most negative, BEAR) | 288 | −0.000118 | +$2,564 | +$738k | 62.5% |
+| Q2 | 288 | +0.000034 | +$1,589 | +$458k | 57.3% |
+| Q3 | 288 | +0.000084 | −$418 | −$120k | 46.9% |
+| Q4 (most positive, BULL) | 289 | +0.000298 | −$1,453 | −$420k | 38.8% |
+
+Strategy NET drops monotonically as funding rate rises. Worst quarters by NET (2021-Q1, 2023-Q4, 2024-Q1) are also the highest-funding quarters in the dataset — bull regimes whipsaw the bearish EMA crossovers without follow-through.
+
+**This OVERTURNS the structural shorts-asymmetry interpretation from the 3-window mechanism analysis.** The strategy isn't exploiting an evergreen short-side skew — it's exploiting bear/neutral regime momentum-following with the short side. In bull regimes (high funding), bearish EMA crosses fire spuriously and the strategy loses.
+
+### Finding F2 — 1D longs WORK at the same TF where 4H longs fail
+
+Walk-forward at 1D long-side, slip=15:
+
+| Window | NET | Trades | WR |
+|---|---:|---:|---:|
+| W1 (in-sample, BULL avg_funding +0.000116) | **+$142k** | 221 | 35.29% |
+| W2 (in-sample, neutral avg +0.000052) | +$12k | 264 | 17.05% |
+| W3 (true OOS, mild-BEAR avg −0.000021) | −$47k | 241 | 22.82% |
+| 3-window sum | **+$107k** | | |
+| Verdict | **SUPPORTIVE** | | |
+
+**At 4H, longs are universally REJECTED (−$643k sum). At 1D, longs are SUPPORTIVE (+$107k sum).** The TF difference matters because:
+- 4H long signals fire in noise — too many spurious bearish-to-bullish crossovers that don't follow through
+- 1D long signals are cleaner — fewer signals, but each represents a multi-day momentum shift
+
+Crucially, 1D longs have the OPPOSITE regime conditioning to shorts:
+- 1D longs win in W1 (highest funding, BULL) → +$142k
+- 1D longs lose in W3 (lowest funding, BEAR) → −$47k
+
+This confirms the regime-dependence story across both sides: at 1D, **longs win bull regimes, shorts win bear/neutral regimes**.
+
+### Finding F3 — 1D BOTH-sides is the most robust configuration found
+
+Combining 1D longs + shorts (--side-filter both) at 1D timeframe:
+
+| Slip | W1 | W2 | W3 | Sum | Mean/yr | Verdict |
+|---:|---:|---:|---:|---:|---:|---|
+| 5bp | +$115k | +$93k | **+$13k** | +$221k | +$74k | **STRONG (3/3)** |
+| 15bp | +$107k | +$83k | **+$4k** | +$194k | +$65k | **STRONG (3/3)** |
+| 25bp | +$99k | +$74k | −$5k | +$167k | +$56k | SUPPORTIVE (2/3) |
+
+**1D both-sides is positive in W3 (true OOS) at slip ≤ 15bp.** This is the FIRST configuration tested that achieves W3-positive at universe-57 slip=15. WR is consistently 25-29% across all windows. Slip degradation is gradual ($221k → $194k → $167k vs 4H short's $729k → $437k → $146k).
+
+Compare deployed config to 1D both-sides:
+
+| Property | 4H shorts (deployed) | 1D both-sides (alternative) |
+|---|---|---|
+| Walk-forward verdict @ slip=15 | SUPPORTIVE (2/3) | **STRONG (3/3)** |
+| W3 true OOS @ slip=15 | −$82k | **+$4k** |
+| Mean/yr @ slip=15 | +$146k | +$65k (lower magnitude) |
+| Slip robustness | FRAGILE (REJECTED at slip=25) | **ROBUST (SUPPORTIVE at slip=25)** |
+| Trade count / 12 mo | 1,983 | 393–508 |
+| WR | 18.91% | 25.98% |
+| Regime-conditioning | bear/neutral only | both sides covered |
+
+### What this means strategically
+
+**The deployed config (4H shorts) is a regime-conditional bet on bear/neutral markets.** It captures 2-3× the magnitude of 1D both-sides when the regime cooperates, but loses materially when the regime is bullish (W3 −$82k, all of 2023-Q4 −$387k, 2024-Q1 −$140k).
+
+**The 1D both-sides config is the regime-balanced alternative.** Lower magnitude but positive in all 3 windows including the true OOS, and slip-robust. Trade rate at 1D is much lower (~1.3 trades/day across all 57 symbols at 1D both = ~0.02 trades/symbol/day) — would not stress rate limits even on a single VPS for the full universe.
+
+**Possible deployment paths going forward:**
+1. **Stay with 4H shorts** (current): higher headline magnitude, regime risk, 5× drawdown vs annual expectation
+2. **Switch to 1D both-sides**: lower magnitude, regime-balanced, slip-robust, 3/3 walk-forward win
+3. **Run both in parallel** (paper): compare regimes as they unfold; switch based on observed regime
+4. **Funding filter on 4H shorts**: only enter shorts when funding is below threshold (e.g., <0.0001 per 8h = ~0.03% per day). Untested — would require code change in cmd/engine.
+
+### Files
+
+- `scripts/walk_forward.sh` (existing) used with `SIDE_FILTER=long` and `SIDE_FILTER=both` at 1D
+- `results/walk_forward_1D_long_rr6.0_slip{5,15,25}_2026-05-06.txt` — long-side slip stress
+- `results/walk_forward_1D_both_rr6.0_slip{5,15,25}_2026-05-06.txt` — both-sides slip stress
+- `results/walk_forward_4H_long_rr6.0_slip15_2026-05-06.txt` — 4H longs baseline (REJECTED)
+- `results/funding_regime_analysis_2026-05-06.txt` — full funding-rate correlation analysis
 
 ## Forward-paper go/no-go criteria
 

@@ -1,0 +1,29 @@
+
+════════════════════════════════════════════════════════════════════════════════════════
+  WALK-FORWARD VALIDATION  1D_long_rr6.0_slip15
+  Config: signal_tf=1D  side=long  target_rr=6.0  slip=15bp
+  Costs: --fee-bps=10  --stop-slippage-bps=15  funding=CSV  max_hold=336h
+  Universe: 57 symbols
+════════════════════════════════════════════════════════════════════════════════════════
+
+Window                            NET   Trades      WR%  Profitable
+------                            ---   ------      ---  ----------
+W1_2023-05_to_2024-04         +142390      221   35.29%  42/56 sym profitable
+W2_2024-05_to_2025-04          +11864      264   17.05%  29/57 sym profitable
+W3_2025-05_to_2026-04          -47191      241   22.82%  21/56 sym profitable
+
+  Aggregate
+  ────────────────────────────────────────────────────────────────────────────
+    Sum NET across 3 windows: +107063
+    Mean NET per window:       +35687
+    Positive windows:          2/3
+
+  Verdict
+  ────────────────────────────────────────────────────────────────────────────
+    SUPPORTIVE — positive in majority of windows AND mean > 0
+    (one losing window is consistent with normal regime variance, NOT a free pass)
+
+  Caveat: each window is ONE regime sample. With n=3 windows, a
+  STRONG/SUPPORTIVE verdict is HYPOTHESIS-STRENGTH evidence — not proof of
+  forward edge. Multiple-comparison adjustment applies when many configs are
+  tested. The framework is designed to REJECT, not to validate.

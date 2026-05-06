@@ -1,0 +1,28 @@
+FUNDING-REGIME CORRELATION ANALYSIS
+======================================================================
+Sample: 1153 symbol-quarter cells (universe-57 × 25 quarters, 4H short P4)
+Pearson correlation r(funding_rate, NET) = -0.1750
+t-statistic = -6.03 (df = 1151)
+p-value < 0.0001 (HIGHLY SIGNIFICANT)
+
+Quartile bins by funding rate (per-cell):
+bin                        n     avg_funding      avg_NET        sum_NET    pos %
+--------------------------------------------------------------------------------
+Q1 (most negative)       288       -0.000118 $     +2,564 $   +738,466.0    62.5%
+Q2                       288       +0.000034 $     +1,589 $   +457,664.0    57.3%
+Q3                       288       +0.000084 $       -418 $   -120,443.0    46.9%
+Q4 (most positive)       289       +0.000298 $     -1,453 $   -420,057.0    38.8%
+
+INTERPRETATION:
+  Strategy NET is NEGATIVELY correlated with funding rate (r=-0.175).
+  Higher funding (bull regime, longs paying) → LOWER strategy NET.
+  Lower funding (bear/neutral) → HIGHER strategy NET.
+
+  This OVERTURNS the structural shorts-asymmetry hypothesis from the
+  3-window mechanism analysis. The strategy is REGIME-CONDITIONED:
+  short-side EMA crossovers follow through in bear/neutral regimes,
+  whipsaw in bull regimes. Combined with the 1D long-side finding
+  (longs work where shorts don't), this implies:
+  - 4H shorts: works in BEAR/NEUTRAL, fails in BULL
+  - 1D longs:  works in BULL, fails in BEAR (W1 +$142k vs W3 -$47k)
+  - 1D BOTH:   regime-balanced (positive in all 3 windows W1/W2/W3)
