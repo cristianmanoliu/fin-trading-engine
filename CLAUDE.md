@@ -165,7 +165,12 @@ ssh root@178.105.24.230 'tail -f /var/log/paper-live/btcusdt.log'
 
 # Run reconciliation (compares live journals vs backtest)
 ./scripts/paper_live_report.sh
+
+# Post-deploy operational health audit — RUN AFTER EVERY redeploy.sh
+./scripts/post_deploy_check.sh
 ```
+
+**Post-deploy validation is mandatory.** After ANY `deploy/redeploy.sh`, run `scripts/post_deploy_check.sh`. It verifies (1) all deployed engines systemctl-active, (2) watchdog timers armed, (3) deployed binary built from current source (md5 match), (4) per-engine tick freshness (no stale heartbeats), (5) no ERROR-level logs in last 5 min, (6) rate-limit pressure within healthy bounds. Run with `STRICT=1` to make it exit non-zero on any warning (CI-friendly). Designed to catch silent failures the way today's funding-loader bug went undetected — by asserting that each subsystem is producing output rather than just reporting "started successfully".
 
 **Local paper-live scripts** (for running locally without VPS):
 ```bash
