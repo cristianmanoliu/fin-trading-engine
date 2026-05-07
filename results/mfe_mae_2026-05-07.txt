@@ -1,0 +1,66 @@
+MFE/MAE DECOMPOSITION — exit-policy diagnostic for deployed-16 candidate
+================================================================================
+journal dir: /Users/cristianmanoliu/Main/source.code/github/trading-engine/results/hod_journals/2026-05-07-mfe
+trades:      2,210
+outcomes:    STOP=1726, TARGET=484
+total NET:   $+687,072  (491/2210 wins, WR=22.2%)
+
+PERCENTILES of MFE_R / MAE_R per outcome bucket:
+  outcome           n  metric  p10  p25  p50  p75  p90  p95  p99
+  ------------  -----  ------  ----  ----  ----  ----  ----  ----  ----
+  STOP           1726  MFE_R   0.12  0.32  0.81  1.78  3.47  4.35  5.55
+  STOP           1726  MAE_R   1.00  1.01  1.03  1.09  1.19  1.28  1.58
+  TARGET          484  MFE_R   3.94  6.01  6.07  6.26  6.62  7.20  8.37
+  TARGET          484  MAE_R   0.07  0.22  0.47  0.74  0.89  0.96  0.99
+
+P(MFE_R ≥ T | STOP) — fraction of 1726 losses that reached T·R favorable
+before reversing. Each such trade is a candidate for partial-TP rescue at T:
+
+   T (R)   count   fraction       best-case ΔNET per loss
+  ------  ------  ---------  ----------------------------
+    0.5     1110     64.3%   $+1.25R per rescued loss
+    1.0      752     43.6%   $+1.50R per rescued loss
+    1.5      537     31.1%   $+1.75R per rescued loss
+    2.0      375     21.7%   $+2.00R per rescued loss
+    2.5      291     16.9%   $+2.25R per rescued loss
+    3.0      216     12.5%   $+2.50R per rescued loss
+    4.0      115      6.7%   $+3.00R per rescued loss
+    5.0       54      3.1%   $+3.50R per rescued loss
+
+COUNTERFACTUAL — partial 50% at +T·R, stop-to-BE on remainder:
+  Per-trade expected ΔR = -WR×(3 - T/2)  +  (1-WR)×P(MFE≥T|STOP)×(T/2 + 1)
+  WR = 0.222  (deployed-16, 5y)
+
+  1R ≈ $1,065  (mean abs loss after fees/slip)
+  baseline NET: $+687,072  (644.9 R aggregate)
+
+     T   P(MFE≥T|STOP)   best-case ΔNET   best-case new NET   lift %
+  ----  --------------  ---------------  ------------------  -------
+  0.5           64.3%   $      +33,689   $        +720,761     +4.9%  *
+  1.0           43.6%   $     -110,875   $        +576,197    -16.1%
+  1.5           31.1%   $     -179,842   $        +507,230    -26.2%
+  2.0           21.7%   $     -250,400   $        +436,672    -36.4%
+  2.5           16.9%   $     -220,692   $        +466,380    -32.1%
+  3.0           12.5%   $     -211,673   $        +475,399    -30.8%
+  4.0            6.7%   $     -157,031   $        +530,041    -22.9%
+  5.0            3.1%   $      -61,008   $        +626,063     -8.9%
+
+  * = highest best-case lift
+
+MAE_R distribution for TARGET wins (484 trades) — how close
+did winners come to stopping out before turning around?
+  P(MAE_R ≥ 0.3 | TARGET) = 66.3%
+  P(MAE_R ≥ 0.5 | TARGET) = 47.3%
+  P(MAE_R ≥ 0.7 | TARGET) = 29.3%
+  P(MAE_R ≥ 0.8 | TARGET) = 19.4%
+  P(MAE_R ≥ 0.9 | TARGET) =  9.5%
+  → Tighter stop at K·R would kill 9.5% of these wins (at K=0.9).
+
+================================================================================
+VERDICT
+================================================================================
+✓ Only 21.7% of STOP losses reach MFE_R ≥ 2.0 — below the 28.6%
+  best-case breakeven for partial-TP at 2R.
+  → 6:1 fixed-RR is empirically near-optimal for this strategy.
+  → Position-management is NOT the holy grail; explore HG2 (funding asymmetry)
+    or HG3 (winner-profile classifier) instead.

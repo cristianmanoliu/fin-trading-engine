@@ -140,18 +140,23 @@ type Stub struct {
 }
 
 type journalEntry struct {
-	Event     string  `json:"event"`      // "open" or "close"
-	Symbol    string  `json:"symbol"`
-	TS        string  `json:"ts"`         // RFC3339 UTC
-	Side      string  `json:"side"`
-	Entry     float64 `json:"entry"`
-	Exit      float64 `json:"exit,omitempty"`
-	Stop      float64 `json:"stop"`
-	Target    float64 `json:"target"`
-	PnlPts    float64 `json:"pnl_pts,omitempty"`
-	PnlUSD    float64 `json:"pnl_usd,omitempty"`
-	Outcome   string  `json:"outcome,omitempty"` // "TARGET" or "STOP"
-	Reason    string  `json:"reason"`
+	Event   string  `json:"event"` // "open" or "close"
+	Symbol  string  `json:"symbol"`
+	TS      string  `json:"ts"` // RFC3339 UTC
+	Side    string  `json:"side"`
+	Entry   float64 `json:"entry"`
+	Exit    float64 `json:"exit,omitempty"`
+	Stop    float64 `json:"stop"`
+	Target  float64 `json:"target"`
+	PnlPts  float64 `json:"pnl_pts,omitempty"`
+	PnlUSD  float64 `json:"pnl_usd,omitempty"`
+	Outcome string  `json:"outcome,omitempty"` // "TARGET" or "STOP" or "PARTIAL"
+	Reason  string  `json:"reason"`
+	// MFE/MAE in R-multiples — peak favorable / adverse excursion since entry.
+	// Captured in close events only (open=0). Used for exit-policy counterfactual
+	// analysis: any trade with MFE_R ≥ T would have triggered a partial-TP at T.
+	MFER float64 `json:"mfe_r,omitempty"`
+	MAER float64 `json:"mae_r,omitempty"`
 }
 
 func (s *Stub) appendJournal(entry journalEntry) {
@@ -288,8 +293,10 @@ func (s *Stub) OnTick(tick models.Tick) {
 		s.position.MaxAdverse = tick.Price
 	}
 
-	// B1 trailing stop: update favorable-excursion watermark and ratchet stop.
-	if s.TrailingStopMode && s.position.OriginalStopDist > 0 {
+	// Track max favorable excursion (always — needed for MFE/MAE journal records
+	// regardless of TrailingStopMode). Pre-fix MFE was only updated when
+	// trailing-stop was on, so MFE was silently 0 in normal-exit journals.
+	if s.position.OriginalStopDist > 0 {
 		var favR float64
 		if sig.Side == models.Long {
 			favR = (tick.Price - sig.EntryPrice) / s.position.OriginalStopDist
@@ -299,6 +306,10 @@ func (s *Stub) OnTick(tick models.Tick) {
 		if favR > s.position.MaxFavorableR {
 			s.position.MaxFavorableR = favR
 		}
+	}
+
+	// B1 trailing stop: ratchet stop based on the MFE watermark we just updated.
+	if s.TrailingStopMode && s.position.OriginalStopDist > 0 {
 		interval := s.TrailIntervalR
 		if interval <= 0 {
 			interval = 1.0
@@ -461,6 +472,11 @@ func (s *Stub) recordPartialClose(exitPrice float64, exitTime time.Time, frac fl
 		holdSeconds: holdSeconds,
 		stopDistPct: stopDistPct,
 	})
+	maeR := 0.0
+	maeStopDist := math.Abs(sig.EntryPrice - sig.StopLoss)
+	if maeStopDist > 0 {
+		maeR = math.Abs(sig.EntryPrice-s.position.MaxAdverse) / maeStopDist
+	}
 	s.appendJournal(journalEntry{
 		Event:   "close",
 		Symbol:  s.Symbol,
@@ -474,6 +490,8 @@ func (s *Stub) recordPartialClose(exitPrice float64, exitTime time.Time, frac fl
 		PnlUSD:  math.Round(pnlUSDT*100) / 100,
 		Outcome: "PARTIAL",
 		Reason:  sig.Reason,
+		MFER:    math.Round(s.position.MaxFavorableR*1000) / 1000,
+		MAER:    math.Round(maeR*1000) / 1000,
 	})
 }
 
@@ -566,6 +584,11 @@ func (s *Stub) closePosition(exitPrice float64, exitTime time.Time, won bool) {
 		holdSeconds: holdSeconds,
 		stopDistPct: stopDistPct,
 	})
+	maeR := 0.0
+	maeStopDist := math.Abs(sig.EntryPrice - sig.StopLoss)
+	if maeStopDist > 0 {
+		maeR = math.Abs(sig.EntryPrice-s.position.MaxAdverse) / maeStopDist
+	}
 	s.appendJournal(journalEntry{
 		Event:   "close",
 		Symbol:  s.Symbol,
@@ -579,6 +602,8 @@ func (s *Stub) closePosition(exitPrice float64, exitTime time.Time, won bool) {
 		PnlUSD:  math.Round(pnlUSDT*100) / 100,
 		Outcome: outcome,
 		Reason:  sig.Reason,
+		MFER:    math.Round(s.position.MaxFavorableR*1000) / 1000,
+		MAER:    math.Round(maeR*1000) / 1000,
 	})
 	s.position = nil
 }
