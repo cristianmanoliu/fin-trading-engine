@@ -3,6 +3,7 @@ package strategy
 import (
 	"context"
 	"log/slog"
+	"time"
 
 	"github.com/cristianmanoliu/trading-engine/pkg/indicators"
 	"github.com/cristianmanoliu/trading-engine/pkg/models"
@@ -44,15 +45,36 @@ type Runner struct {
 	// pkg/strategy/funding_filter.go. nil = disabled (default).
 	fundingFilter *FundingFilter
 
+	// liveMode gates evaluateEntry to suppress signals from candles whose CloseTime
+	// is more than backfillStaleness in the past. Set true via SetLiveMode in
+	// cmd/engine; cmd/backtest leaves it false so historical CSV replay produces signals.
+	// Without this gate, paginated backfill (96h × 60 1m klines) would prime EMA21
+	// mid-backfill and emit signals at stale historical close prices.
+	liveMode bool
+
 	// output
 	executor Executor
 }
+
+// backfillStaleness is the age beyond which evaluateEntry treats a candle as
+// historical (from REST kline backfill) rather than live in liveMode. Smaller
+// than the smallest signal timeframe (5m) so real live closes are never
+// suppressed even with reasonable network/processing lag.
+const backfillStaleness = 90 * time.Second
 
 // SetFundingFilter installs (or clears, if nil) a funding-regime filter on
 // SHORT signals. Safe to call before Run starts. Concurrent use during Run is
 // not supported (caller must set up before calling Run).
 func (r *Runner) SetFundingFilter(f *FundingFilter) {
 	r.fundingFilter = f
+}
+
+// SetLiveMode toggles the backfill-staleness gate in evaluateEntry. cmd/engine
+// must call this with true before Run; cmd/backtest leaves it default-false so
+// historical replay continues to emit signals. Safe to call before Run starts;
+// concurrent use during Run is not supported.
+func (r *Runner) SetLiveMode(live bool) {
+	r.liveMode = live
 }
 
 // NewRunner wires up the strategy runner.
@@ -224,6 +246,15 @@ func (r *Runner) Summarize() {
 }
 
 func (r *Runner) evaluateEntry(c models.Candle) {
+	if r.liveMode && time.Since(c.CloseTime) > backfillStaleness {
+		// Historical candle from REST kline backfill — firing a signal here would
+		// open a position at a stale close price → instant adverse fill on the next
+		// live tick. Indicators have already been updated by AddCandle (warmup is
+		// the whole point of running backfill through the pipeline); we only
+		// suppress signal emission, not state mutation.
+		return
+	}
+
 	if !r.levels.HasData() {
 		return // need at least one full day before PDH/PDL are valid
 	}

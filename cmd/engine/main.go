@@ -185,6 +185,7 @@ func main() {
 		entryCfg,
 		exec,
 	)
+	runner.SetLiveMode(true)
 
 	// Funding filter (optional): gate SHORT signals by current funding regime.
 	// Requires Historical funding provider — Constant rate has no time variation
@@ -246,6 +247,7 @@ func main() {
 			shadowEntryCfg,
 			shadowExec,
 		)
+		shadowRunners[i].SetLiveMode(true)
 		switch spec.Type {
 		case "bb":
 			slog.Info("shadow strategy registered",

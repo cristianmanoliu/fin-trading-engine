@@ -48,7 +48,13 @@ type StrategyConfig struct {
 	EMAMode bool `yaml:"ema_mode"`
 	// StakeUSDT is the fixed dollar amount risked per trade for PnL reporting. 0 = points only.
 	StakeUSDT float64 `yaml:"stake_usd"`
-	// BackfillHours is how many hours of 1m klines to fetch from REST on startup. Default 48.
+	// BackfillHours is how many hours of 1m klines to fetch from REST on startup. Default 96.
+	// Sized so that 4H-signal indicators (EMA21, BB20) prime during backfill. Each engine
+	// restart costs (period − backfilled-candles) × signal-tf hours of cold-start blindness;
+	// 96h gives 24 closed 4H candles, enough to prime EMA21 + leave 3 candles past the
+	// prevEma21 ≠ 0 gate, so signals can fire on the first live close. The single-call
+	// Binance limit is 1500 klines (= 25h); larger values trigger pagination — see
+	// pkg/marketdata/binance.go backfill().
 	BackfillHours int `yaml:"backfill_hours"`
 	// SignalTimeframe selects which closed candles drive entry evaluation: "5m" | "30m" | "4H".
 	// Defaults to "5m" (legacy). Higher TFs produce wider stops, reducing implicit leverage and fees.
@@ -102,7 +108,7 @@ func Load(path string) (*Config, error) {
 		cfg.Exchange.RESTURL = "https://fapi.binance.com"
 	}
 	if cfg.Strategy.BackfillHours == 0 {
-		cfg.Strategy.BackfillHours = 48
+		cfg.Strategy.BackfillHours = 96
 	}
 	if cfg.Strategy.SignalTimeframe == "" {
 		cfg.Strategy.SignalTimeframe = "5m"

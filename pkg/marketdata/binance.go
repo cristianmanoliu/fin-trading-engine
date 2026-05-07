@@ -20,8 +20,9 @@ import (
 const (
 	wsReadDeadline   = 90 * time.Second
 	wsMaxStalls      = 2 // consecutive i/o timeouts before falling back to REST polling
-	// 6s × 8 symbols = 80 req/min × 20 weight = 1600/min (Binance limit: 2400/min)
-	restPollInterval = 6 * time.Second
+	// 16 symbols × (60/10) polls/min × 20 weight/call = 1920 weight/min (Binance limit: 2400/min).
+	// Do NOT lower this without recomputing: at 6s × 16 the fleet sat in 50% rate-limit backoff.
+	restPollInterval = 10 * time.Second
 	restPollLimit    = 500
 )
 
@@ -48,9 +49,15 @@ func NewBinanceFutures(wsURL, restURL, symbol string, backfillHours int) *Binanc
 }
 
 func (b *BinanceFutures) Subscribe(ctx context.Context) (<-chan models.Tick, error) {
-	// Buffer must hold all backfill ticks before consumers start.
-	// Max: 1500 klines × 4 ticks each = 6000. Use 8192 for headroom.
-	ch := make(chan models.Tick, 8192)
+	// Buffer must hold all backfill ticks before consumers start. Backfill is
+	// synchronous in Subscribe and blocks until done; if the buffer is too small,
+	// backfill blocks on send and Subscribe never returns.
+	// Sized for backfillHours × 60 klines × 4 ticks/kline + 2048 headroom.
+	bufSize := b.backfillHours*60*4 + 2048
+	if bufSize < 8192 {
+		bufSize = 8192 // floor for tiny / zero-backfill configs
+	}
+	ch := make(chan models.Tick, bufSize)
 
 	// Backfill before opening the WebSocket so the aggregator and DailyLevels
 	// are primed from the first live tick. Failure is non-fatal: log a warning
@@ -77,77 +84,117 @@ func (b *BinanceFutures) Subscribe(ctx context.Context) (<-chan models.Tick, err
 // backfill fetches the last backfillHours of 1m klines from the Binance Futures REST API
 // and expands them into synthetic ticks, pushing them synchronously into ch before the
 // WebSocket is opened.
+//
+// Pagination: Binance's /fapi/v1/klines caps at 1500 klines per call (= 25h of 1m data).
+// To support backfillHours > 25 we walk forward in chained startTime calls. This is
+// load-bearing for cold-start indicator priming — a 4H-signal strategy with EMA21 needs
+// 22 closed 4H candles ≈ 88h of 1m history before the cross detector can fire.
 func (b *BinanceFutures) backfill(ctx context.Context, ch chan<- models.Tick) error {
-	limit := b.backfillHours * 60
-	if limit > 1500 {
-		limit = 1500 // Binance max per request
+	totalKlines := b.backfillHours * 60
+	if totalKlines <= 0 {
+		return nil
 	}
 
-	url := fmt.Sprintf("%s/fapi/v1/klines?symbol=%s&interval=1m&limit=%d",
-		b.restURL, b.symbol, limit)
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return err
-	}
-
+	const perCallLimit = 1500
 	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("REST klines returned HTTP %d", resp.StatusCode)
-	}
+	nowMs := time.Now().UTC().UnixMilli()
+	startMs := time.Now().UTC().Add(-time.Duration(b.backfillHours) * time.Hour).UnixMilli()
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return err
-	}
+	fetched := 0
+	pages := 0
+	ticksEmitted := 0
 
-	// Binance returns a JSON array of arrays:
-	// [openMs, open, high, low, close, volume, closeMs, ...]
-	var raw [][]json.RawMessage
-	if err := json.Unmarshal(body, &raw); err != nil {
-		return fmt.Errorf("decode klines: %w", err)
-	}
-
-	count := 0
-	for _, row := range raw {
-		if len(row) < 7 {
-			continue
+	for fetched < totalKlines {
+		n := perCallLimit
+		if remaining := totalKlines - fetched; remaining < n {
+			n = remaining
 		}
-		openMs, err := parseRawInt64(row[0])
+
+		url := fmt.Sprintf("%s/fapi/v1/klines?symbol=%s&interval=1m&startTime=%d&limit=%d",
+			b.restURL, b.symbol, startMs, n)
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 		if err != nil {
-			continue
+			return err
 		}
-		closeMs, err := parseRawInt64(row[6])
-		if err != nil {
-			continue
-		}
-		o, _ := parseRawFloat(row[1])
-		h, _ := parseRawFloat(row[2])
-		l, _ := parseRawFloat(row[3])
-		c, _ := parseRawFloat(row[4])
-		v, _ := parseRawFloat(row[5])
 
-		for _, tick := range expandKlineToTicks(openMs, closeMs, o, h, l, c, v, b.symbol) {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case ch <- tick:
-				count++
+		resp, err := client.Do(req)
+		if err != nil {
+			return err
+		}
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			return err
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("REST klines page %d returned HTTP %d", pages+1, resp.StatusCode)
+		}
+
+		// Binance returns a JSON array of arrays:
+		// [openMs, open, high, low, close, volume, closeMs, ...]
+		var raw [][]json.RawMessage
+		if err := json.Unmarshal(body, &raw); err != nil {
+			return fmt.Errorf("decode klines page %d: %w", pages+1, err)
+		}
+		if len(raw) == 0 {
+			break
+		}
+
+		var lastOpenMs int64
+		for _, row := range raw {
+			if len(row) < 7 {
+				continue
 			}
+			openMs, err := parseRawInt64(row[0])
+			if err != nil {
+				continue
+			}
+			closeMs, err := parseRawInt64(row[6])
+			if err != nil {
+				continue
+			}
+			o, _ := parseRawFloat(row[1])
+			h, _ := parseRawFloat(row[2])
+			l, _ := parseRawFloat(row[3])
+			c, _ := parseRawFloat(row[4])
+			v, _ := parseRawFloat(row[5])
+
+			for _, tick := range expandKlineToTicks(openMs, closeMs, o, h, l, c, v, b.symbol) {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case ch <- tick:
+					ticksEmitted++
+				}
+			}
+			lastOpenMs = openMs
+		}
+
+		fetched += len(raw)
+		pages++
+
+		// Advance cursor past the last 1m bar we just received.
+		nextStart := lastOpenMs + 60_000
+		if nextStart >= nowMs {
+			break // caught up to the current minute
+		}
+		startMs = nextStart
+
+		// Server returned fewer rows than asked for → end of available history.
+		if len(raw) < n {
+			break
 		}
 	}
 
 	slog.Info("kline backfill complete",
 		"symbol", b.symbol,
 		"hours", b.backfillHours,
-		"klines", len(raw),
-		"ticks", count)
+		"klines", fetched,
+		"pages", pages,
+		"ticks", ticksEmitted)
 	return nil
 }
 
