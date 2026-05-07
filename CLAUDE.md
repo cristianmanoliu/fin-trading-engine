@@ -238,7 +238,7 @@ P4-Combined backtests at WR 20.64% with 6:1 R:R. Breakeven WR ≈ 14.3% — only
 ### Kill the strategy if ANY true
 
 - First 60 days net-negative
-- Realized stop-side slippage > 25 bp (the cliff edge)
+- Realized stop-side slippage > 25 bp (the historical-rule cliff edge — but A2 sweep 2026-05-07 shows the actual breakeven is at ~81bp; slip-cost is linear at −$1.71k/yr per bp with no nonlinear cliff. 25bp triggers investigation, not auto-kill. See `results/slip_cliff_verdict_2026-05-07.md`)
 - Realized WR < 14% over ≥150 trades (below breakeven)
 - Single symbol contributes >40% of live PnL (concentration risk realized)
 - Train-only-shortlist diagnostic re-run on rolling forward data shows non-positive honest test
