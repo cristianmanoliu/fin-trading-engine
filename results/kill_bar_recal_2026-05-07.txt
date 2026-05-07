@@ -1,0 +1,59 @@
+KILL-BAR RECALIBRATION — kill_bar_recal_decision_rule_2026-05-07.md
+================================================================================
+journal dir: /Users/cristianmanoliu/Main/source.code/github/trading-engine/results/hod_journals/2026-05-07
+target FP rate: 10%  paths: 1000  horizon: 90d
+
+Loading trades & BTC prices...
+  2,210 trades, 2020-01-20 → 2025-04-30
+  2,301 daily BTC closes
+
+Step 1: collecting null distribution at 90d, B=1000...
+  collected 1000 paths' raw statistics
+  WR-eligible paths: 0
+  total monthly deltas: 3000
+
+Step 2: deriving new thresholds from quantiles (target FP = 10%)
+  PNL    threshold: -$33,261  (was: < $0)
+  SYM    threshold: 115.7%  (was: > 40%)
+  HODL_C threshold: -$74,274  (was: < $0)
+  HODL_W threshold: -$35,316/window  (was: -$5,000/window)
+  WR     threshold: DISCARDED  (only 0 eligible paths at 90d — too few to set quantile)
+
+Step 3: verifying recalibrated thresholds across scenarios × horizons...
+
+   null   60d  PNL=  7.4%  WR=  0.0%  SYM= 17.7%  HODL_C=  3.3%  HODL_W=  1.5%
+   null   90d  PNL=  9.5%  WR=  0.0%  SYM= 12.2%  HODL_C=  9.8%  HODL_W=  3.0%
+   null  120d  PNL= 13.2%  WR=  0.0%  SYM=  9.9%  HODL_C= 12.2%  HODL_W=  5.5%
+   null  180d  PNL= 13.1%  WR=  0.0%  SYM= 13.8%  HODL_C= 12.7%  HODL_W=  7.9%
+  deg30   60d  PNL=  3.8%  WR=  0.0%  SYM= 15.3%  HODL_C=  0.2%  HODL_W=  0.0%
+  deg30   90d  PNL=  8.6%  WR=  0.0%  SYM= 10.6%  HODL_C=  6.0%  HODL_W=  0.0%
+  deg30  120d  PNL=  9.0%  WR=  0.0%  SYM= 11.0%  HODL_C= 11.4%  HODL_W=  0.0%
+  deg30  180d  PNL= 10.5%  WR=  0.0%  SYM= 14.6%  HODL_C= 12.6%  HODL_W=  0.0%
+  deg50   60d  PNL=  2.5%  WR=  0.0%  SYM= 15.8%  HODL_C=  0.0%  HODL_W=  0.0%
+  deg50   90d  PNL=  3.7%  WR=  0.0%  SYM= 11.0%  HODL_C=  2.9%  HODL_W=  0.0%
+  deg50  120d  PNL=  4.2%  WR=  0.0%  SYM=  9.9%  HODL_C=  7.9%  HODL_W=  0.0%
+  deg50  180d  PNL=  6.9%  WR=  0.0%  SYM= 15.1%  HODL_C= 15.2%  HODL_W=  0.0%
+   dead   60d  PNL=  0.0%  WR=  0.0%  SYM=100.0%  HODL_C=  0.0%  HODL_W=  0.0%
+   dead   90d  PNL=  0.0%  WR=  0.0%  SYM=100.0%  HODL_C=  0.0%  HODL_W=  0.0%
+   dead  120d  PNL=  0.0%  WR=  0.0%  SYM=100.0%  HODL_C=  2.9%  HODL_W=  0.1%
+   dead  180d  PNL=  0.0%  WR=  0.0%  SYM=100.0%  HODL_C=  6.4%  HODL_W=  1.0%
+
+================================================================================
+DECISION RULE EVALUATION (90d verification, locked bands):
+  FP(null) ≤ 20.0%   TP(deg50) ≥ 50.0%   TP(dead) ≥ 80.0%
+
+  PNL      FP=  9.5% ✓   TP(d50)=  3.7% ✗   TP(dd)=  0.0% ✗   ✗ DISCARDED
+  WR       DISCARDED (no quantile set — too few eligible paths)
+  SYM      FP= 12.2% ✓   TP(d50)= 11.0% ✗   TP(dd)=100.0% ✓   ✗ DISCARDED
+  HODL_C   FP=  9.8% ✓   TP(d50)=  2.9% ✗   TP(dd)=  0.0% ✗   ✗ DISCARDED
+  HODL_W   FP=  3.0% ✓   TP(d50)=  0.0% ✗   TP(dd)=  0.0% ✗   ✗ DISCARDED
+
+================================================================================
+VERDICT: NO_KILL_BAR
+  Accepted (0): —
+  Discarded (5): PNL, WR, SYM, HODL_C, HODL_W
+================================================================================
+
+Final recalibrated thresholds (for accepted criteria only):
+
+Discarded criteria do NOT contribute to the kill bar.
