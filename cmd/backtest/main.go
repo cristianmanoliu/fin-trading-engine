@@ -61,6 +61,8 @@ func main() {
 	confluenceSlowPeriod := flag.Int("confluence-slow", 0, "Cat D1: 1D EMA slow period (default 21)")
 	volFilterMode := flag.Bool("vol-filter-mode", false, "Cat E1: skip entries when realized 30d annualized vol > MaxVolAnnualized.")
 	maxVolAnnualized := flag.Float64("max-vol-annualized", 0, "Cat E1: max 30d realized vol as fraction (default 1.20 = 120%)")
+	fundingCrossMode := flag.Bool("funding-cross-mode", false, "Cat F1: standalone entry on extreme 8h funding rate (mean-reversion on position crowding). Independent of EMA/RSI/MACD. Requires --funding-csv-dir.")
+	fundingThresholdBpsPerDay := flag.Float64("funding-threshold-bps", 0, "Cat F1: |funding × 3 × 10000| threshold in bps/day (default 30, locked by pre-registered decision rule)")
 	journalDir := flag.String("journal-dir", "", "when set, write per-trade JSONL journals to this directory (same schema as paper-live). Off by default — backtest runs are journal-silent unless explicitly opted in.")
 	flag.Parse()
 
@@ -153,6 +155,8 @@ func main() {
 		ConfluenceSlowPeriod: *confluenceSlowPeriod,
 		VolFilterMode:        *volFilterMode,
 		MaxVolAnnualized:     *maxVolAnnualized,
+		FundingCrossMode:          *fundingCrossMode,
+		FundingThresholdBpsPerDay: *fundingThresholdBpsPerDay,
 		ATRStopMult:       *atrStopMult,
 		ATRPeriod:         *atrPeriod,
 		SignalTimeframe:   tf,
@@ -199,6 +203,17 @@ func main() {
 		entryCfg,
 		exec,
 	)
+
+	// Cat F1 funding-cross signal needs RateAt access at signal-evaluation time.
+	// Wire from the same Historical provider that exec uses for funding accrual.
+	if *fundingCrossMode {
+		if hist, ok := exec.FundingProvider.(*funding.Historical); ok {
+			runner.SetFundingRateReader(hist.RateAt)
+		} else {
+			slog.Error("--funding-cross-mode requires --funding-csv-dir to load Historical provider")
+			os.Exit(1)
+		}
+	}
 
 	// Funding filter (optional): gate SHORT signals by current funding regime.
 	// Requires Historical funding provider — Constant rate has no time variation.

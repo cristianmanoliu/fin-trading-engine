@@ -248,3 +248,117 @@ func TestEMACrossoverWithFixedRR_TargetMatchesMultiplier(t *testing.T) {
 		t.Errorf("TargetRR multiplier: got %v want 6.0 (±0.01)", gotMultiplier)
 	}
 }
+
+// ── Cat F1 funding-cross standalone signal tests ─────────────────────────────
+// Pre-registered 2026-05-07 — see results/cat_f1_funding_cross_decision_rule_2026-05-07.md.
+// Trigger: funding × 3 × 10000 > +threshold → SHORT; < −threshold → LONG.
+
+func newFundingCrossDetector(threshold float64, rateFn func(time.Time) float64) *EntryDetector {
+	d := NewEntryDetector(EntryConfig{
+		FundingCrossMode:          true,
+		FundingThresholdBpsPerDay: threshold,
+		StopBufferPct:             0.001,
+		TargetRR:                  6.0,
+	})
+	d.SetFundingRateReader(rateFn)
+	return d
+}
+
+func TestFundingCross_NoReader_NoSignal(t *testing.T) {
+	d := NewEntryDetector(EntryConfig{
+		FundingCrossMode:          true,
+		FundingThresholdBpsPerDay: 30,
+		StopBufferPct:             0.001,
+		TargetRR:                  6.0,
+	})
+	// No SetFundingRateReader call → fundingRate is nil.
+	d.AddCandle(models.Candle{Symbol: "BTCUSDT", Open: 100, High: 101, Low: 99, Close: 100,
+		CloseTime: time.Date(2026, 5, 7, 0, 0, 0, 0, time.UTC)})
+	if sig := d.Evaluate(nil, 0, &BiasTracker{}); sig != nil {
+		t.Errorf("expected nil signal when fundingRate reader unset, got %+v", sig)
+	}
+}
+
+func TestFundingCross_BelowPositiveThreshold_NoSignal(t *testing.T) {
+	// 29.9 bp/day = rate8h × 3 × 10000 < 30 → no entry
+	rate := 29.9 / (3 * 10000)
+	d := newFundingCrossDetector(30, func(time.Time) float64 { return rate })
+	d.AddCandle(models.Candle{Symbol: "BTCUSDT", Open: 100, High: 101, Low: 99, Close: 100,
+		CloseTime: time.Date(2026, 5, 7, 0, 0, 0, 0, time.UTC)})
+	if sig := d.Evaluate(nil, 0, &BiasTracker{}); sig != nil {
+		t.Errorf("expected nil signal at 29.9bp/day (below 30 threshold), got %+v", sig)
+	}
+}
+
+func TestFundingCross_AbovePositiveThreshold_FiresShort(t *testing.T) {
+	// 35 bp/day positive → short entry (overcrowded longs revert)
+	rate := 35.0 / (3 * 10000)
+	d := newFundingCrossDetector(30, func(time.Time) float64 { return rate })
+	d.AddCandle(models.Candle{Symbol: "BTCUSDT", Open: 100, High: 101, Low: 99, Close: 100,
+		CloseTime: time.Date(2026, 5, 7, 0, 0, 0, 0, time.UTC)})
+	sig := d.Evaluate(nil, 0, &BiasTracker{})
+	if sig == nil {
+		t.Fatal("expected SHORT signal at 35bp/day funding (above 30 threshold)")
+	}
+	if sig.Side != models.Short {
+		t.Errorf("expected Short side, got %v", sig.Side)
+	}
+	// Wick stop: high × (1 + 0.001) = 101.101
+	if sig.StopLoss < 101.10 || sig.StopLoss > 101.11 {
+		t.Errorf("expected stop ≈ 101.101, got %v", sig.StopLoss)
+	}
+	// 6:1 RR: target = entry − 6 × stop_dist
+	stopDist := sig.StopLoss - sig.EntryPrice
+	expectedTarget := sig.EntryPrice - 6*stopDist
+	if sig.TakeProfit < expectedTarget-0.01 || sig.TakeProfit > expectedTarget+0.01 {
+		t.Errorf("expected target ≈ %v (6:1 RR), got %v", expectedTarget, sig.TakeProfit)
+	}
+}
+
+func TestFundingCross_BelowNegativeThreshold_FiresLong(t *testing.T) {
+	// −35 bp/day → long entry (overcrowded shorts revert)
+	rate := -35.0 / (3 * 10000)
+	d := newFundingCrossDetector(30, func(time.Time) float64 { return rate })
+	d.AddCandle(models.Candle{Symbol: "BTCUSDT", Open: 100, High: 101, Low: 99, Close: 100,
+		CloseTime: time.Date(2026, 5, 7, 0, 0, 0, 0, time.UTC)})
+	sig := d.Evaluate(nil, 0, &BiasTracker{})
+	if sig == nil {
+		t.Fatal("expected LONG signal at −35bp/day funding (below −30 threshold)")
+	}
+	if sig.Side != models.Long {
+		t.Errorf("expected Long side, got %v", sig.Side)
+	}
+	// Wick stop: low × (1 − 0.001) = 98.901
+	if sig.StopLoss < 98.90 || sig.StopLoss > 98.91 {
+		t.Errorf("expected stop ≈ 98.901, got %v", sig.StopLoss)
+	}
+}
+
+func TestFundingCross_Neutral_NoSignal(t *testing.T) {
+	// Funding within ±30 → no entry
+	rate := 0.00005 // = 1.5 bp/day, well inside threshold
+	d := newFundingCrossDetector(30, func(time.Time) float64 { return rate })
+	d.AddCandle(models.Candle{Symbol: "BTCUSDT", Open: 100, High: 101, Low: 99, Close: 100,
+		CloseTime: time.Date(2026, 5, 7, 0, 0, 0, 0, time.UTC)})
+	if sig := d.Evaluate(nil, 0, &BiasTracker{}); sig != nil {
+		t.Errorf("expected nil signal at 1.5bp/day funding (well inside threshold), got %+v", sig)
+	}
+}
+
+func TestFundingCross_SideFilterShort_LongSignalSuppressed(t *testing.T) {
+	// SideFilter=Short + funding signal would fire LONG → suppressed
+	rate := -50.0 / (3 * 10000)
+	d := NewEntryDetector(EntryConfig{
+		FundingCrossMode:          true,
+		FundingThresholdBpsPerDay: 30,
+		StopBufferPct:             0.001,
+		TargetRR:                  6.0,
+		SideFilter:                models.Short,
+	})
+	d.SetFundingRateReader(func(time.Time) float64 { return rate })
+	d.AddCandle(models.Candle{Symbol: "BTCUSDT", Open: 100, High: 101, Low: 99, Close: 100,
+		CloseTime: time.Date(2026, 5, 7, 0, 0, 0, 0, time.UTC)})
+	if sig := d.Evaluate(nil, 0, &BiasTracker{}); sig != nil {
+		t.Errorf("expected nil signal (SideFilter=Short blocks LONG funding signal), got %+v", sig)
+	}
+}

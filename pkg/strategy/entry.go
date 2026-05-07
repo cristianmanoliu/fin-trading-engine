@@ -3,6 +3,7 @@ package strategy
 import (
 	"fmt"
 	"math"
+	"time"
 
 	"github.com/cristianmanoliu/trading-engine/pkg/indicators"
 	"github.com/cristianmanoliu/trading-engine/pkg/models"
@@ -51,6 +52,19 @@ type EntryDetector struct {
 	// Used as a gating filter inside checkEMACrossover. Cat E1: 2026-05-07.
 	logReturns      []float64
 	realizedVol30d  float64 // annualized; 0 until window has ≥30 returns
+
+	// F1 funding-cross state (used only when FundingCrossMode=true). The detector
+	// itself doesn't store funding history — it queries via this accessor at
+	// signal-evaluation time. nil means no reader wired (signal can't fire).
+	// Cat F1: 2026-05-07.
+	fundingRate func(t time.Time) float64
+}
+
+// SetFundingRateReader wires a funding-rate accessor for FundingCrossMode.
+// Pass nil to clear. Safe to call before strategy run starts; not safe to
+// reconfigure during a run (single-goroutine ownership applies).
+func (e *EntryDetector) SetFundingRateReader(f func(t time.Time) float64) {
+	e.fundingRate = f
 }
 
 // EntryConfig holds the tunable parameters for entry detection.
@@ -114,6 +128,15 @@ type EntryConfig struct {
 	// Cat E1: vol-regime filter test (2026-05-07).
 	VolFilterMode    bool
 	MaxVolAnnualized float64 // 0 → defaults to 1.20 (120% annualized)
+
+	// FundingCrossMode (Cat F1): standalone entry on extreme 8h funding rate at
+	// the candle close. Mean-reversion on position crowding. SHORT when
+	// funding × 3 × 10000 > +threshold (overcrowded longs revert); LONG when
+	// < −threshold (overcrowded shorts revert). Independent of EMA cross —
+	// orthogonal mechanism. Pre-registered 2026-05-07; see
+	// results/cat_f1_funding_cross_decision_rule_2026-05-07.md.
+	FundingCrossMode          bool
+	FundingThresholdBpsPerDay float64 // 0 → defaults to 30 (mean+2σ of universe)
 
 	// ATRStopMult: when > 0 (and EMAMode), place stop at last.Close ± ATRStopMult × ATR(period).
 	// 0 keeps the legacy wick-based stop (last.Low or last.High with StopBufferPct).
@@ -313,6 +336,10 @@ func (e *EntryDetector) Evaluate(levels []float64, vwap float64, bias *BiasTrack
 
 	if e.cfg.BollingerMode {
 		return e.checkBollingerBreakdown(last, bias)
+	}
+
+	if e.cfg.FundingCrossMode {
+		return e.checkFundingCross(last)
 	}
 
 	if e.cfg.PDHPDLBreakMode {
@@ -607,6 +634,78 @@ func (e *EntryDetector) checkBollingerBreakdown(last models.Candle, bias *BiasTr
 		Timestamp:  last.CloseTime,
 		Reason: fmt.Sprintf("bollinger_break %s | close=%.4f band=%.4f | rr=%.1f",
 			side, last.Close, band, rr),
+	}
+}
+
+// checkFundingCross fires a STANDALONE entry when the 8h funding rate at the
+// candle close is more extreme than ±FundingThresholdBpsPerDay. Mean-reversion
+// hypothesis: extreme funding marks position-crowding extremes that revert.
+//
+// This is INDEPENDENT of price-derived signals (EMA, RSI, MACD, Bollinger).
+// Mechanism is positioning crowding, not price momentum. Pre-registered as
+// Cat F1 on 2026-05-07 — see results/cat_f1_funding_cross_decision_rule_2026-05-07.md.
+func (e *EntryDetector) checkFundingCross(last models.Candle) *models.Signal {
+	if e.fundingRate == nil {
+		return nil
+	}
+	rate8h := e.fundingRate(last.CloseTime)
+	// 3 funding intervals per day, decimal → bps.
+	fundingPerDayBps := rate8h * 3 * 10000
+
+	threshold := e.cfg.FundingThresholdBpsPerDay
+	if threshold <= 0 {
+		threshold = 30.0
+	}
+
+	var side models.Direction
+	switch {
+	case fundingPerDayBps > threshold:
+		side = models.Short // overcrowded longs revert
+	case fundingPerDayBps < -threshold:
+		side = models.Long // overcrowded shorts revert
+	default:
+		return nil
+	}
+
+	// Optional one-sided filter (mirrors EMA / Bollinger / RSI / MACD checks).
+	if e.cfg.SideFilter != models.Neutral && side != e.cfg.SideFilter {
+		return nil
+	}
+
+	// Wick-based stop, identical to other fixed-RR signal types.
+	var stopLoss float64
+	if side == models.Long {
+		stopLoss = last.Low * (1 - e.cfg.StopBufferPct)
+	} else {
+		stopLoss = last.High * (1 + e.cfg.StopBufferPct)
+	}
+
+	risk := math.Abs(last.Close - stopLoss)
+	if risk == 0 {
+		return nil
+	}
+
+	rr := e.cfg.TargetRR
+	if rr <= 0 {
+		rr = 6.0
+	}
+
+	var takeProfit float64
+	if side == models.Long {
+		takeProfit = last.Close + risk*rr
+	} else {
+		takeProfit = last.Close - risk*rr
+	}
+
+	return &models.Signal{
+		Symbol:     last.Symbol,
+		Side:       side,
+		EntryPrice: last.Close,
+		StopLoss:   stopLoss,
+		TakeProfit: takeProfit,
+		Timestamp:  last.CloseTime,
+		Reason: fmt.Sprintf("funding_cross %s | rate_8h=%.6f → %+.1fbp/day | thresh=%.0f | rr=%.1f",
+			side, rate8h, fundingPerDayBps, threshold, rr),
 	}
 }
 

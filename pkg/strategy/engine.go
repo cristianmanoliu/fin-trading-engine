@@ -93,6 +93,16 @@ func (r *Runner) SetSignalContextWriter(w *SignalContextWriter, label string) {
 	r.contextLabel = label
 }
 
+// SetFundingRateReader wires a funding-rate accessor for FundingCrossMode
+// (Cat F1, see results/cat_f1_funding_cross_decision_rule_2026-05-07.md).
+// Pass nil to clear. Safe to call before Run; not safe to reconfigure during.
+// Delegates to the inner EntryDetector so funding-cross signals can fire.
+func (r *Runner) SetFundingRateReader(f func(t time.Time) float64) {
+	if r.detector != nil {
+		r.detector.SetFundingRateReader(f)
+	}
+}
+
 // NewRunner wires up the strategy runner.
 func NewRunner(
 	candle4H, candle30m, candle5m <-chan models.Candle,
