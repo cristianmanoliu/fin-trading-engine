@@ -62,12 +62,14 @@ run_one() {
     " "${ROOT}/configs/default.yaml" > "$cfg"
 
     local started=$(date +%s)
+    local funding_arg="--funding-csv-dir ${ROOT}/data/funding"
+    [[ "${NO_FUNDING:-0}" == "1" ]] && funding_arg=""
     "$BINARY" --config "$cfg" \
         --exact-fills --include-boundary \
         --fee-bps 10 --stop-slippage-bps 5 \
         --funding-bps-per-day 0 \
-        --funding-csv-dir "${ROOT}/data/funding" \
-        --signal-tf 4H --side-filter short --max-hold-hours 504 \
+        $funding_arg \
+        --signal-tf 4H --side-filter "${SIDE_FILTER:-short}" --max-hold-hours 504 \
         --journal-dir "$OUTDIR" \
         > /dev/null 2>&1
     local elapsed=$(( $(date +%s) - started ))
