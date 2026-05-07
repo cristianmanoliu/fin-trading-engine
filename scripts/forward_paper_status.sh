@@ -34,6 +34,12 @@ MAX_SYM_PCT=40       # No single symbol > 40% of cumulative PnL
 # --- kill criteria ---
 KILL_MAX_FEE_BP=12   # Realized round-trip fee ≤ 12bp (vs 10bp modeled — 20% slack)
 KILL_MAX_SLIP_BP=25  # Realized stop-side slip ≤ 25bp on losing-trade subsample (cliff edge)
+# BTC-HODL benchmark notional: CLAUDE.md specifies $32k from the deployed-32
+# era. Current deployed is 16 engines × $1k stake = $16k. Override via env if
+# you want to reconcile with current notional. Kill-window threshold $5k absolute.
+BENCHMARK_NOTIONAL="${BENCHMARK_NOTIONAL:-32000}"
+KILL_HODL_WINDOW_USD="${KILL_HODL_WINDOW_USD:-5000}"
+HODL_HELPER="$(cd "$(dirname "$0")" && pwd)/btc_hodl_benchmark.py"
 
 # --- runner ---
 remote_or_local() {
@@ -61,11 +67,16 @@ aggregate() {
     # Concatenate close events (regular + partial) and aggregate via awk.
     # Cost columns (fee_usd, slip_usd, notional_usd) carry "//0" defaults so
     # older close events written before the schema extension still parse.
+    # The same awk emits per-close TSV records (CLOSE|...) so the local-side
+    # BTC-HODL benchmark helper can do windowed comparison without re-parsing
+    # journals — no process substitution (which does not survive bash -s heredoc).
     cat "${files[@]}" | jq -r '"'"'select(.event=="close") | [.ts, .symbol, (.pnl_usd // 0), (.outcome // "STOP"), (.fee_usd // 0), (.slip_usd // 0), (.notional_usd // 0)] | @tsv'"'"' 2>/dev/null \
     | awk -F"\t" -v label="$label" '"'"'
         BEGIN { first_ts=""; last_ts=""; total=0; wins=0; pnl=0
                 fee_usd=0; slip_usd_losers=0; notional=0; notional_losers=0 }
         {
+            # Emit per-close TSV record for downstream HODL comparator.
+            printf "CLOSE|%s|%s|%s|%s|%s\n", label, $1, $2, $3, $4
             if (first_ts=="") first_ts=$1
             last_ts=$1
             total++
@@ -89,9 +100,10 @@ aggregate() {
         }'"'"'
 }
 
-# Live: top-level *.jsonl
+# Live: top-level *.jsonl. Use ${arr[@]+"${arr[@]}"} for bash 3.2 (macOS)
+# compatibility — direct ${arr[@]} on an empty array errors under set -u.
 live_files=( "${JOURNAL_DIR}"/*-*.jsonl )
-aggregate "live" "${live_files[@]}"
+aggregate "live" ${live_files[@]+"${live_files[@]}"}
 
 # Shadows: scan shadow/*/  for any per-symbol files
 if [[ -d "${JOURNAL_DIR}/shadow" ]]; then
@@ -99,7 +111,7 @@ if [[ -d "${JOURNAL_DIR}/shadow" ]]; then
         [[ -d "$label_dir" ]] || continue
         label_name=$(basename "$label_dir")
         shadow_files=( "${label_dir}"*-*.jsonl )
-        aggregate "shadow/${label_name}" "${shadow_files[@]}"
+        aggregate "shadow/${label_name}" ${shadow_files[@]+"${shadow_files[@]}"}
     done
 fi
 ')
@@ -210,15 +222,41 @@ echo "$DATA" | grep "^STRATEGY|" | while IFS='|' read -r _ label first_ts last_t
         s_slip="PENDING"
     fi
 
-    # Overall verdict — fee/slip kill criteria check at any data volume since
-    # they're per-trade and don't need 60-day calendar accumulation to fail.
+    # BTC-HODL benchmark — cumulative deploy criterion + rolling-30d kill
+    # criterion (two consecutive windows underperforming by >$KILL_HODL_WINDOW_USD).
+    strategy_closes=$(echo "$DATA" | awk -F'|' -v lbl="$label" '$1=="CLOSE" && $2==lbl {OFS="\t"; print $3, $4, $5, $6}')
+    hodl_strategy_usd="0"; hodl_total_usd="0"; hodl_delta_usd="0"
+    hodl_n_windows="0"; hodl_kill_pairs="0"; hodl_kill="0"; hodl_warning=""
+    if [[ -n "$strategy_closes" ]] && [[ -x "$HODL_HELPER" ]]; then
+        hodl_out=$(echo "$strategy_closes" | "$HODL_HELPER" \
+            --benchmark-notional "$BENCHMARK_NOTIONAL" \
+            --kill-threshold-usd "$KILL_HODL_WINDOW_USD" 2>/dev/null || true)
+        if [[ -n "$hodl_out" ]]; then
+            IFS=$'\t' read -r hodl_strategy_usd hodl_total_usd hodl_delta_usd \
+                hodl_n_windows hodl_kill_pairs hodl_kill hodl_warning <<<"$hodl_out"
+        fi
+    fi
+    s_hodl_cumul=$(pass_or_fail "$hodl_delta_usd" "0" ge)
+    if [[ "$hodl_kill" == "1" ]]; then
+        s_hodl_window="FAIL"
+    elif [[ "$hodl_n_windows" -lt "2" ]]; then
+        s_hodl_window="PENDING"
+    else
+        s_hodl_window="PASS"
+    fi
+
+    # Overall verdict — fee/slip and HODL kill criteria check at any data volume
+    # since they're per-trade / per-window signals that don't need 60-day power
+    # floor confirmation.
     if [[ "$s_fee" == "FAIL" ]] || [[ "$s_slip" == "FAIL" ]]; then
         overall="KILL — realized cost exceeds kill threshold"
+    elif [[ "$s_hodl_window" == "FAIL" ]]; then
+        overall="KILL — two consecutive 30d windows underperform BTC-HODL"
     elif [[ "$days_elapsed" -lt "$MIN_DAYS" ]] || [[ "$trades" -lt "$MIN_TRADES" ]]; then
         overall="WAITING (insufficient data)"
-    elif [[ "$s_pnl" == "FAIL" ]] || [[ "$s_wr" == "FAIL" ]] || [[ "$s_sym" == "FAIL" ]]; then
+    elif [[ "$s_pnl" == "FAIL" ]] || [[ "$s_wr" == "FAIL" ]] || [[ "$s_sym" == "FAIL" ]] || [[ "$s_hodl_cumul" == "FAIL" ]]; then
         overall="KILL — at least one criterion failed"
-    elif [[ "$s_pnl" == "PASS" ]] && [[ "$s_wr" == "PASS" ]] && [[ "$s_sym" == "PASS" ]] && [[ "$s_fee" == "PASS" ]] && [[ "$s_slip" == "PASS" ]]; then
+    elif [[ "$s_pnl" == "PASS" ]] && [[ "$s_wr" == "PASS" ]] && [[ "$s_sym" == "PASS" ]] && [[ "$s_fee" == "PASS" ]] && [[ "$s_slip" == "PASS" ]] && [[ "$s_hodl_cumul" == "PASS" ]]; then
         overall="DEPLOY-READY — all criteria met"
     else
         overall="WAITING"
@@ -233,6 +271,15 @@ echo "$DATA" | grep "^STRATEGY|" | while IFS='|' read -r _ label first_ts last_t
     printf "    Net PnL:             \$%-12s              [%s]\n" "$pnl_int" "$s_pnl"
     printf "    Realized fee bps:    %-6s  / ≤%dbp                [%s]\n" "$fee_bps_val" "$KILL_MAX_FEE_BP" "$s_fee"
     printf "    Realized slip bps:   %-6s  / ≤%dbp (losers)       [%s]\n" "$slip_bps_val" "$KILL_MAX_SLIP_BP" "$s_slip"
+    hodl_delta_int=$(awk -v d="$hodl_delta_usd" 'BEGIN{printf "%+d", d}')
+    hodl_total_int=$(awk -v h="$hodl_total_usd" 'BEGIN{printf "%+d", h}')
+    if [[ -n "$hodl_warning" ]]; then
+        printf "    BTC-HODL Δ vs \$%-5d: (%s)                          [PENDING]\n" "$BENCHMARK_NOTIONAL" "$hodl_warning"
+    else
+        printf "    BTC-HODL Δ vs \$%-5d: \$%-12s  (HODL=\$%s)  [%s]\n" \
+            "$BENCHMARK_NOTIONAL" "$hodl_delta_int" "$hodl_total_int" "$s_hodl_cumul"
+    fi
+    printf "    30d windows / kill-pairs: %s / %s                    [%s]\n" "$hodl_n_windows" "$hodl_kill_pairs" "$s_hodl_window"
     printf "    Single-sym pct:      %s%% (%s)        [%s]\n" "$max_sym_pct_val" "$max_sym_name" "$s_sym"
     if [[ -n "$top_syms" ]]; then
         printf "    Top symbols:         %s\n" "$top_syms"
@@ -251,7 +298,8 @@ echo "    and full target hits are excluded since slippage is modeled on losers 
 echo "  - n/a means no closes carry the cost decomposition yet (engine restart needed before"
 echo "    new closes will land in the journal — old closes pre-extension show as 0 fee/slip)"
 echo "  - Kill criteria 'first 60 days net-negative' = same as Net PnL FAIL post 60-day mark"
-echo "  - Kill criteria 'two consecutive 30-day windows underperform BTC-HODL' not yet implemented"
+echo "  - BTC-HODL benchmark notional: \$$BENCHMARK_NOTIONAL (override via BENCHMARK_NOTIONAL env);"
+echo "    consecutive 30d window kill threshold: \$$KILL_HODL_WINDOW_USD (override via KILL_HODL_WINDOW_USD)"
 echo "  - All criteria from CLAUDE.md ## Forward-paper go/no-go criteria"
 echo "$SEP"
 echo
