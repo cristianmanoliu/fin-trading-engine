@@ -3,15 +3,23 @@
 live_vs_backtest_drift.py — alert when realized live-paper trade metrics
 diverge from the backtest empirical distribution.
 
-The instrumentation built earlier in this project (paper-live journals,
-backtest journals at hod_journals/2026-05-07-mfe/) gives us per-trade
-records on both sides. This script runs Welch's t-test (mean) and
-proportion z-test (WR) per metric, applies Bonferroni correction across
-the metric set, and emits a severity-graded summary.
+This is the **decision-grade kill mechanism** for forward-paper. The
+threshold-based criteria in scripts/forward_paper_status.sh are
+mis-calibrated (NEEDS_RECALIBRATION + NO_KILL_BAR at 90d due to
+distribution overlap — see results/kill_bar_recal_verdict_2026-05-07.md)
+and serve as advisory-only. This detector achieved DETECTOR_VIABLE in
+its pre-registered calibration (results/drift_detector_calibration_verdict_2026-05-07.md):
+TP(deg30)=TP(deg50)=TP(dead)=100% across all operating points.
 
-Designed to be run periodically as forward-paper data accumulates. Won't
-fire false alerts on small n: each metric requires ≥30 live trades before
-the comparison is considered decision-grade.
+Operating point set per the calibration:
+  ALPHA = 0.001 (recommended; FP=12.1% at N=50, TP=100% all scenarios)
+  N_MIN = 30   (the original safety floor; we ramp to N=50 in practice
+                where the calibration was anchored)
+
+The script runs Welch's t-test (mean) and proportion z-test (WR) per
+metric, applies Bonferroni correction across the metric set, and emits a
+severity-graded summary. Designed to be run periodically as forward-paper
+data accumulates.
 
 Inputs:
   Backtest:  results/hod_journals/2026-05-07-mfe/   (cached locally; built
@@ -39,9 +47,9 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-# Locked thresholds.
+# Locked thresholds (per drift_detector_calibration_verdict_2026-05-07.md).
 N_MIN = 30                  # minimum live trades for a meaningful comparison
-ALPHA = 0.05                # base significance level
+ALPHA = 0.001               # family-wise α — calibration-recommended operating point
 SHADOW_SUBDIRS = ("",)      # only the live strategy's journal dir; shadows handled separately
 
 
