@@ -32,7 +32,8 @@ MIN_WR_PCT=14        # Realized WR ≥ 14% (breakeven ≈ 14.3% at 6:1 RR)
 MAX_SYM_PCT=40       # No single symbol > 40% of cumulative PnL
 
 # --- kill criteria ---
-KILL_MAX_SLIP_BP=25  # Slip > 25bp is the cliff edge (model not yet wired into journal)
+KILL_MAX_FEE_BP=12   # Realized round-trip fee ≤ 12bp (vs 10bp modeled — 20% slack)
+KILL_MAX_SLIP_BP=25  # Realized stop-side slip ≤ 25bp on losing-trade subsample (cliff edge)
 
 # --- runner ---
 remote_or_local() {
@@ -58,21 +59,32 @@ aggregate() {
         return
     fi
     # Concatenate close events (regular + partial) and aggregate via awk.
-    cat "${files[@]}" | jq -r '"'"'select(.event=="close") | [.ts, .symbol, (.pnl_usd // 0), (.outcome // "STOP")] | @tsv'"'"' 2>/dev/null \
+    # Cost columns (fee_usd, slip_usd, notional_usd) carry "//0" defaults so
+    # older close events written before the schema extension still parse.
+    cat "${files[@]}" | jq -r '"'"'select(.event=="close") | [.ts, .symbol, (.pnl_usd // 0), (.outcome // "STOP"), (.fee_usd // 0), (.slip_usd // 0), (.notional_usd // 0)] | @tsv'"'"' 2>/dev/null \
     | awk -F"\t" -v label="$label" '"'"'
-        BEGIN { first_ts=""; last_ts=""; total=0; wins=0; pnl=0 }
+        BEGIN { first_ts=""; last_ts=""; total=0; wins=0; pnl=0
+                fee_usd=0; slip_usd_losers=0; notional=0; notional_losers=0 }
         {
             if (first_ts=="") first_ts=$1
             last_ts=$1
             total++
             if ($4=="TARGET" || $4=="PARTIAL") wins++
             pnl += $3
+            fee_usd += $5
+            notional += $7
+            if ($4=="STOP") {
+                slip_usd_losers += $6
+                notional_losers += $7
+            }
             sym_pnl[$2] += $3
             sym_count[$2]++
         }
         END {
             if (total==0) { printf "STRATEGY|%s|NODATA\n", label; exit }
-            printf "STRATEGY|%s|%s|%s|%d|%d|%.2f\n", label, first_ts, last_ts, total, wins, pnl
+            printf "STRATEGY|%s|%s|%s|%d|%d|%.2f|%.2f|%.2f|%.2f|%.2f\n", \
+                label, first_ts, last_ts, total, wins, pnl, \
+                fee_usd, slip_usd_losers, notional, notional_losers
             for (s in sym_pnl) printf "SYMBOL|%s|%s|%.2f|%d\n", label, s, sym_pnl[s], sym_count[s]
         }'"'"'
 }
@@ -109,11 +121,16 @@ echo "  Source: $VPS  ($JOURNAL_DIR)"
 echo "$SEP"
 
 # Iterate strategy lines
-echo "$DATA" | grep "^STRATEGY|" | while IFS='|' read -r _ label first_ts last_ts trades wins pnl; do
+echo "$DATA" | grep "^STRATEGY|" | while IFS='|' read -r _ label first_ts last_ts trades wins pnl fee_usd slip_usd_losers notional notional_losers; do
     if [[ "$first_ts" == "NODATA" ]]; then
         printf "\n  %-26s  (no data yet)\n" "$label"
         continue
     fi
+    # Defaults for old strategy lines that predate the cost columns.
+    fee_usd="${fee_usd:-0}"
+    slip_usd_losers="${slip_usd_losers:-0}"
+    notional="${notional:-0}"
+    notional_losers="${notional_losers:-0}"
 
     # Days elapsed (UTC)
     first_epoch=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "${first_ts%%.*}Z" +%s 2>/dev/null || \
@@ -175,12 +192,33 @@ echo "$DATA" | grep "^STRATEGY|" | while IFS='|' read -r _ label first_ts last_t
     s_pnl=$(pass_or_fail "$pnl" "0" ge)
     s_sym=$(pass_or_fail "$max_sym_pct_val" "$MAX_SYM_PCT" le)
 
-    # Overall verdict
-    if [[ "$days_elapsed" -lt "$MIN_DAYS" ]] || [[ "$trades" -lt "$MIN_TRADES" ]]; then
+    # Realized fee/slip bps (from journal cost decomposition). When notional is
+    # 0 — either every close predates the schema extension or every closed
+    # trade had StakeUSDT=0 — display "n/a" rather than dividing by zero.
+    if (( $(awk "BEGIN{print ($notional > 0)}") )); then
+        fee_bps_val=$(awk "BEGIN{printf \"%.2f\", $fee_usd / $notional * 10000}")
+        s_fee=$(pass_or_fail "$fee_bps_val" "$KILL_MAX_FEE_BP" le)
+    else
+        fee_bps_val="n/a"
+        s_fee="PENDING"
+    fi
+    if (( $(awk "BEGIN{print ($notional_losers > 0)}") )); then
+        slip_bps_val=$(awk "BEGIN{printf \"%.2f\", $slip_usd_losers / $notional_losers * 10000}")
+        s_slip=$(pass_or_fail "$slip_bps_val" "$KILL_MAX_SLIP_BP" le)
+    else
+        slip_bps_val="n/a"
+        s_slip="PENDING"
+    fi
+
+    # Overall verdict — fee/slip kill criteria check at any data volume since
+    # they're per-trade and don't need 60-day calendar accumulation to fail.
+    if [[ "$s_fee" == "FAIL" ]] || [[ "$s_slip" == "FAIL" ]]; then
+        overall="KILL — realized cost exceeds kill threshold"
+    elif [[ "$days_elapsed" -lt "$MIN_DAYS" ]] || [[ "$trades" -lt "$MIN_TRADES" ]]; then
         overall="WAITING (insufficient data)"
     elif [[ "$s_pnl" == "FAIL" ]] || [[ "$s_wr" == "FAIL" ]] || [[ "$s_sym" == "FAIL" ]]; then
         overall="KILL — at least one criterion failed"
-    elif [[ "$s_pnl" == "PASS" ]] && [[ "$s_wr" == "PASS" ]] && [[ "$s_sym" == "PASS" ]]; then
+    elif [[ "$s_pnl" == "PASS" ]] && [[ "$s_wr" == "PASS" ]] && [[ "$s_sym" == "PASS" ]] && [[ "$s_fee" == "PASS" ]] && [[ "$s_slip" == "PASS" ]]; then
         overall="DEPLOY-READY — all criteria met"
     else
         overall="WAITING"
@@ -193,6 +231,8 @@ echo "$DATA" | grep "^STRATEGY|" | while IFS='|' read -r _ label first_ts last_t
     printf "    Trades closed:       %4d / %d              [%s]\n" "$trades" "$MIN_TRADES" "$s_trades"
     printf "    Wins / WR:           %4d / %s%%             [%s]\n" "$wins" "$wr_pct" "$s_wr"
     printf "    Net PnL:             \$%-12s              [%s]\n" "$pnl_int" "$s_pnl"
+    printf "    Realized fee bps:    %-6s  / ≤%dbp                [%s]\n" "$fee_bps_val" "$KILL_MAX_FEE_BP" "$s_fee"
+    printf "    Realized slip bps:   %-6s  / ≤%dbp (losers)       [%s]\n" "$slip_bps_val" "$KILL_MAX_SLIP_BP" "$s_slip"
     printf "    Single-sym pct:      %s%% (%s)        [%s]\n" "$max_sym_pct_val" "$max_sym_name" "$s_sym"
     if [[ -n "$top_syms" ]]; then
         printf "    Top symbols:         %s\n" "$top_syms"
@@ -205,7 +245,11 @@ done
 echo
 echo "$SEP"
 echo "  Notes:"
-echo "  - Realized fee/slippage checks not yet implemented (require journal extension)"
+echo "  - Realized fee/slip bps come from journal cost decomposition (gross/fee/slip/notional)"
+echo "  - Slip bps computed on the losing-trade (outcome=STOP) subsample only — partial closes"
+echo "    and full target hits are excluded since slippage is modeled on losers only"
+echo "  - n/a means no closes carry the cost decomposition yet (engine restart needed before"
+echo "    new closes will land in the journal — old closes pre-extension show as 0 fee/slip)"
 echo "  - Kill criteria 'first 60 days net-negative' = same as Net PnL FAIL post 60-day mark"
 echo "  - Kill criteria 'two consecutive 30-day windows underperform BTC-HODL' not yet implemented"
 echo "  - All criteria from CLAUDE.md ## Forward-paper go/no-go criteria"
