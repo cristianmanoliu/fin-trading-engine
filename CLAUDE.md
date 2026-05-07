@@ -2,9 +2,9 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Strategy status (2026-05-06 EOS)
+## Strategy status (2026-05-07 EOS)
 
-**Live:** 16 paper-trading engines on Hetzner VPS, each running 1 live + 2 shadow strategies.
+**Live:** 16 paper-trading engines on Hetzner VPS, each running 1 live + 3 shadow strategies (alt5-15-336, alt5-15-504, bb20). Engines now have **journal-replay on startup** — restarts no longer orphan in-flight positions (commit `9eaeb54`, deployed 2026-05-07T20:24 UTC, 7 orphans recovered cleanly on first run).
 - **Live config:** `--signal-tf 4H --side-filter short --target-rr 6.0 --max-hold-hours 504 --funding-csv-dir data/funding --fee-bps 10 --stop-slippage-bps 5` (EMA 9/21 hardcoded). Selected via 6-window walk-forward validation 2026-05-06.
 - **Shadow A:** EMA 5/15 + mh336 (Cat A weak signal, forward A/B test).
 - **Shadow B:** EMA 5/15 + mh504 (joint candidate).
@@ -14,19 +14,24 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Real-money allocation:** ZERO. Gated on forward-paper validation (≥150 trades, ≥60 days net-positive, see `## Forward-paper go/no-go criteria`).
 
-## Today's findings (2026-05-06) — see `docs/findings/2026-05-06.md` for full narrative
+## Today's findings (2026-05-07 EOS)
 
-Headline outcomes (memory entries cover specifics):
-- Funding-loader bug fixed (was silently zeroing all historical funding)
-- Walk-forward + mechanism + quarterly framework built and run
-- Per-symbol skill REFUTED (0/57 pass Bonferroni, z=−0.52)
-- mh504 adopted as live (6/6 wins vs mh336 in pre-registered 6-window test)
-- Shadow mode deployed for 5/15 EMA candidate
-- Cat A entry-mechanism alternatives REJECTED (VWAP fade, PDH/PDL break, RSI cross-50)
-- Funding-regime correlation HOLDS (r=−0.17 at quarter level) but trade-level filter REJECTED
-- 1D both-sides identified as slip-robust alternative deployment (3/3 walk-forward, +$63k/yr — not deployed today)
+**Foundational claim validation set is COMPLETE.** A1 (block bootstrap CI), A3 (sample-split bootstrap), and edge-stability all confirm the +$130k/yr cumulative claim is real, regime-independent, and not time-decaying.
 
-**Pre-registered decision rules archived in:** `results/6window_decision_rule_2026-05-06.md`, `results/cat_a_decision_rule_2026-05-06.md`, `results/vwap_decision_rule_2026-05-06.md`.
+**Operational kill mechanism is RESOLVED.** Threshold-based kill criteria in `forward_paper_status.sh` were Monte-Carlo-calibrated → NEEDS_RECALIBRATION (30-40% FP under null) → recalibration attempt → NO_KILL_BAR (statistical impossibility at 90d due to distribution overlap; shift/SD ≈ 0.6, need ≥1.68 for FP≤20% AND TP≥80%). The drift detector (`scripts/live_vs_backtest_drift.py`) was then calibrated as the alternative → **DETECTOR_VIABLE**: TP=100% under deg30/deg50/dead at every operating point in the locked grid. Deployed at α_family=0.001, N_LIVE=50 (FP=12.1%, TP=100%) per recalibration verdict.
+
+**Architectural fix shipped.** `Stub.RecoverFromJournal()` reads current+prior month journal on engine startup, reconstructs in-flight position from last unclosed open. Pre-open tick guard skips backfill ticks predating recovered position. 11 unit tests cover edge cases (empty/closed/partial/cross-month/corrupt-line/pre-existing-position/pre-open-tick-guard). Verified end-to-end against the IMX bb20 orphan from yesterday morning.
+
+Headline outcomes (verdict docs are the authoritative records):
+- A1 / A3 / edge-stability: cumulative claim validated three independent ways
+- Kill bar: threshold-based criteria mis-calibrated then statistically impossible at 90d → distribution-based detector is the path forward
+- Drift detector: calibrated, verified VIABLE, tightened to α=0.001
+- Engine recovery: deployed, 7 orphans recovered cleanly, today's journal cost-decomposition schema activated for future closes
+- Cat G F1∧F2 composite: pre-registered today for next milestone, not yet executed
+
+**Pre-registered decision rules archived in:** `results/sample_split_bootstrap_decision_rule_2026-05-07.md`, `results/edge_stability_decision_rule_2026-05-07.md`, `results/kill_bar_calibration_decision_rule_2026-05-07.md`, `results/kill_bar_recal_decision_rule_2026-05-07.md`, `results/drift_detector_calibration_decision_rule_2026-05-07.md`, `results/cat_g_f1xf2_composite_decision_rule_2026-05-07.md`.
+
+**Prior-day findings:** `docs/findings/2026-05-06.md`. Today's session log: pending writeup.
 
 ## Build & Run
 
@@ -171,6 +176,7 @@ Key levels (used by absorption/breakout only): PDH, PDL, and optional manual `zo
 - **`expandKlineToTicks` is the canonical tick-expansion helper** (`pkg/marketdata/klines.go`). Both `CSVReplay` (backtest) and `BinanceFutures` (REST backfill on startup) call it so interpolation is identical in both paths. Do not inline a second copy.
 - **`BinanceFutures` backfills 96h of 1m klines on startup, paginated across 4 calls** by fetching `GET /fapi/v1/klines?startTime=...&limit=1500` from `fapi.binance.com` before opening the WebSocket. Sized so 4H-signal indicators (EMA21, BB20) prime during backfill; without this, each restart cost ~64h of cold-start blindness — see Bug 5. Backfill failure (any page) is non-fatal — engine logs a warning and proceeds with whatever ticks were successfully pushed before the failure.
 - **Live engine MUST call `Runner.SetLiveMode(true)`** to suppress signals from candles whose `CloseTime` is older than `backfillStaleness` (90s). Without this gate, paginated backfill (96h × 60 1m klines → 24 closed 4H candles) would prime EMA21 mid-backfill and emit a spurious "signal" at a stale historical close, opening a position at a price hours/days old. `cmd/backtest` leaves the gate off so historical CSV replay still produces signals — the gate is live-only.
+- **Engine startup MUST call `Stub.RecoverFromJournal()` for live + each shadow** to bridge the orphan-open gap that previously existed when an engine restart wiped `Stub.position` while the journal had an open event with no matching close. Recovery is no-op if `JournalPath` unset, position already non-nil, or no unclosed open in recent journal. Reconstructs entry/stop/target/side/reason/timestamp from the open event; `MaxAdverse`/`MaxFavorableR` reset to entry-time defaults (lossless for live config which doesn't use trail-stop or B2). Pre-open tick guard in `OnTick` (skip ticks where `tick.Timestamp < position.Signal.Timestamp`) prevents backfill replay from spuriously closing recovered positions on pre-open price action.
 - **Signal-context sidecars (C2)** capture rich state at signal-emission time for forward-paper pattern-matching. Enabled by `--signal-context-dir <path>` flag or `PAPER_LIVE_SIGNAL_CONTEXT_DIR` env. Writes `<dir>/<label>/<SYMBOL>-<month>.jsonl` per runner (live + each shadow). Schema: `pkg/strategy/signal_context.go` `SignalContext` struct — entry/stop/target/RR + EMA9/EMA21/spread + ATR + realized vol + BB bands + bias + VWAP + PDH/PDL + funding rate + signal_tf + side_filter. Records are written **after all filters pass**, just before `executor.OnSignal` — filtered signals are not captured. Off by default; opt-in.
 - **`Stub.JournalPath` opt-in — journal writes only happen in live mode.** `cmd/engine` sets `JournalPath`; `cmd/backtest` does not. When `JournalPath == ""`, `appendJournal` is a no-op. This preserves backtest behaviour byte-for-byte.
 - **`stake_usd` must be set in config** for dollar PnL output. Without it, `total_pnl_usd` is not emitted and all `$1k` columns will show zero.
@@ -215,11 +221,22 @@ High-value gaps still missing: `EntryDetector` EMA crossover and absorption/brea
 - **Bug 3β — Same-bar resolution**: synthetic open→high→low→close ordering means LONG positions always score TARGET when both stop and target lie within a single 1m kline range. `--pessimistic-ambiguous` flag detects and reclassifies these. At target_rr=5.0, ZERO ambiguous bars detected across 1,345 BTC winning trades — immaterial. Check again if target_rr is ever reduced below 2.
 - ~~**Bug 4 — REST poll interval × symbol count exceeded Binance weight cap**~~: `restPollInterval=6s × 16 symbols × 20 weight/call = 3200 weight/min` vs Binance per-IP cap `2400/min`. CLAUDE.md doc was wrong (claimed 1200–1600 weight/min by implicitly assuming the wrong weight/call). Fleet equilibrated at ~50% wall-time in 60s rate-limit backoff — confirmed 2026-05-07 by observing 30 × 429/hour/engine, identical counts across all 16 engines (per-IP synchronization), and 154 × 60s / 27829s = 0.332 backoff fraction averaged over the run (steady-state 0.5 in the last 5 hours). Fix: bumped to 10s on 2026-05-07. New steady-state load 1920 weight/min with 480 weight/min headroom. Operational consequence of the bug: ~13% of forward-paper signals at risk of 0–60s entry delay (boundary tick blocked by backoff) — bounds adverse-fill bias for the 7.5h pre-fix forward window. No trades fired in that window so impact = 0.
 - ~~**Bug 5 — Cold-start indicator blind period of ~64 h per restart**~~: `BinanceFutures.backfill` silently truncated to 1500 klines (= 25h of 1m data) regardless of the `backfill_hours` config, because `if limit > 1500 { limit = 1500 }` capped without pagination or warning. Combined with `EMA.Primed()` requiring 21 samples + `prevEma21 != 0` requiring one more candle, a 4H-signal-tf restart needed 22 closed 4H candles before any signal could fire — backfill provided ~6 → live runtime had to accumulate 16 more × 4h = **64h of blind period per restart**. Across the deploy churn 2026-05-05 → 2026-05-07, the strategy was structurally incapable of firing a signal continuously, masking it as "low n / quiet market". Fix 2026-05-07: paginated `backfill()` walks forward in `startTime`-chained 1500-call pages and the `BackfillHours` default bumped 48 → 96; channel buffer sized dynamically. To prevent the spurious-historical-signal failure mode introduced by paginated priming (EMA21 now primes mid-backfill — a cross there would emit a signal at a stale close price), `Runner.evaluateEntry` gates on `time.Since(c.CloseTime) > 90s` when `liveMode=true`. cmd/engine sets liveMode=true on live + shadow runners; cmd/backtest leaves it false so historical CSV replay continues to emit signals. Recovered ~62h of forward-paper time per restart.
+- ~~**Bug 6 — Engine restart orphans in-flight paper positions**~~: `Stub.Position` was RAM-only with no journal-replay on startup. An engine restart while a position was open left the journal with an "open" event and no matching "close" — the new engine didn't know about the position, so any subsequent stop/target hit went unrecorded. Surfaced in 2026-05-07 morning audit (IMXUSDT bb20 LONG @ 0.1766 had been orphaned since 08:00 UTC). Fix 2026-05-07: `Stub.RecoverFromJournal()` reads current+prior month journal on engine startup, walks open/close events, reconstructs `position` from the most-recent unclosed open. Defensive guard in `OnTick` skips ticks predating the position's open ts (necessary because backfill replay covers ~96h of pre-restart history). PARTIAL closes (B2 mid-R) are recovered with `MidRHit=true` and reduced `RemainingFrac`. Cross-month recovery scans 2 months. Corrupt trailing line (engine killed mid-flush) is tolerated. 11 unit tests cover edge cases. Deployed 2026-05-07T20:24 UTC: 7 orphans recovered cleanly across all engines (commit `9eaeb54`).
 
 
 ## Forward-paper go/no-go criteria
 
-Forward-paper validation started 2026-05-05 20:06 UTC (32 Strategy B engines). The deployed-32 list backtested at +$129k/yr at slip=25bp, but the train-only-shortlist diagnostic shows +70% look-ahead inflation at that slip level. **Anchor expectations to the honest annual: ≈ $69k/yr at slip=25bp**, not the deployed-claim or all-57 headline.
+Forward-paper validation started 2026-05-05 20:06 UTC (32 Strategy B engines, since reduced to deployed-16). The deployed-32 list backtested at +$129k/yr at slip=25bp, but the train-only-shortlist diagnostic shows +70% look-ahead inflation at that slip level. **Anchor expectations to the honest annual: ≈ $69k/yr at slip=25bp**, not the deployed-claim or all-57 headline.
+
+### Kill mechanism (decision-grade vs advisory) — IMPORTANT
+
+The threshold-based criteria below are **advisory only.** Pre-registered Monte Carlo calibration (2026-05-07) found them mis-calibrated against the strategy's natural variance — under "null" (strategy performing as backtest predicted), they produce ~30-40% false-positive KILL verdicts. Recalibration via principled quantile-setting was attempted and found that no threshold can simultaneously meet FP(null)≤20% AND TP(dead)≥80% at the 90-day horizon (statistical impossibility; distribution overlap). See `results/kill_bar_recal_verdict_2026-05-07.md`.
+
+**The decision-grade kill mechanism is `scripts/live_vs_backtest_drift.py`** — distribution-based detection comparing live trades to the backtest empirical distribution via Welch t-tests + WR z-test, Bonferroni-corrected. Calibration found it VIABLE: TP(deg30)=TP(deg50)=TP(dead)=100% at every operating point in the locked grid. Deployed operating point: α_family=0.001, N_LIVE=50 (FP=12.1%, TP=100%). Run periodically as forward-paper accumulates; exit code 1 = decision-grade drift detected.
+
+The threshold criteria remain useful as **early-warning indicators** that warrant investigation, but should not auto-trigger a kill. Always cross-reference against the drift detector before acting on a `forward_paper_status.sh` KILL verdict.
+
+See `results/drift_detector_calibration_verdict_2026-05-07.md` for the full calibration record.
 
 ### Statistical-power floor (before reading any signal)
 
@@ -227,22 +244,27 @@ P4-Combined backtests at WR 20.64% with 6:1 R:R. Breakeven WR ≈ 14.3% — only
 
 ### Deploy real money (small tranche, 1/10th notional) only if ALL true
 
-- ≥150 live trades accumulated
-- Realized round-trip taker fees ≤ 12 bp (vs 10 bp modeled — 20% slack)
+Note: the "≥150 trades AND ≥60 days" gate is internally inconsistent at the historical fleet trade rate of ~1.18 trades/day. 60 days yields ~70 trades on average; ~127 days are needed to hit 150 trades. Surfaced in kill-bar calibration 2026-05-07. The two thresholds collide; apply both literally (whichever comes second).
+
+- ≥150 live trades accumulated AND ≥60 calendar days net-positive in dollar terms
+- Realized round-trip taker fees ≤ 12 bp (vs 10 bp modeled — 20% slack). The journal cost-decomposition schema (commit `7939786`, 2026-05-07) writes `fee_usd`/`slip_usd`/`notional_usd` per close so this is now directly evaluable in `forward_paper_status.sh`.
 - Realized stop-side slippage ≤ 20 bp on the losing-trade subsample (vs 5-25 bp modeled range)
-- ≥60 calendar days net-positive in dollar terms
 - Live PnL ≥ 60% of pro-rated honest-annual ($69k/yr × elapsed-fraction × 0.60)
 - Live PnL beats `BTC HODL with $32k notional` over the same window
 - No single symbol contributes >40% of cumulative live PnL
+- **`scripts/live_vs_backtest_drift.py` returns exit code 0** (no Bonferroni-significant divergence at α_family=0.001) — this is the decision-grade gate; the threshold-based criteria above are advisory only
 
-### Kill the strategy if ANY true
+### Kill the strategy (advisory triggers — confirm via drift detector before acting)
+
+These are NOT auto-kills. The threshold-based criteria are mis-calibrated (per kill-bar calibration 2026-05-07). Treat each as an **investigation trigger**: when one fires, run `scripts/live_vs_backtest_drift.py`; if THAT returns exit code 1 (decision-grade drift), kill. If drift detector is clean, the threshold fire is more likely sampling variance than strategy degradation.
 
 - First 60 days net-negative
-- Realized stop-side slippage > 25 bp (the historical-rule cliff edge — but A2 sweep 2026-05-07 shows the actual breakeven is at ~81bp; slip-cost is linear at −$1.71k/yr per bp with no nonlinear cliff. 25bp triggers investigation, not auto-kill. See `results/slip_cliff_verdict_2026-05-07.md`)
-- Realized WR < 14% over ≥150 trades (below breakeven)
-- Single symbol contributes >40% of live PnL (concentration risk realized)
+- Realized stop-side slippage > 25 bp (historical-rule cliff edge — but A2 sweep 2026-05-07 shows the actual breakeven is at ~81bp; slip-cost is linear at −$1.71k/yr per bp with no nonlinear cliff. See `results/slip_cliff_verdict_2026-05-07.md`)
+- Realized WR < 14% over ≥150 trades (below breakeven; calibration found this rarely fires under any scenario — useful but low-power)
+- Single symbol contributes >40% of live PnL (calibration found this fires in 41% of healthy windows; treat with skepticism)
 - Train-only-shortlist diagnostic re-run on rolling forward data shows non-positive honest test
 - Two consecutive 30-day windows underperform BTC-HODL benchmark by >$5k each
+- **Drift detector returns exit code 1** at α_family=0.001 — this IS a decision-grade kill, no further confirmation needed
 
 ### Initial real-money sizing
 
@@ -264,9 +286,9 @@ Open with **$100/trade** (1/10th of backtest stake), not $1k. Cost of being wron
 
 ## Known unmodeled risks
 
-After the 2026-05-05 cost-survivor battery and 2026-05-06 follow-up work, the original 13 caveats are now reduced to 3 still-open:
+After the 2026-05-05 cost-survivor battery and 2026-05-06/07 follow-up work, the original 13 caveats are now reduced to 3 still-open:
 
-- **6 s REST polling lag is unmodeled.** Adverse on every entry and every stop. Live-only risk — not testable in backtest. Mitigation: monitor live vs backtest signal-to-execution gap during forward-paper.
+- **6 s REST polling lag is unmodeled** (10s as of 2026-05-07 Bug 4 fix). Adverse on every entry and every stop. Live-only risk — not testable in backtest. Mitigation: monitor live vs backtest signal-to-execution gap during forward-paper. The journal cost-decomposition schema lets this be measured directly once realized fills accumulate.
 - **Funding-CSV staleness drift.** Even with the new `refresh_funding.sh` mechanism, engines pick up refreshed CSVs only on restart. Between restarts, trades held past the CSV's last entry get $0 funding. Bounded by time-since-last-restart; weekly refresh + restart caps drift at ~7 days. Net funding ≈ $0 in steady state per backtest, so divergence is small in practice.
 - **No real-money execution test.** Forward-paper with realistic position sizing, exchange position limits, margin reuse, and concurrent-trade interaction is unmodeled. Honest backtest projection is $69-184k/yr depending on slip (see `## Train-only shortlist diagnostic`); the original $74-142k/yr framing was based on the deployed-32 list which carries +26-70% look-ahead inflation.
 
@@ -275,6 +297,8 @@ After the 2026-05-05 cost-survivor battery and 2026-05-06 follow-up work, the or
 - ~~Funding-CSV silent fallback~~ → verified clean at deploy 2026-05-05 (all 32 engines logged "loaded historical funding"). The remaining concern is staleness, addressed above.
 - ~~`tradeResult.fundingUSDT` comment was stale~~ → fixed 2026-05-06.
 - ~~Symbol-selection look-ahead in deployed-32~~ → measured 2026-05-06 via train-only-shortlist diagnostic at slip ∈ {5, 15, 25} bp. Inflation is +26-70%, fixed dollar bias ~$115-124k on test, sign of test_NET preserved at every honest selection rule. **Quantified, not eliminated** — incorporated into go/no-go expectations.
+- ~~Engine restart orphans in-flight paper positions~~ → fixed 2026-05-07 (Bug 6, commit `9eaeb54`). Documented in Known Bugs / Fixed.
+- ~~Threshold-based kill criteria not validated against natural variance~~ → calibrated 2026-05-07; found mis-calibrated at 90d (statistical impossibility of meeting locked acceptance bands). Replaced as decision-grade by drift detector (DETECTOR_VIABLE, 100% TP across degradation scenarios). Threshold criteria remain advisory.
 
 ## Dead Code
 
