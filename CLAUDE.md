@@ -275,7 +275,22 @@ These are NOT auto-kills. The threshold-based criteria are mis-calibrated (per k
 
 ### Initial real-money sizing
 
-Open with **$100/trade** (1/10th of backtest stake), not $1k. Cost of being wrong is bounded; cost of being right is just slower scaling. Promote to $1k/trade only after 6 months of forward evidence meeting all deploy-criteria.
+The full staged deployment protocol is pre-registered at
+`results/real_money_protocol_decision_rule_2026-05-08.md` (locked
+2026-05-08, before forward-paper validation completes — applies
+mechanically when forward-paper resolves).
+
+Summary:
+- **STAGE_1**: $100/trade after forward-paper deploy criteria + 30d clean drift detector
+- **STAGE_2**: $300/trade after ≥50 STAGE_1 trades + 30d + slip stable
+- **STAGE_3**: $500/trade after ≥100 cumulative + 60d at STAGE_2 + slip/drift stable
+- **STAGE_4**: $1,000/trade after ≥200 cumulative + 90d at STAGE_3
+
+Earliest STAGE_4 reach from forward-paper start (~2026-05-05): approximately 2027-03-09.
+
+Locked kill criteria fire at any stage (STOP entire protocol, no auto-resumption within milestone): confirmed drift firing (two 7+ days apart or drift+threshold match), realized slip >30bp sustained 30 trades, 3 consecutive days each net-loss >5× stake, single-symbol >50% PnL, unrecoverable engine/exchange error, 20% drawdown over 60d window.
+
+When forward-paper resolves: read the pre-reg file. The promotion or kill decision is a mechanical rule application, no design choices remaining.
 
 ### Things to NOT do during forward-paper
 
