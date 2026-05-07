@@ -1,0 +1,53 @@
+CAT G' — F1 ∧ F2 COMPOSITE, UNIVERSE-57 DENOMINATOR (locked)
+================================================================================
+Pre-reg:    cat_g_prime_universe57_decision_rule_2026-05-08.md
+F1 thresh:  > 30.0 bp/day funding (locked)
+F2 K:       ≥ 5 other universe-57 same-side crosses (locked)
+F2 tol:     ±60 s (locked)
+Trade pool: deployed-16 (locked)
+F2 univ:    universe-57 (NEW: only change vs Cat G)
+
+Loading deployed-16 trades...
+  2,210 deployed trades
+Loading universe-57 trades (for F2 co-cross denominator)...
+  7,479 universe trades
+Loading funding histories...
+  funding loaded for 16/16 deployed symbols
+
+Computing F1 and F2 tags per deployed trade...
+  F1-pass:                   49/2210 (2.2%)
+  F2-pass (univ-57 K=5):    723/2210 (32.7%)
+  COMPOSITE F1 ∧ F2:          6/2210 (0.27%)
+
+Per-window walk-forward aggregates:
+
+  Window Range                    unf-N        unf-NET  flt-N        flt-NET flt-NET/tr    Δ-WR flt≥unf
+  ------ ----------------------- ------ -------------- ------ -------------- ---------- ------- -------
+  W-2    2020-05-01→2021-04-30    276       -$45,001      3        +$4,120    +$1,373  +19.2p       ✓
+  W-1    2021-05-01→2022-04-30    388      +$268,749      1        -$1,007    -$1,007  -27.1p       ✗
+  W0     2022-05-01→2023-04-30    471      +$196,204      0            +$0        +$0  -25.1p       ✗
+  W1     2023-05-01→2024-04-30    510        +$8,799      2        -$1,968      -$984  -17.6p       ✗
+  W2     2024-05-01→2025-04-30    509      +$253,338      0            +$0        +$0  -24.4p       ✗
+  W3     2025-05-01→2026-04-30      0            +$0      0            +$0        +$0   +0.0p       ✓
+
+Aggregate (across valid windows):
+  Valid windows                   : 5 of 6
+  Positive flt windows            : 1/5
+  Filtered total NET              : +$1,145
+  Unfiltered total NET            : +$682,090
+  Mean annual flt NET             : +$229/yr
+  Filtered NET/trade              : +$191
+  Unfiltered NET/trade            : +$317
+  flt-NET-per-trade vs unf        : 0.60×
+  Windows where flt-NET ≥ unf-NET : 1/5
+
+================================================================================
+DECISION RULE EVALUATION (locked, same tiers as Cat G):
+
+  DEPLOY-CANDIDATE      ≥5/6 wins: 1/6 ✗ | mean ≥ $50k/yr: +$229 ✗ | flt ≥ unf: +$1,145 vs +$682,090 ✗
+  SHADOW DEPLOY         ≥4/6 wins: 1/6 ✗ | mean ≥ $30k/yr: +$229 ✗ | flt $/tr ≥ 1.5× unf: 0.60× ✗
+  WALK-FORWARD CAND.    ≥3/6 wins: 1/6 ✗ | mean > 0: +$229 ✓ | flt $/tr > unf $/tr: +$191 > +$317 ✗
+
+================================================================================
+VERDICT: REJECT
+================================================================================
