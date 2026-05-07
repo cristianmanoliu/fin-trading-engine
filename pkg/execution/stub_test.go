@@ -701,6 +701,268 @@ func TestJournalCloseEventCostFields(t *testing.T) {
 	}
 }
 
+// ── RecoverFromJournal tests ──────────────────────────────────────────────
+
+// writeJournal writes the given JSON-serialized lines to <dir>/<symbol>-<month>.jsonl.
+// month should be "YYYY-MM" matching what the recovery scans.
+func writeJournal(t *testing.T, dir, symbol, month string, lines []string) {
+	t.Helper()
+	path := filepath.Join(dir, symbol+"-"+month+".jsonl")
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		t.Fatalf("create journal: %v", err)
+	}
+	defer f.Close()
+	for _, line := range lines {
+		if _, err := f.WriteString(line + "\n"); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+	}
+}
+
+func currentMonthStr() string  { return time.Now().UTC().Format("2006-01") }
+func priorMonthStr() string    { return time.Now().UTC().AddDate(0, -1, 0).Format("2006-01") }
+
+func TestRecover_NoJournalDir_NoOp(t *testing.T) {
+	stub := &Stub{StakeUSDT: 1000, Symbol: "X"} // JournalPath empty
+	recovered, err := stub.RecoverFromJournal()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if recovered {
+		t.Errorf("expected no recovery without JournalPath, got recovered=true")
+	}
+}
+
+func TestRecover_EmptyDir_NoOp(t *testing.T) {
+	dir := t.TempDir()
+	stub := &Stub{StakeUSDT: 1000, JournalPath: dir, Symbol: "BTCUSDT"}
+	recovered, err := stub.RecoverFromJournal()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if recovered {
+		t.Errorf("expected no recovery on empty dir, got recovered=true")
+	}
+}
+
+func TestRecover_OpenWithoutClose_Recovers(t *testing.T) {
+	dir := t.TempDir()
+	openLine := `{"event":"open","symbol":"BTCUSDT","ts":"2026-05-07T08:00:00Z","side":"LONG","entry":50000,"stop":49500,"target":53000,"reason":"test"}`
+	writeJournal(t, dir, "BTCUSDT", currentMonthStr(), []string{openLine})
+
+	stub := &Stub{StakeUSDT: 1000, JournalPath: dir, Symbol: "BTCUSDT"}
+	recovered, err := stub.RecoverFromJournal()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !recovered {
+		t.Fatalf("expected recovery for open without close")
+	}
+	if stub.position == nil {
+		t.Fatal("position not set after recovery")
+	}
+	sig := stub.position.Signal
+	if sig.Side != models.Long {
+		t.Errorf("side: want LONG, got %v", sig.Side)
+	}
+	if sig.EntryPrice != 50000 || sig.StopLoss != 49500 || sig.TakeProfit != 53000 {
+		t.Errorf("price fields wrong: entry=%v stop=%v target=%v", sig.EntryPrice, sig.StopLoss, sig.TakeProfit)
+	}
+	expectedTS, _ := time.Parse(time.RFC3339, "2026-05-07T08:00:00Z")
+	if !sig.Timestamp.Equal(expectedTS) {
+		t.Errorf("ts: want %v, got %v", expectedTS, sig.Timestamp)
+	}
+	if stub.position.OriginalStopDist != 500 {
+		t.Errorf("OriginalStopDist: want 500, got %v", stub.position.OriginalStopDist)
+	}
+	if stub.position.MidRHit || stub.position.RemainingFrac != 1.0 {
+		t.Errorf("expected fresh-position state for non-partial recovery, got MidRHit=%v RemFrac=%v",
+			stub.position.MidRHit, stub.position.RemainingFrac)
+	}
+}
+
+func TestRecover_OpenAndClose_NoRecovery(t *testing.T) {
+	dir := t.TempDir()
+	lines := []string{
+		`{"event":"open","symbol":"BTCUSDT","ts":"2026-05-07T08:00:00Z","side":"LONG","entry":50000,"stop":49500,"target":53000,"reason":"test"}`,
+		`{"event":"close","symbol":"BTCUSDT","ts":"2026-05-07T09:00:00Z","side":"LONG","entry":50000,"exit":53000,"stop":49500,"target":53000,"pnl_pts":3000,"pnl_usd":6000,"outcome":"TARGET","reason":"test"}`,
+	}
+	writeJournal(t, dir, "BTCUSDT", currentMonthStr(), lines)
+
+	stub := &Stub{StakeUSDT: 1000, JournalPath: dir, Symbol: "BTCUSDT"}
+	recovered, err := stub.RecoverFromJournal()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if recovered || stub.position != nil {
+		t.Errorf("expected no recovery for closed trade")
+	}
+}
+
+func TestRecover_OpenAndPartialClose_RecoversWithMidRHit(t *testing.T) {
+	dir := t.TempDir()
+	lines := []string{
+		`{"event":"open","symbol":"X","ts":"2026-05-07T08:00:00Z","side":"LONG","entry":100,"stop":99,"target":106,"reason":"test"}`,
+		`{"event":"close","symbol":"X","ts":"2026-05-07T09:00:00Z","side":"LONG","entry":100,"exit":103,"stop":99,"target":106,"pnl_pts":3,"pnl_usd":1500,"outcome":"PARTIAL","reason":"test"}`,
+	}
+	writeJournal(t, dir, "X", currentMonthStr(), lines)
+
+	stub := &Stub{StakeUSDT: 1000, JournalPath: dir, Symbol: "X"}
+	recovered, err := stub.RecoverFromJournal()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !recovered {
+		t.Fatal("expected recovery after partial close (remainder still open)")
+	}
+	if !stub.position.MidRHit {
+		t.Error("expected MidRHit=true after recovering partial-closed open")
+	}
+	if stub.position.RemainingFrac != 0.5 {
+		t.Errorf("RemainingFrac: want 0.5, got %v", stub.position.RemainingFrac)
+	}
+}
+
+func TestRecover_OpenPartialAndFullClose_NoRecovery(t *testing.T) {
+	dir := t.TempDir()
+	lines := []string{
+		`{"event":"open","symbol":"X","ts":"2026-05-07T08:00:00Z","side":"LONG","entry":100,"stop":99,"target":106,"reason":"test"}`,
+		`{"event":"close","symbol":"X","ts":"2026-05-07T09:00:00Z","side":"LONG","entry":100,"exit":103,"stop":99,"target":106,"outcome":"PARTIAL","reason":"test"}`,
+		`{"event":"close","symbol":"X","ts":"2026-05-07T10:00:00Z","side":"LONG","entry":100,"exit":106,"stop":100,"target":106,"outcome":"TARGET","reason":"test"}`,
+	}
+	writeJournal(t, dir, "X", currentMonthStr(), lines)
+
+	stub := &Stub{StakeUSDT: 1000, JournalPath: dir, Symbol: "X"}
+	recovered, _ := stub.RecoverFromJournal()
+	if recovered || stub.position != nil {
+		t.Errorf("expected no recovery — partial then full target should clear position")
+	}
+}
+
+func TestRecover_TwoOpensSecondNotClosed_RecoversSecond(t *testing.T) {
+	// Defensive: legitimate sequence is open→close→open→close. Two opens with
+	// only one close (and the second un-closed) shouldn't normally happen
+	// (OnSignal rejects when position is already open) but recovery must
+	// still pick the LATEST unclosed open.
+	dir := t.TempDir()
+	lines := []string{
+		`{"event":"open","symbol":"X","ts":"2026-05-07T08:00:00Z","side":"LONG","entry":100,"stop":99,"target":106,"reason":"first"}`,
+		`{"event":"close","symbol":"X","ts":"2026-05-07T09:00:00Z","side":"LONG","entry":100,"exit":99,"outcome":"STOP","reason":"first"}`,
+		`{"event":"open","symbol":"X","ts":"2026-05-07T10:00:00Z","side":"SHORT","entry":200,"stop":210,"target":140,"reason":"second"}`,
+	}
+	writeJournal(t, dir, "X", currentMonthStr(), lines)
+
+	stub := &Stub{StakeUSDT: 1000, JournalPath: dir, Symbol: "X"}
+	recovered, _ := stub.RecoverFromJournal()
+	if !recovered {
+		t.Fatal("expected recovery of second open")
+	}
+	if stub.position.Signal.Side != models.Short || stub.position.Signal.EntryPrice != 200 {
+		t.Errorf("recovered wrong position: side=%v entry=%v",
+			stub.position.Signal.Side, stub.position.Signal.EntryPrice)
+	}
+}
+
+func TestRecover_PriorMonthOpen_CrossMonthRecovery(t *testing.T) {
+	// Position opened in prior month's journal, no close anywhere — should
+	// recover by reading prior-month file.
+	dir := t.TempDir()
+	openLine := `{"event":"open","symbol":"X","ts":"2026-04-25T08:00:00Z","side":"LONG","entry":100,"stop":99,"target":106,"reason":"crossmonth"}`
+	writeJournal(t, dir, "X", priorMonthStr(), []string{openLine})
+
+	stub := &Stub{StakeUSDT: 1000, JournalPath: dir, Symbol: "X"}
+	recovered, err := stub.RecoverFromJournal()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !recovered {
+		t.Fatal("expected recovery from prior month's journal")
+	}
+}
+
+func TestRecover_CorruptTrailingLine_StillRecovers(t *testing.T) {
+	dir := t.TempDir()
+	// Open event followed by a corrupt partial line (e.g., engine killed mid-write).
+	path := filepath.Join(dir, "X-"+currentMonthStr()+".jsonl")
+	f, _ := os.Create(path)
+	f.WriteString(`{"event":"open","symbol":"X","ts":"2026-05-07T08:00:00Z","side":"LONG","entry":100,"stop":99,"target":106,"reason":"test"}` + "\n")
+	f.WriteString(`{"event":"clo`) // truncated
+	f.Close()
+
+	stub := &Stub{StakeUSDT: 1000, JournalPath: dir, Symbol: "X"}
+	recovered, err := stub.RecoverFromJournal()
+	if err != nil {
+		t.Fatalf("expected corrupt-line tolerance, got err: %v", err)
+	}
+	if !recovered {
+		t.Fatal("corrupt trailing line should not block recovery of valid open")
+	}
+}
+
+func TestRecover_PreExistingPosition_NoOverwrite(t *testing.T) {
+	dir := t.TempDir()
+	openLine := `{"event":"open","symbol":"X","ts":"2026-05-07T08:00:00Z","side":"LONG","entry":100,"stop":99,"target":106,"reason":"journal"}`
+	writeJournal(t, dir, "X", currentMonthStr(), []string{openLine})
+
+	stub := &Stub{StakeUSDT: 1000, JournalPath: dir, Symbol: "X"}
+	// Plant an existing position (simulate already-active).
+	stub.position = &OpenPosition{
+		Signal: &models.Signal{
+			Symbol: "X", Side: models.Short, EntryPrice: 999,
+			StopLoss: 1100, TakeProfit: 500, Timestamp: time.Now(),
+		},
+		OriginalStopDist: 101, RemainingFrac: 1.0,
+	}
+
+	recovered, err := stub.RecoverFromJournal()
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if recovered {
+		t.Errorf("must not overwrite existing position")
+	}
+	if stub.position.Signal.EntryPrice != 999 {
+		t.Errorf("position was overwritten: entry=%v", stub.position.Signal.EntryPrice)
+	}
+}
+
+func TestRecover_PreOpenTickGuard_DoesNotCloseRecovered(t *testing.T) {
+	// After recovery, a tick with timestamp BEFORE the position's ts should
+	// be skipped — even if its price would otherwise hit stop/target.
+	dir := t.TempDir()
+	openLine := `{"event":"open","symbol":"X","ts":"2026-05-07T08:00:00Z","side":"LONG","entry":100,"stop":99,"target":110,"reason":"test"}`
+	writeJournal(t, dir, "X", currentMonthStr(), []string{openLine})
+
+	stub := &Stub{StakeUSDT: 1000, JournalPath: dir, Symbol: "X", ExactFills: true}
+	if recovered, _ := stub.RecoverFromJournal(); !recovered {
+		t.Fatal("recovery should have succeeded")
+	}
+
+	// Pre-open tick at a price that would hit target — must be ignored.
+	stub.OnTick(models.Tick{
+		Symbol: "X",
+		Timestamp: time.Date(2026, 5, 7, 7, 0, 0, 0, time.UTC), // 1h BEFORE open
+		Price: 110,
+	})
+	if stub.position == nil {
+		t.Fatal("pre-open tick at target price closed the recovered position — guard failed")
+	}
+
+	// Post-open tick at target price — should close normally.
+	stub.OnTick(models.Tick{
+		Symbol: "X",
+		Timestamp: time.Date(2026, 5, 7, 9, 0, 0, 0, time.UTC), // 1h AFTER open
+		Price: 110,
+	})
+	if stub.position != nil {
+		t.Fatal("post-open tick at target price should have closed the recovered position")
+	}
+	if len(stub.results) != 1 || !stub.results[0].won {
+		t.Errorf("expected one winning trade after recovery+target, got %d results", len(stub.results))
+	}
+}
+
 func TestJournalDisabledInBacktest(t *testing.T) {
 	// When JournalPath is empty (backtest mode), no files should be created.
 	stub := &Stub{StakeUSDT: 1000} // JournalPath intentionally not set

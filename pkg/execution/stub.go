@@ -1,6 +1,7 @@
 package execution
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -169,6 +170,150 @@ type journalEntry struct {
 	Notional   float64 `json:"notional_usd,omitempty"`
 }
 
+// RecoverFromJournal scans the symbol's journal files (current and prior
+// month) for an unclosed position. If found, reconstructs s.position to the
+// recovered state. Returns whether recovery happened.
+//
+// Designed to be called once on engine startup, after Stub initialization
+// but before any tick processing, to bridge restart-time orphan-open gaps
+// in forward-paper data. Without this, an engine restart while a paper
+// position is open results in a journal "open" with no matching "close" —
+// the new engine doesn't know about the position and any subsequent stop/
+// target hit goes unrecorded.
+//
+// Recovery preserves: entry, stop, target, side, reason, timestamp, plus
+// MidRHit / RemainingFrac (so a partial-closed B2 trade resumes correctly).
+//
+// Recovery does NOT preserve: MaxAdverse / MaxFavorableR — these reset to
+// entry-time defaults. For the live config (no trailing-stop, no B2 multi-
+// level TP) this loses no information. For B1/B2 modes intra-trade history
+// is reset but the trade resumes at the current stop level intact.
+//
+// No-op when JournalPath/Symbol unset, or position is already non-nil
+// (refuses to overwrite). Corrupt or missing journal files are skipped
+// silently — recovery is best-effort.
+func (s *Stub) RecoverFromJournal() (recovered bool, err error) {
+	if s.JournalPath == "" || s.Symbol == "" {
+		return false, nil
+	}
+	if s.position != nil {
+		return false, nil
+	}
+
+	now := time.Now().UTC()
+	currentMonth := now.Format("2006-01")
+	priorMonth := now.AddDate(0, -1, 0).Format("2006-01")
+	files := []string{
+		// Process chronologically: prior month first, then current.
+		filepath.Join(s.JournalPath, fmt.Sprintf("%s-%s.jsonl", s.Symbol, priorMonth)),
+		filepath.Join(s.JournalPath, fmt.Sprintf("%s-%s.jsonl", s.Symbol, currentMonth)),
+	}
+
+	var lastOpen *journalEntry
+	midRHit := false
+	remainingFrac := 1.0
+
+	for _, fname := range files {
+		f, openErr := os.Open(fname)
+		if openErr != nil {
+			continue // missing file is fine
+		}
+		sc := bufio.NewScanner(f)
+		// Allow up to 1MB per line — journal entries are small but defensive.
+		sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+		for sc.Scan() {
+			line := sc.Bytes()
+			if len(line) == 0 {
+				continue
+			}
+			var e journalEntry
+			if jerr := json.Unmarshal(line, &e); jerr != nil {
+				// Corrupt line (e.g. partial trailing write from a kill mid-flush) — skip.
+				continue
+			}
+			switch e.Event {
+			case "open":
+				eCopy := e // capture by value; loop reuses e
+				lastOpen = &eCopy
+				midRHit = false
+				remainingFrac = 1.0
+			case "close":
+				if e.Outcome == "PARTIAL" {
+					// B2 mid-R partial: remainder still open. We assume the
+					// configured MidFrac was 0.5 (the project default); if a
+					// future config changes this, recovery will be slightly
+					// off but the open vs closed boolean stays correct.
+					midRHit = true
+					if remainingFrac > 0.5 {
+						remainingFrac -= 0.5
+					}
+				} else {
+					// Full close (TARGET or STOP): position is closed.
+					lastOpen = nil
+					midRHit = false
+					remainingFrac = 1.0
+				}
+			}
+		}
+		_ = f.Close()
+	}
+
+	if lastOpen == nil {
+		return false, nil
+	}
+
+	// Translate side string back to Direction.
+	var side models.Direction
+	switch lastOpen.Side {
+	case "LONG":
+		side = models.Long
+	case "SHORT":
+		side = models.Short
+	default:
+		return false, fmt.Errorf("recovery: unknown side %q in journal open", lastOpen.Side)
+	}
+	ts, terr := time.Parse(time.RFC3339, lastOpen.TS)
+	if terr != nil {
+		return false, fmt.Errorf("recovery: invalid timestamp %q in journal open: %w", lastOpen.TS, terr)
+	}
+	stopDist := math.Abs(lastOpen.Entry - lastOpen.Stop)
+	if stopDist == 0 {
+		return false, fmt.Errorf("recovery: zero stop distance (entry==stop) in journal open")
+	}
+
+	sig := &models.Signal{
+		Symbol:     lastOpen.Symbol,
+		Side:       side,
+		EntryPrice: lastOpen.Entry,
+		StopLoss:   lastOpen.Stop,
+		TakeProfit: lastOpen.Target,
+		Timestamp:  ts,
+		Reason:     lastOpen.Reason,
+	}
+	s.position = &OpenPosition{
+		Signal:           sig,
+		MaxAdverse:       sig.EntryPrice,
+		LastPrice:        sig.EntryPrice,
+		LastTime:         sig.Timestamp,
+		OriginalStopDist: stopDist,
+		MidRHit:          midRHit,
+		RemainingFrac:    remainingFrac,
+	}
+
+	slog.Info("position recovered from journal",
+		"symbol", s.Symbol,
+		"side", side.String(),
+		"entry", sig.EntryPrice,
+		"stop", sig.StopLoss,
+		"target", sig.TakeProfit,
+		"ts", lastOpen.TS,
+		"midRHit", midRHit,
+		"remainingFrac", remainingFrac,
+		"journal_path", s.JournalPath,
+	)
+	return true, nil
+}
+
 func (s *Stub) appendJournal(entry journalEntry) {
 	if s.JournalPath == "" {
 		return
@@ -275,6 +420,17 @@ func (s *Stub) OnTick(tick models.Tick) {
 		return
 	}
 	sig := s.position.Signal
+
+	// Skip ticks predating the position's open timestamp. Normal in-flow
+	// ticks always have ts >= signal ts (signals fire at candle close, ticks
+	// stream forward). This guard matters during journal-recovery + backfill:
+	// the engine recovers an open with ts=X, then backfill replays ticks for
+	// the past 96h — many of which have ts < X. Those don't apply to the
+	// recovered position. Ticks at ts >= X DO apply (they're the "gap"
+	// covered by the engine being down).
+	if !sig.Timestamp.IsZero() && tick.Timestamp.Before(sig.Timestamp) {
+		return
+	}
 
 	s.position.LastPrice = tick.Price
 	s.position.LastTime = tick.Timestamp

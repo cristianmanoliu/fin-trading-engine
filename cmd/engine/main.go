@@ -159,6 +159,16 @@ func main() {
 		}
 	}
 
+	// Recover any unclosed paper position from the journal before any tick
+	// flow starts. This bridges the orphan-open gap that previously existed
+	// when an engine restart wiped Stub.position while the journal still had
+	// the corresponding open event with no matching close.
+	if recovered, err := exec.RecoverFromJournal(); err != nil {
+		slog.Warn("live position recovery failed", "err", err, "symbol", cfg.Symbol)
+	} else if recovered {
+		slog.Info("live position recovery: in-flight trade restored", "symbol", cfg.Symbol)
+	}
+
 	// Parse shadow specs first so we know how many runners to fan-out to.
 	shadowSpecs, err := strategy.ParseShadowSpecs(*shadowFlag)
 	if err != nil {
@@ -253,6 +263,16 @@ func main() {
 			FundingBpsPerDay: *fundingBpsPerDay,
 			MaxHoldHours:     spec.MaxHoldHours,
 			FundingProvider:  exec.FundingProvider, // share — provider is read-only
+		}
+
+		// Same recovery as live — each shadow has its own journal at
+		// shadow/<label>/, so its own orphan-open class.
+		if recovered, err := shadowExec.RecoverFromJournal(); err != nil {
+			slog.Warn("shadow position recovery failed",
+				"err", err, "symbol", cfg.Symbol, "label", spec.Label)
+		} else if recovered {
+			slog.Info("shadow position recovery: in-flight trade restored",
+				"symbol", cfg.Symbol, "label", spec.Label)
 		}
 
 		idx := i + 1 // live = 0, shadows = 1..N
