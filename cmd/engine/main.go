@@ -37,6 +37,7 @@ func main() {
 	shadowFlag := flag.String("shadow", "", "comma-separated shadow strategy specs to run alongside live: 'label1:ema_fast-ema_slow-max_hold,label2:...'. Shadow strategies see identical market data but write to /var/log/paper-live/journal/shadow/<label>/. Used to test parameter variants forward without changing the live config.")
 	emaFastPeriod := flag.Int("ema-fast-period", 0, "fast EMA period for live strategy (default 9 when EMAMode is true)")
 	emaSlowPeriod := flag.Int("ema-slow-period", 0, "slow EMA period for live strategy (default 21 when EMAMode is true)")
+	signalContextDir := flag.String("signal-context-dir", "", "directory for signal-context JSONL sidecars; written per-runner under <dir>/<label>/<symbol>-<month>.jsonl. Off by default; when unset and PAPER_LIVE_SIGNAL_CONTEXT_DIR env is set, that env value is used.")
 	flag.Parse()
 
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
@@ -187,6 +188,22 @@ func main() {
 	)
 	runner.SetLiveMode(true)
 
+	// Resolve signal-context dir: CLI flag wins, then env var, else off.
+	signalContextRoot := *signalContextDir
+	if signalContextRoot == "" {
+		signalContextRoot = os.Getenv("PAPER_LIVE_SIGNAL_CONTEXT_DIR")
+	}
+	if signalContextRoot != "" {
+		liveCtxWriter := &strategy.SignalContextWriter{
+			Dir:    filepath.Join(signalContextRoot, "live"),
+			Symbol: cfg.Symbol,
+		}
+		runner.SetSignalContextWriter(liveCtxWriter, "live")
+		slog.Info("signal-context writer enabled",
+			"label", "live",
+			"dir", liveCtxWriter.Dir)
+	}
+
 	// Funding filter (optional): gate SHORT signals by current funding regime.
 	// Requires Historical funding provider — Constant rate has no time variation
 	// so the filter would be trivially uniform. Mirrors cmd/backtest wiring.
@@ -248,6 +265,13 @@ func main() {
 			shadowExec,
 		)
 		shadowRunners[i].SetLiveMode(true)
+		if signalContextRoot != "" {
+			shadowCtxWriter := &strategy.SignalContextWriter{
+				Dir:    filepath.Join(signalContextRoot, spec.Label),
+				Symbol: cfg.Symbol,
+			}
+			shadowRunners[i].SetSignalContextWriter(shadowCtxWriter, spec.Label)
+		}
 		switch spec.Type {
 		case "bb":
 			slog.Info("shadow strategy registered",

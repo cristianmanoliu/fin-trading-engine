@@ -183,6 +183,34 @@ func NewEntryDetector(cfg EntryConfig) *EntryDetector {
 	return d
 }
 
+// Snapshot returns the indicator values for a SignalContext record. Zero
+// values mean "indicator not configured / not primed" — consumers should
+// rely on omitempty in the JSON encoding rather than sentinel values.
+func (e *EntryDetector) Snapshot() IndicatorSnapshot {
+	s := IndicatorSnapshot{}
+	if e.cfg.EMAMode {
+		if e.ema9 != nil && e.ema9.Primed() {
+			s.EMA9 = e.ema9.Value()
+		}
+		if e.ema21 != nil && e.ema21.Primed() {
+			s.EMA21 = e.ema21.Value()
+		}
+	}
+	if e.atr != nil && e.atr.Primed() {
+		s.ATR = e.atr.Value()
+	}
+	if e.cfg.VolFilterMode {
+		s.RealizedVol30dAnn = e.realizedVol30d
+	}
+	if e.cfg.BollingerMode && e.bollinger != nil && e.bollinger.Primed() {
+		lower, mid, upper := e.bollinger.Value()
+		s.BBLower = lower
+		s.BBMid = mid
+		s.BBUpper = upper
+	}
+	return s
+}
+
 // AddCandle appends a closed 5m candle to the rolling window, keeping the last
 // max(absorptionCandles+1, 3) candles for pattern analysis.
 func (e *EntryDetector) AddCandle(c models.Candle) {

@@ -52,6 +52,12 @@ type Runner struct {
 	// mid-backfill and emit signals at stale historical close prices.
 	liveMode bool
 
+	// signalContext (optional) writes rich state at signal-emission time to
+	// JSONL sidecars for forward-paper pattern-matching analysis. Nil = disabled.
+	// See SignalContext / SignalContextWriter in signal_context.go.
+	signalContext *SignalContextWriter
+	contextLabel  string // "live" | shadow label, embedded in each record
+
 	// output
 	executor Executor
 }
@@ -75,6 +81,16 @@ func (r *Runner) SetFundingFilter(f *FundingFilter) {
 // concurrent use during Run is not supported.
 func (r *Runner) SetLiveMode(live bool) {
 	r.liveMode = live
+}
+
+// SetSignalContextWriter wires a JSONL sidecar that captures rich state at
+// signal-emission time (just before executor.OnSignal). Pass nil to disable.
+// label is embedded in each record so multiple Runners (live + shadows) can
+// share an inspection pipeline. Safe to call before Run starts; concurrent
+// use during Run is not supported.
+func (r *Runner) SetSignalContextWriter(w *SignalContextWriter, label string) {
+	r.signalContext = w
+	r.contextLabel = label
 }
 
 // NewRunner wires up the strategy runner.
@@ -284,5 +300,86 @@ func (r *Runner) evaluateEntry(c models.Candle) {
 		"reason", sig.Reason,
 		"time", sig.Timestamp)
 
+	r.writeSignalContext(sig)
+
 	r.executor.OnSignal(sig)
+}
+
+// writeSignalContext is a no-op when no SignalContextWriter is wired. When
+// wired, it builds a SignalContext record from Runner state + EntryDetector
+// snapshot and appends it to the per-symbol JSONL sidecar.
+func (r *Runner) writeSignalContext(sig *models.Signal) {
+	if r.signalContext == nil {
+		return
+	}
+	snap := r.detector.Snapshot()
+	emaSpreadPct := 0.0
+	if snap.EMA21 != 0 {
+		emaSpreadPct = (snap.EMA9 - snap.EMA21) / snap.EMA21 * 100
+	}
+	distPDHPct := 0.0
+	distPDLPct := 0.0
+	if r.levels.PDH > 0 && sig.EntryPrice > 0 {
+		distPDHPct = (r.levels.PDH - sig.EntryPrice) / sig.EntryPrice * 100
+	}
+	if r.levels.PDL > 0 && sig.EntryPrice > 0 {
+		distPDLPct = (sig.EntryPrice - r.levels.PDL) / sig.EntryPrice * 100
+	}
+
+	rr := 0.0
+	if sig.EntryPrice != sig.StopLoss {
+		risk := sig.EntryPrice - sig.StopLoss
+		reward := sig.TakeProfit - sig.EntryPrice
+		if risk != 0 {
+			rr = reward / risk
+			if rr < 0 {
+				rr = -rr
+			}
+		}
+	}
+
+	sideFilter := ""
+	switch r.detector.cfg.SideFilter {
+	case models.Long:
+		sideFilter = "long"
+	case models.Short:
+		sideFilter = "short"
+	case models.Neutral:
+		sideFilter = ""
+	}
+
+	ctx := SignalContext{
+		Event:             "signal_context",
+		Symbol:            sig.Symbol,
+		TS:                sig.Timestamp.UTC().Format(time.RFC3339),
+		Label:             r.contextLabel,
+		Side:              sig.Side.String(),
+		Entry:             sig.EntryPrice,
+		Stop:              sig.StopLoss,
+		Target:            sig.TakeProfit,
+		RR:                rr,
+		Reason:            sig.Reason,
+		EMA9:              snap.EMA9,
+		EMA21:             snap.EMA21,
+		EMASpreadPct:      emaSpreadPct,
+		ATR:               snap.ATR,
+		RealizedVol30dAnn: snap.RealizedVol30dAnn,
+		BBUpper:           snap.BBUpper,
+		BBMid:             snap.BBMid,
+		BBLower:           snap.BBLower,
+		Bias:              int(r.bias.Direction()),
+		VWAP:              r.vwap.Value(),
+		PDH:               r.levels.PDH,
+		PDL:               r.levels.PDL,
+		DistPDHPct:        distPDHPct,
+		DistPDLPct:        distPDLPct,
+		SignalTF:          string(r.signalTF),
+		SideFilter:        sideFilter,
+	}
+	if r.fundingFilter != nil && r.fundingFilter.Reader != nil {
+		rate8h := r.fundingFilter.Reader.RateAt(sig.Timestamp)
+		ctx.FundingRate8h = rate8h
+		ctx.FundingBpsPerDay = rate8h * 3 * 10000 // 3 funding intervals per day, → bps
+	}
+	r.signalContext.Write(ctx)
 }
