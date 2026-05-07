@@ -1,0 +1,46 @@
+SAMPLE-SPLIT BOOTSTRAP — sample_split_bootstrap_decision_rule_2026-05-07.md
+================================================================================
+journal dir: /Users/cristianmanoliu/Main/source.code/github/trading-engine/results/hod_journals/2026-05-07
+split point: 2022-10-31 (calendar midpoint, locked)
+resamples:   5,000 per half
+pass rule:   lo95 > $0 AND P(>$0) ≥ 95.0%
+
+Full dataset (sanity vs A1):
+  trades = 2,210  span = 5.28y (2020-01-20 → 2025-04-30)  total = +$687,072  annual = +$130,207/yr
+
+Per-half bootstrap results:
+
+  Half A (2020-01-20 → 2022-10-31):
+    trades:        918  (block length L = 30)
+    span:          2.78 years
+    total NET:     +$336,017
+    annual point:  +$120,917/yr
+    bootstrap median:  +$119,431/yr
+    bootstrap 95% CI:  [+$22,071, +$227,573]/yr
+    half-width:    $102,751/yr
+    P(>$0):        99.0%   ✓ (need ≥95.0%)
+    P(>$50k):      90.5%
+    P(>$100k):     64.2%
+    lo95 > $0:     ✓
+    >>> per-half:  PASS
+
+  Half B (2022-11-01 → 2025-04-30):
+    trades:        1,292  (block length L = 36)
+    span:          2.49 years
+    total NET:     +$351,055
+    annual point:  +$140,775/yr
+    bootstrap median:  +$141,428/yr
+    bootstrap 95% CI:  [+$9,194, +$271,536]/yr
+    half-width:    $131,171/yr
+    P(>$0):        98.2%   ✓ (need ≥95.0%)
+    P(>$50k):      91.3%
+    P(>$100k):     73.0%
+    lo95 > $0:     ✓
+    >>> per-half:  PASS
+
+================================================================================
+VERDICT: ROBUST_BOTH
+================================================================================
+  Both halves independently pass the per-half rule.
+  → Cumulative CI is regime-independent at this split.
+  → Anchor unchanged: deploy expectations stay on existing CI.
