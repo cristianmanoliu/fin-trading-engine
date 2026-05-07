@@ -1,0 +1,43 @@
+DRIFT DETECTOR TIME-TO-DETECTION (locked)
+================================================================================
+Pre-reg:    drift_detector_time_to_detection_decision_rule_2026-05-08.md
+α_family:   0.001 (per-test α = 0.00017)
+N_MIN:      30
+Trade rate: 1.18/day (historical fleet)
+Horizon:    365 days   B paths: 1000
+
+Loading data...
+  pool: 2,210 trades; per-trade global mean = +$311
+
+   null: 280/1000 fired by day 365, median=26d
+  deg30: 1000/1000 fired by day 365, median=25d
+  deg50: 1000/1000 fired by day 365, median=26d
+   dead: 1000/1000 fired by day 365, median=26d
+
+Cumulative fire rate (% of paths that have fired by day X):
+
+  Scenario    30d    60d    90d   180d   365d
+  -------- ------ ------ ------ ------ ------
+  null      22.1%  26.6%  27.5%  27.9%  28.0%
+  deg30     84.3% 100.0% 100.0% 100.0% 100.0%
+  deg50     85.5% 100.0% 100.0% 100.0% 100.0%
+  dead      83.1% 100.0% 100.0% 100.0% 100.0%
+
+Detection-day distribution (paths that fired within 365d):
+
+  Scenario    P25    P50    P75    P90  censored
+  -------- ------ ------ ------ ------ ---------
+  null        23d    26d    30d    36d  720/1000
+  deg30       22d    25d    29d    32d    0/1000
+  deg50       23d    26d    29d    32d    0/1000
+  dead        23d    26d    29d    32d    0/1000
+
+================================================================================
+DECISION RULE EVALUATION (locked):
+
+  FP band: cumulative FP(null, 365d) = 28.0% (need ≤ 20.0%)  ✗
+  TP band: median detection(dead) = 26.0d (need ≤ 60d)  ✓
+
+================================================================================
+VERDICT: NEEDS_TUNING — too-noisy-null
+================================================================================
