@@ -69,7 +69,8 @@ def quantile_of(sorted_values: list[float], q: float) -> float:
 
 
 def collect_path_stats(trades: list[dict], scenario: str, horizon_days: int,
-                       btc_prices: dict, B: int, collect_monthly: bool = False) -> dict:
+                       btc_prices: dict, B: int, global_mean: float = 0.0,
+                       collect_monthly: bool = False) -> dict:
     """Run B paths and collect raw per-path statistics."""
     earliest = trades[0]["ts"]
     latest = trades[-1]["ts"]
@@ -94,7 +95,7 @@ def collect_path_stats(trades: list[dict], scenario: str, horizon_days: int,
         wts = [t for t in trades if win_start <= t["ts"] < win_end]
         if not wts:
             continue
-        pnls = transform_scenario([t["pnl_usd"] for t in wts], scenario)
+        pnls = transform_scenario([t["pnl_usd"] for t in wts], scenario, global_mean)
         n_trades = len(pnls)
         total_pnl = sum(pnls)
         wins = sum(1 for t, p in zip(wts, pnls) if t["outcome"] in ("TARGET", "PARTIAL"))
@@ -140,7 +141,8 @@ def collect_path_stats(trades: list[dict], scenario: str, horizon_days: int,
 
 
 def evaluate_with_thresholds(trades: list[dict], scenario: str, horizon_days: int,
-                              btc_prices: dict, B: int, thresholds: dict) -> dict:
+                              btc_prices: dict, B: int, thresholds: dict,
+                              global_mean: float = 0.0) -> dict:
     """Re-run B paths and compute fire rates given recalibrated thresholds.
 
     thresholds dict keys: PNL, WR, SYM, HODL_C, HODL_W (None means DISCARDED)
@@ -163,7 +165,7 @@ def evaluate_with_thresholds(trades: list[dict], scenario: str, horizon_days: in
         wts = [t for t in trades if win_start <= t["ts"] < win_end]
         if not wts:
             continue
-        pnls = transform_scenario([t["pnl_usd"] for t in wts], scenario)
+        pnls = transform_scenario([t["pnl_usd"] for t in wts], scenario, global_mean)
         n_trades = len(pnls)
         total_pnl = sum(pnls)
         wins = sum(1 for t, p in zip(wts, pnls) if t["outcome"] in ("TARGET", "PARTIAL"))
@@ -233,14 +235,17 @@ def main() -> int:
     earliest = trades[0]["ts"]
     latest = trades[-1]["ts"]
     btc_prices = fetch_btc_daily_closes(earliest, latest)
+    global_mean = sum(t["pnl_usd"] for t in trades) / len(trades)
     print(f"  {len(trades):,} trades, {earliest.date()} → {latest.date()}")
     print(f"  {len(btc_prices):,} daily BTC closes")
+    print(f"  global per-trade mean (used for dead scenario): {fmt_dollar(global_mean)}")
     print()
 
     # Step 1: collect null distribution at 90d.
     print(f"Step 1: collecting null distribution at {CALIBRATION_HORIZON_DAYS}d, B={B_PATHS}...")
     null_stats = collect_path_stats(
-        trades, "null", CALIBRATION_HORIZON_DAYS, btc_prices, B_PATHS, collect_monthly=True
+        trades, "null", CALIBRATION_HORIZON_DAYS, btc_prices, B_PATHS,
+        global_mean=global_mean, collect_monthly=True
     )
     print(f"  collected {len(null_stats['total_pnl'])} paths' raw statistics")
     print(f"  WR-eligible paths: {len(null_stats['wr_when_eligible'])}")
@@ -294,7 +299,7 @@ def main() -> int:
     for sc in scenarios:
         results[sc] = {}
         for h in HORIZONS_DAYS:
-            r = evaluate_with_thresholds(trades, sc, h, btc_prices, B_PATHS, thresholds)
+            r = evaluate_with_thresholds(trades, sc, h, btc_prices, B_PATHS, thresholds, global_mean)
             results[sc][h] = r
             print(f"  {sc:>5}  {h:>3}d  PNL={r['PNL']:>5.1f}%  WR={r['WR']:>5.1f}%  "
                   f"SYM={r['SYM']:>5.1f}%  HODL_C={r['HODL_C']:>5.1f}%  HODL_W={r['HODL_W']:>5.1f}%")

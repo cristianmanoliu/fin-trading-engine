@@ -116,7 +116,11 @@ def btc_close_lookup(prices: dict, when: datetime) -> float | None:
     return None
 
 
-def transform_scenario(pnls: list[float], scenario: str) -> list[float]:
+def transform_scenario(pnls: list[float], scenario: str, global_mean: float = 0.0) -> list[float]:
+    """Apply scenario transform. global_mean is the per-trade historical mean
+    across the FULL dataset — used for "dead" so we shift each trade by the
+    global mean (preserving variance) rather than by the window mean (which
+    would zero variance per-path, the bug found in run-1)."""
     if scenario == "null":
         return list(pnls)
     if scenario == "deg30":
@@ -124,19 +128,16 @@ def transform_scenario(pnls: list[float], scenario: str) -> list[float]:
     if scenario == "deg50":
         return [p * 0.5 for p in pnls]
     if scenario == "dead":
-        if not pnls:
-            return []
-        mean = sum(pnls) / len(pnls)
-        return [p - mean for p in pnls]
+        return [p - global_mean for p in pnls]
     raise ValueError(f"unknown scenario: {scenario}")
 
 
 def evaluate_window(window_trades: list[dict], scenario: str,
                     btc_prices: dict, window_start: datetime,
-                    window_end: datetime) -> dict:
+                    window_end: datetime, global_mean: float = 0.0) -> dict:
     """Apply the kill bar to one simulated forward-paper window. Returns
     dict mapping criterion name → bool (True = fired)."""
-    pnls = transform_scenario([t["pnl_usd"] for t in window_trades], scenario)
+    pnls = transform_scenario([t["pnl_usd"] for t in window_trades], scenario, global_mean)
     n_trades = len(pnls)
     total_pnl = sum(pnls)
     wins = sum(1 for t, p in zip(window_trades, pnls) if t["outcome"] in ("TARGET", "PARTIAL"))
@@ -197,7 +198,7 @@ def evaluate_window(window_trades: list[dict], scenario: str,
 
 
 def run_scenario(trades: list[dict], scenario: str, horizon_days: int,
-                 btc_prices: dict, B: int) -> dict:
+                 btc_prices: dict, B: int, global_mean: float = 0.0) -> dict:
     """Run B Monte Carlo paths for a scenario × horizon. Returns fire rates."""
     if not trades:
         return {}
@@ -222,7 +223,7 @@ def run_scenario(trades: list[dict], scenario: str, horizon_days: int,
         window_trades = [t for t in trades if win_start <= t["ts"] < win_end]
         if not window_trades:
             continue
-        result = evaluate_window(window_trades, scenario, btc_prices, win_start, win_end)
+        result = evaluate_window(window_trades, scenario, btc_prices, win_start, win_end, global_mean)
         for k in fires:
             if result[k]:
                 fires[k] += 1
@@ -263,7 +264,9 @@ def main() -> int:
         return 1
     earliest = trades[0]["ts"]
     latest = trades[-1]["ts"]
+    global_mean = sum(t["pnl_usd"] for t in trades) / len(trades)
     print(f"  {len(trades):,} trades, {earliest.date()} → {latest.date()}")
+    print(f"  global per-trade mean (used for dead scenario): {fmt_dollar(global_mean)}")
 
     print("Fetching BTC daily closes...")
     btc_prices = fetch_btc_daily_closes(earliest, latest)
@@ -276,7 +279,7 @@ def main() -> int:
         results[sc] = {}
         for h in HORIZONS_DAYS:
             print(f"  scenario={sc:>5}  horizon={h:>3}d  ", end="", flush=True)
-            r = run_scenario(trades, sc, h, btc_prices, B_PATHS)
+            r = run_scenario(trades, sc, h, btc_prices, B_PATHS, global_mean)
             results[sc][h] = r
             print(f"trades={r.get('mean_n_trades', 0):.0f}  "
                   f"PNL={'fire' if r.get('fire_rate_pct',{}).get('KILL_PNL',0)>50 else 'ok':>4}")
