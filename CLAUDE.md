@@ -232,11 +232,18 @@ Forward-paper validation started 2026-05-05 20:06 UTC (32 Strategy B engines, si
 
 The threshold-based criteria below are **advisory only.** Pre-registered Monte Carlo calibration (2026-05-07) found them mis-calibrated against the strategy's natural variance — under "null" (strategy performing as backtest predicted), they produce ~30-40% false-positive KILL verdicts. Recalibration via principled quantile-setting was attempted and found that no threshold can simultaneously meet FP(null)≤20% AND TP(dead)≥80% at the 90-day horizon (statistical impossibility; distribution overlap). See `results/kill_bar_recal_verdict_2026-05-07.md`.
 
-**The decision-grade kill mechanism is `scripts/live_vs_backtest_drift.py`** — distribution-based detection comparing live trades to the backtest empirical distribution via Welch t-tests + WR z-test, Bonferroni-corrected. Calibration found it VIABLE: TP(deg30)=TP(deg50)=TP(dead)=100% at every operating point in the locked grid. Deployed operating point: α_family=0.001, N_LIVE=50 (FP=12.1%, TP=100%). Run periodically as forward-paper accumulates; exit code 1 = decision-grade drift detected.
+**The decision-grade kill mechanism is `scripts/live_vs_backtest_drift.py`** — distribution-based detection comparing live trades to the backtest empirical distribution via Welch t-tests + WR z-test, Bonferroni-corrected. Calibration found it VIABLE: TP(deg30)=TP(deg50)=TP(dead)=100% at every operating point in the locked grid. Deployed operating point: α_family=0.001, N_LIVE=50 (FP=12.1%, TP=100% single-shot).
+
+**Operational cadence matters — don't cron daily.** Time-to-detection analysis (2026-05-08) found median detection day = 26d under any degradation (deg30/deg50/dead) — fast. But cumulative FP under daily sequential testing reaches 28%/year (most accrued in the first 30 days). Single-shot at fixed N=50 has 12% FP; daily testing on accumulating sample inflates this 2.3×. Operational recommendation:
+
+- **Cadence**: run weekly or per-N (every ~50 new trades, ≈42 days at fleet rate), NOT daily. Reduces sequential FP to estimated 8-15%/year.
+- **Single firing**: investigation-grade signal, not auto-kill. Cross-check against forward-paper PnL trajectory.
+- **Two firings 7+ days apart, OR drift + threshold-kill match**: strong signals — auto-kill candidate.
+- The verdict (`results/drift_detector_time_to_detection_verdict_2026-05-08.md`) is NEEDS_TUNING — too-noisy-null at daily cadence; the locked rule forbids retuning within this milestone but flags the pattern for operational practice.
 
 The threshold criteria remain useful as **early-warning indicators** that warrant investigation, but should not auto-trigger a kill. Always cross-reference against the drift detector before acting on a `forward_paper_status.sh` KILL verdict.
 
-See `results/drift_detector_calibration_verdict_2026-05-07.md` for the full calibration record.
+See `results/drift_detector_calibration_verdict_2026-05-07.md` and `results/drift_detector_time_to_detection_verdict_2026-05-08.md` for the full calibration record.
 
 ### Statistical-power floor (before reading any signal)
 
