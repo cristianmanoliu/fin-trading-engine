@@ -1,0 +1,82 @@
+CAT X — CROSS-EXCHANGE OOS REPLICATION ON BYBIT (locked)
+================================================================================
+Pre-reg:  cat_x_bybit_replication_decision_rule_2026-05-08.md
+Strategy: 4H short EMA9/21, RR=6.0, mh=504h, fee=10.0bp slip=5.0bp, no funding
+
+Loading data...
+  pulling Bybit 4H for ROSEUSDT (2021-01-01 → 2026-05-01)...
+    9407 4H candles cached
+  ROSEUSDT       bybit 4H:  9407  binance-1m→4H:  9462
+  pulling Bybit 4H for BCHUSDT (2021-01-01 → 2026-05-01)...
+    11677 4H candles cached
+  BCHUSDT        bybit 4H: 11677  binance-1m→4H: 13872
+  pulling Bybit 4H for GRTUSDT (2021-01-01 → 2026-05-01)...
+    9641 4H candles cached
+  GRTUSDT        bybit 4H:  9641  binance-1m→4H: 11723
+  pulling Bybit 4H for 1INCHUSDT (2021-01-01 → 2026-05-01)...
+    9641 4H candles cached
+  1INCHUSDT      bybit 4H:  9641  binance-1m→4H: 11716
+  pulling Bybit 4H for ADAUSDT (2021-01-01 → 2026-05-01)...
+    11220 4H candles cached
+  ADAUSDT        bybit 4H: 11220  binance-1m→4H: 13690
+  pulling Bybit 4H for KAVAUSDT (2021-01-01 → 2026-05-01)...
+    9431 4H candles cached
+  KAVAUSDT       bybit 4H:  9431  binance-1m→4H: 12617
+  pulling Bybit 4H for 1000SHIBUSDT (2021-01-01 → 2026-05-01)...
+    9924 4H candles cached
+  1000SHIBUSDT   bybit 4H:  9924  binance-1m→4H: 10898
+  pulling Bybit 4H for ENSUSDT (2021-01-01 → 2026-05-01)...
+    9786 4H candles cached
+  ENSUSDT        bybit 4H:  9786  binance-1m→4H:  9678
+  pulling Bybit 4H for XLMUSDT (2021-01-01 → 2026-05-01)...
+    10224 4H candles cached
+  XLMUSDT        bybit 4H: 10224  binance-1m→4H: 13726
+  pulling Bybit 4H for IMXUSDT (2021-01-01 → 2026-05-01)...
+    9714 4H candles cached
+  IMXUSDT        bybit 4H:  9714  binance-1m→4H:  9210
+  pulling Bybit 4H for ETCUSDT (2021-01-01 → 2026-05-01)...
+    10602 4H candles cached
+  ETCUSDT        bybit 4H: 10602  binance-1m→4H: 13780
+  pulling Bybit 4H for RUNEUSDT (2021-01-01 → 2026-05-01)...
+    9683 4H candles cached
+  RUNEUSDT       bybit 4H:  9683  binance-1m→4H: 12389
+  pulling Bybit 4H for AVAXUSDT (2021-01-01 → 2026-05-01)...
+    10133 4H candles cached
+  AVAXUSDT       bybit 4H: 10133  binance-1m→4H: 12275
+  pulling Bybit 4H for APTUSDT (2021-01-01 → 2026-05-01)...
+    7741 4H candles cached
+  APTUSDT        bybit 4H:  7741  binance-1m→4H:  7740
+  pulling Bybit 4H for DOTUSDT (2021-01-01 → 2026-05-01)...
+    11219 4H candles cached
+  DOTUSDT        bybit 4H: 11219  binance-1m→4H: 12467
+  pulling Bybit 4H for FILUSDT (2021-01-01 → 2026-05-01)...
+    10602 4H candles cached
+  FILUSDT        bybit 4H: 10602  binance-1m→4H: 12107
+
+Running backtests...
+  Bybit:   2,932 trades
+  Binance: 3,428 trades
+
+  Win   Range                    Binance-4H N   Binance-4H NET   Bybit N      Bybit NET  sign-match
+  ----- ------------------------ ------------ ---------------- --------- -------------- -----------
+  W0    2022-05-01→2023-04-30          591        +$132,106       587       +$94,674           ✓
+  W1    2023-05-01→2024-04-30          624         -$76,477       632       -$79,206           ✓
+  W2    2024-05-01→2025-04-30          616        +$180,657       626      +$193,324           ✓
+  W3    2025-05-01→2026-04-30          696         -$26,842       701       +$10,699           ✗
+
+Aggregate (across all 4 comparable windows):
+  Binance-4H total NET   : +$209,444
+  Bybit total NET        : +$219,491
+  Bybit / Binance ratio  : 1.05×
+  Sign-matched windows   : 3/4
+
+================================================================================
+DECISION RULE EVALUATION (locked):
+
+  ROBUST              Bybit ≥ 0.5× Binance: 1.05× ✓ | ≥3/4 sign-match: 3/4 ✓ | Bybit > 0: +$219,491 ✓
+  WEAK_REPLICATION    Bybit > 0: +$219,491 ✓ | ≥2/4 sign-match: 3/4 ✓
+  BINANCE-SPECIFIC    Bybit ≤ 0: +$219,491 ✗ | <2/4 sign-match: 3/4 ✗ (OR triggers)
+
+================================================================================
+VERDICT: ROBUST
+================================================================================
