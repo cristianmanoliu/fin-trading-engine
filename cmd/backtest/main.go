@@ -61,6 +61,7 @@ func main() {
 	confluenceSlowPeriod := flag.Int("confluence-slow", 0, "Cat D1: 1D EMA slow period (default 21)")
 	volFilterMode := flag.Bool("vol-filter-mode", false, "Cat E1: skip entries when realized 30d annualized vol > MaxVolAnnualized.")
 	maxVolAnnualized := flag.Float64("max-vol-annualized", 0, "Cat E1: max 30d realized vol as fraction (default 1.20 = 120%)")
+	journalDir := flag.String("journal-dir", "", "when set, write per-trade JSONL journals to this directory (same schema as paper-live). Off by default — backtest runs are journal-silent unless explicitly opted in.")
 	flag.Parse()
 
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
@@ -172,6 +173,8 @@ func main() {
 		MultiLevelTPMode:     *multiLevelTPMode,
 		MidRMult:             *midR,
 		MidFrac:              *midFrac,
+		JournalPath:          *journalDir,
+		Symbol:               cfg.Symbol,
 	}
 
 	// Per-symbol historical funding overrides the constant rate when the file is present.
