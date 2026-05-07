@@ -157,6 +157,16 @@ type journalEntry struct {
 	// analysis: any trade with MFE_R ≥ T would have triggered a partial-TP at T.
 	MFER float64 `json:"mfe_r,omitempty"`
 	MAER float64 `json:"mae_r,omitempty"`
+	// Cost decomposition (close events only when StakeUSDT>0). Lets the
+	// forward-paper status checker derive realized fee bps and slip bps
+	// against the 12bp / 25bp kill criteria without re-deriving from
+	// pnl_usd. Backward-compat: omitempty so old readers ignore them and
+	// older journal lines without these fields still parse.
+	GrossUSD   float64 `json:"gross_usd,omitempty"`
+	FeeUSD     float64 `json:"fee_usd,omitempty"`
+	SlipUSD    float64 `json:"slip_usd,omitempty"`
+	FundingUSD float64 `json:"funding_usd,omitempty"`
+	Notional   float64 `json:"notional_usd,omitempty"`
 }
 
 func (s *Stub) appendJournal(entry journalEntry) {
@@ -434,11 +444,11 @@ func (s *Stub) recordPartialClose(exitPrice float64, exitTime time.Time, frac fl
 		}
 	}
 
-	var grossUSDT, feeUSDT, fundingUSDT, pnlUSDT float64
+	var grossUSDT, feeUSDT, fundingUSDT, pnlUSDT, notional float64
 	if s.StakeUSDT > 0 {
 		units := s.StakeUSDT * frac / stopDist
 		grossUSDT = units * pnlPts
-		notional := units * sig.EntryPrice
+		notional = units * sig.EntryPrice
 		if s.FeeBps > 0 {
 			feeUSDT = s.FeeBps / 10000.0 * notional
 		}
@@ -478,20 +488,25 @@ func (s *Stub) recordPartialClose(exitPrice float64, exitTime time.Time, frac fl
 		maeR = math.Abs(sig.EntryPrice-s.position.MaxAdverse) / maeStopDist
 	}
 	s.appendJournal(journalEntry{
-		Event:   "close",
-		Symbol:  s.Symbol,
-		TS:      time.Now().UTC().Format(time.RFC3339),
-		Side:    sig.Side.String(),
-		Entry:   sig.EntryPrice,
-		Exit:    exitPrice,
-		Stop:    sig.StopLoss,
-		Target:  sig.TakeProfit,
-		PnlPts:  math.Round(pnlPts*100) / 100,
-		PnlUSD:  math.Round(pnlUSDT*100) / 100,
-		Outcome: "PARTIAL",
-		Reason:  sig.Reason,
-		MFER:    math.Round(s.position.MaxFavorableR*1000) / 1000,
-		MAER:    math.Round(maeR*1000) / 1000,
+		Event:      "close",
+		Symbol:     s.Symbol,
+		TS:         time.Now().UTC().Format(time.RFC3339),
+		Side:       sig.Side.String(),
+		Entry:      sig.EntryPrice,
+		Exit:       exitPrice,
+		Stop:       sig.StopLoss,
+		Target:     sig.TakeProfit,
+		PnlPts:     math.Round(pnlPts*100) / 100,
+		PnlUSD:     math.Round(pnlUSDT*100) / 100,
+		Outcome:    "PARTIAL",
+		Reason:     sig.Reason,
+		MFER:       math.Round(s.position.MaxFavorableR*1000) / 1000,
+		MAER:       math.Round(maeR*1000) / 1000,
+		GrossUSD:   math.Round(grossUSDT*100) / 100,
+		FeeUSD:     math.Round(feeUSDT*100) / 100,
+		SlipUSD:    0, // partial closes are never losers
+		FundingUSD: math.Round(fundingUSDT*100) / 100,
+		Notional:   math.Round(notional*100) / 100,
 	})
 }
 
@@ -518,7 +533,7 @@ func (s *Stub) closePosition(exitPrice float64, exitTime time.Time, won bool) {
 	// units = (StakeUSDT × remainingFrac) / |entry - originalStop|; gross = units × pnlPts;
 	// net = gross − fee − slip − funding. Uses OriginalStopDist (cached at OnSignal) so that
 	// B1/B2 stop mutations don't break sizing. RemainingFrac scales for B2 partial closes.
-	var grossUSDT, feeUSDT, slipUSDT, fundingUSDT, pnlUSDT float64
+	var grossUSDT, feeUSDT, slipUSDT, fundingUSDT, pnlUSDT, notional float64
 	if s.StakeUSDT > 0 {
 		stopDist := s.position.OriginalStopDist
 		if stopDist == 0 {
@@ -531,7 +546,7 @@ func (s *Stub) closePosition(exitPrice float64, exitTime time.Time, won bool) {
 		if stopDist > 0 {
 			units := s.StakeUSDT * remainingFrac / stopDist
 			grossUSDT = units * pnlPts
-			notional := units * sig.EntryPrice
+			notional = units * sig.EntryPrice
 			if s.FeeBps > 0 {
 				feeUSDT = s.FeeBps / 10000.0 * notional
 			}
@@ -590,20 +605,25 @@ func (s *Stub) closePosition(exitPrice float64, exitTime time.Time, won bool) {
 		maeR = math.Abs(sig.EntryPrice-s.position.MaxAdverse) / maeStopDist
 	}
 	s.appendJournal(journalEntry{
-		Event:   "close",
-		Symbol:  s.Symbol,
-		TS:      time.Now().UTC().Format(time.RFC3339),
-		Side:    sig.Side.String(),
-		Entry:   sig.EntryPrice,
-		Exit:    exitPrice,
-		Stop:    sig.StopLoss,
-		Target:  sig.TakeProfit,
-		PnlPts:  math.Round(pnlPts*100) / 100,
-		PnlUSD:  math.Round(pnlUSDT*100) / 100,
-		Outcome: outcome,
-		Reason:  sig.Reason,
-		MFER:    math.Round(s.position.MaxFavorableR*1000) / 1000,
-		MAER:    math.Round(maeR*1000) / 1000,
+		Event:      "close",
+		Symbol:     s.Symbol,
+		TS:         time.Now().UTC().Format(time.RFC3339),
+		Side:       sig.Side.String(),
+		Entry:      sig.EntryPrice,
+		Exit:       exitPrice,
+		Stop:       sig.StopLoss,
+		Target:     sig.TakeProfit,
+		PnlPts:     math.Round(pnlPts*100) / 100,
+		PnlUSD:     math.Round(pnlUSDT*100) / 100,
+		Outcome:    outcome,
+		Reason:     sig.Reason,
+		MFER:       math.Round(s.position.MaxFavorableR*1000) / 1000,
+		MAER:       math.Round(maeR*1000) / 1000,
+		GrossUSD:   math.Round(grossUSDT*100) / 100,
+		FeeUSD:     math.Round(feeUSDT*100) / 100,
+		SlipUSD:    math.Round(slipUSDT*100) / 100,
+		FundingUSD: math.Round(fundingUSDT*100) / 100,
+		Notional:   math.Round(notional*100) / 100,
 	})
 	s.position = nil
 }

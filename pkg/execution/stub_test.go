@@ -631,6 +631,76 @@ func TestNoModeBaseline_PreservedExactly(t *testing.T) {
 	}
 }
 
+func TestJournalCloseEventCostFields(t *testing.T) {
+	// Close events should carry the cost decomposition (gross, fee, slip,
+	// funding, notional) so forward_paper_status.sh can derive realized
+	// fee bps and slip bps without re-deriving from pnl_usd.
+	//
+	// Setup mirrors TestFeeAndSlippageMath/loss_pays_fee_and_slippage:
+	//   stake=$1000, entry=50000, stop=49900, target=50500. units=10.
+	//   notional=$500k. FeeBps=8 → fee=$400. SlipBps=5 (loser) → slip=$250.
+	dir := t.TempDir()
+	stub := &Stub{
+		StakeUSDT:       1000,
+		ExactFills:      true,
+		FeeBps:          8,
+		StopSlippageBps: 5,
+		JournalPath:     dir,
+		Symbol:          "X",
+	}
+	stub.OnSignal(&models.Signal{
+		Symbol: "X", Side: models.Long,
+		EntryPrice: 50000, StopLoss: 49900, TakeProfit: 50500,
+		Timestamp: time.Now().UTC(),
+	})
+	stub.OnTick(models.Tick{Symbol: "X", Timestamp: time.Now().UTC(), Price: 49900})
+
+	// Find the close event in the journal.
+	matches, err := filepath.Glob(filepath.Join(dir, "X-*.jsonl"))
+	if err != nil || len(matches) == 0 {
+		t.Fatal("no journal file created")
+	}
+	f, err := os.Open(matches[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+	var closeLine map[string]any
+	for sc.Scan() {
+		var m map[string]any
+		if err := json.Unmarshal(sc.Bytes(), &m); err != nil {
+			t.Fatalf("invalid JSON: %s", sc.Text())
+		}
+		if m["event"] == "close" {
+			closeLine = m
+		}
+	}
+	if closeLine == nil {
+		t.Fatal("no close event found")
+	}
+
+	// Numeric assertions. JSON unmarshals numbers as float64 — match exactly.
+	check := func(field string, want float64) {
+		got, ok := closeLine[field].(float64)
+		if !ok {
+			t.Errorf("field %s missing or not numeric: %v", field, closeLine[field])
+			return
+		}
+		if got != want {
+			t.Errorf("field %s: want %v, got %v", field, want, got)
+		}
+	}
+	check("gross_usd", -1000)
+	check("fee_usd", 400)
+	check("slip_usd", 250)
+	check("notional_usd", 500000)
+	// funding_usd should be omitted (0) since neither provider nor const-rate set.
+	if v, present := closeLine["funding_usd"]; present && v.(float64) != 0 {
+		t.Errorf("funding_usd should be 0/omitted, got %v", v)
+	}
+}
+
 func TestJournalDisabledInBacktest(t *testing.T) {
 	// When JournalPath is empty (backtest mode), no files should be created.
 	stub := &Stub{StakeUSDT: 1000} // JournalPath intentionally not set
