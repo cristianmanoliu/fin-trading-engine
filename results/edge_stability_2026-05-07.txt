@@ -1,0 +1,57 @@
+EDGE STABILITY — edge_stability_decision_rule_2026-05-07.md
+================================================================================
+journal dir: /Users/cristianmanoliu/Main/source.code/github/trading-engine/results/hod_journals/2026-05-07
+alpha:       0.05 (two-sided)
+
+trades: 2,210, 2020-01-20 → 2025-04-30
+base year for quarter indexing: 2020
+
+Per-quarter NET and trade count:
+  idx  label     trades             NET
+  ---  --------  ------  --------------
+    1  2020-Q1       28        +$20,082
+    2  2020-Q2       31        -$12,696
+    3  2020-Q3       42        +$27,102
+    4  2020-Q4       79        -$26,174
+    5  2021-Q1      107        -$39,056
+    6  2021-Q2       79        +$46,913
+    7  2021-Q3       90         +$3,418
+    8  2021-Q4      105        +$63,497
+    9  2022-Q1       98        +$66,091
+   10  2022-Q2      112       +$154,236
+   11  2022-Q3      115         -$4,350
+   12  2022-Q4      123       +$133,255
+   13  2023-Q1      117        -$14,059
+   14  2023-Q2      139         +$6,683
+   15  2023-Q3      124        +$38,572
+   16  2023-Q4      137        -$85,967
+   17  2024-Q1      122        -$14,654
+   18  2024-Q2      122        +$90,003
+   19  2024-Q3      137        +$99,134
+   20  2024-Q4      130        +$34,791
+   21  2025-Q1      133       +$127,260
+   22  2025-Q2       40        -$27,011
+
+Linear regression: NET_q = a + b · t
+  n quarters:    22
+  intercept (a): +$11,504/q
+  slope     (b): +$1,715/q-per-quarter
+  SE slope:      +$2,085
+  t-statistic:   0.823  (df=20)
+  p-value:       0.4205  (two-sided)
+  R-squared:     0.0327
+
+================================================================================
+DECISION RULE EVALUATION (α = 0.05):
+  p = 0.4205 > 0.05 → no detectable trend.
+
+================================================================================
+VERDICT: STABLE_EDGE
+================================================================================
+
+Diagnostic: critical slope for α=0.05 at df=20 is |+$4,171|/q. Observed slope is +$1,715/q.
+
+Sanity context (no decision impact):
+  early 11 quarters NET:  +$299,064
+  late 11 quarters NET:  +$388,008
+  recent-vs-early ratio: 1.30x
