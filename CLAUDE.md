@@ -224,15 +224,7 @@ Key levels (used by absorption/breakout only): PDH, PDL, and optional manual `zo
 
 ### Fixed
 
-- ~~`go.mod` declared `go 1.26.2`~~ — turns out **1.26.2 is the actual installed Go version**; the prior "invalid" claim was stale. No change needed.
-- ~~All `go.mod` dependencies marked `// indirect`~~ — fixed 2026-05-06 via `go mod tidy`. Markers removed.
-- ~~`tradeResult.fundingUSDT` field comment said "always non-negative"~~ — fixed 2026-05-06. Comment now correctly reflects that the value is signed when using the Historical provider.
-- ~~Funding-CSV staleness for forward trades~~ — partially addressed 2026-05-06 via `scripts/refresh_funding.sh` and `INCREMENTAL=1` mode of `download_funding.sh`. Recommended: weekly refresh during forward-paper-validation. Engines pick up refreshed CSVs on next restart.
-- ~~`cmd/engine` did not wire `EMAMode`/`TargetRR` into `EntryConfig`~~ — fixed 2026-05-04. Always add new `EntryConfig` fields to **both** `cmd/backtest/main.go` and `cmd/engine/main.go`.
-- ~~`cmd/engine` did not wire P4 fields (SideFilter, MaxHoldHours, FundingProvider, FeeBps, StopSlippageBps, target-rr, signal-tf)~~ — fixed 2026-05-05. CLI flags mirror cmd/backtest.
-- ~~Watchdog symbol list pinned to old deployed-16~~ — fixed 2026-05-05. Now matches the deployed-32. Stale `alerted.state` cleared.
-- ~~**Bug 2 — Wick-exit pricing**~~: `Stub.OnTick` closed at `tick.Price` (synthetic wick extreme) instead of `sig.StopLoss`/`sig.TakeProfit`. Inflated all R:R ≤ 2 results; at 1:1 RR the entire 57-sym edge was artifact (+$8M → −$4.7M). Fixed via `--exact-fills` flag.
-- ~~**Bug 3α — Aggregator boundary-tick exclusion**~~: routed boundary tick into next candle. Corrected via `--include-boundary` flag; effect at target_rr=5.0 is +10.6%.
+- ~~Pre-2026-05-08 fix-records~~ — go.mod version, indirect-deps, fundingUSDT comment, funding-CSV refresh tooling, EMAMode/TargetRR/P4-field wiring in cmd/engine, watchdog symbol list, **Bug 2** (wick-exit pricing → `--exact-fills`), **Bug 3α** (aggregator boundary-tick → `--include-boundary`). All landed before this milestone; full narrative in commit history + `docs/findings/`.
 - **Bug 3β — Same-bar resolution**: synthetic open→high→low→close ordering means LONG positions always score TARGET when both stop and target lie within a single 1m kline range. `--pessimistic-ambiguous` flag detects and reclassifies these. At target_rr=5.0, ZERO ambiguous bars detected across 1,345 BTC winning trades — immaterial. Check again if target_rr is ever reduced below 2.
 - ~~**Bug 4 — REST poll exceeded Binance weight cap**~~: 6s × 16 sym × 20 weight/call = 3200/min vs 2400 cap → ~50% backoff. Fix 2026-05-07: bumped to 10s (1920/min). See `docs/findings/2026-05-08.md`.
 - ~~**Bug 5 — Cold-start indicator blind period**~~: backfill silently truncated to 1500 klines; restart needed 22 closed 4H candles → 64h blind. Fix 2026-05-07: paginated backfill, BackfillHours 48→96, liveMode stale-candle gate. See `docs/findings/2026-05-08.md`.
@@ -339,11 +331,5 @@ After the 2026-05-05 cost-survivor battery and 2026-05-06/07 follow-up work, the
 - **Funding-CSV staleness drift.** Engines pick up refreshed CSVs only on restart. Between restarts, trades held past the CSV's last entry get $0 funding. Bounded by time-since-last-restart; weekly refresh + restart caps drift at ~7 days. **Mitigated 2026-05-08:** `cmd/engine` logs `slog.Warn` at startup if `funding.Historical.LastTS()` is >7d old, naming `symbol`, `last_funding_ts`, and `stale_days`. The previously-silent "operator forgot to refresh" failure mode now produces a loud signal in `/var/log/paper-live/<symbol>.log` (and surfaces via `post_deploy_check.sh` section 9). Net funding ≈ $0 in steady state per backtest, so divergence remains small in practice.
 - **No real-money execution test.** Forward-paper with realistic position sizing, exchange position limits, margin reuse, and concurrent-trade interaction is unmodeled. Honest backtest projection is $69-184k/yr depending on slip (see `## Train-only shortlist diagnostic`); the original $74-142k/yr framing was based on the deployed-32 list which carries +26-70% look-ahead inflation.
 
-**Resolved or downgraded since 2026-05-05:**
-- ~~Max-hold force-close slippage (`stub.go:236`)~~ → measured 2026-05-06: only 5.8% of trades hit time_stop on RUNE; extrapolated impact is ~$3-17k over 5y depending on slip = 1-2% of Strategy A NET. **Cosmetic.** Documented in Known Bugs.
-- ~~Funding-CSV silent fallback~~ → verified clean at deploy 2026-05-05 (all 32 engines logged "loaded historical funding"). The remaining concern is staleness, addressed above.
-- ~~`tradeResult.fundingUSDT` comment was stale~~ → fixed 2026-05-06.
-- ~~Symbol-selection look-ahead in deployed-32~~ → measured 2026-05-06 via train-only-shortlist diagnostic at slip ∈ {5, 15, 25} bp. Inflation is +26-70%, fixed dollar bias ~$115-124k on test, sign of test_NET preserved at every honest selection rule. **Quantified, not eliminated** — incorporated into go/no-go expectations.
-- ~~Engine restart orphans in-flight paper positions~~ → fixed 2026-05-07 (Bug 6, commit `9eaeb54`). Documented in Known Bugs / Fixed.
-- ~~Threshold-based kill criteria not validated against natural variance~~ → calibrated 2026-05-07; found mis-calibrated at 90d (statistical impossibility of meeting locked acceptance bands). Replaced as decision-grade by drift detector (DETECTOR_VIABLE, 100% TP across degradation scenarios). Threshold criteria remain advisory.
+**Resolved or downgraded since 2026-05-05:** max-hold winner-slippage (cosmetic, 5.8% time-stop rate, deferred); funding-CSV silent fallback (clean at deploy); `tradeResult.fundingUSDT` comment; symbol-selection look-ahead (quantified +26-70%, not eliminated); orphan-on-restart (Bug 6 fixed in `9eaeb54`); threshold kill criteria (mis-calibrated at 90d, replaced by drift detector as decision-grade).
 
