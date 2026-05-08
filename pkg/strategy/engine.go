@@ -271,8 +271,17 @@ func (r *Runner) Summarize() {
 	r.executor.Summary()
 }
 
+// candleTooStale reports whether evaluateEntry should suppress signal emission
+// because the candle's CloseTime predates the backfill-staleness threshold and
+// liveMode is on. Extracted from evaluateEntry so the Bug 5 regression gate
+// (see CLAUDE.md "Known Bugs / Fixed → Bug 5") can be tested in isolation
+// without priming the full indicator/levels/bias pipeline.
+func (r *Runner) candleTooStale(c models.Candle) bool {
+	return r.liveMode && time.Since(c.CloseTime) > backfillStaleness
+}
+
 func (r *Runner) evaluateEntry(c models.Candle) {
-	if r.liveMode && time.Since(c.CloseTime) > backfillStaleness {
+	if r.candleTooStale(c) {
 		// Historical candle from REST kline backfill — firing a signal here would
 		// open a position at a stale close price → instant adverse fill on the next
 		// live tick. Indicators have already been updated by AddCandle (warmup is
