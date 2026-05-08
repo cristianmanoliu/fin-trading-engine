@@ -170,6 +170,44 @@ else
     warn "$RL_TOTAL rate-limit warnings in 5 min ($RL_PER_MIN/min — high)"
 fi
 
+# ── 7. Position recovery events in last 24h ───────────────────────────────────
+# Each engine restart with an in-flight position triggers Stub.RecoverFromJournal,
+# which logs "position recovered from journal" once per recovered orphan. In
+# steady state recoveries are rare — each one signals an unplanned (crash) or
+# planned (deploy) restart. Surface them so silent restart loops or unexpected
+# crashes show up in the audit instead of staying buried in the log files.
+#
+# 24h window scans .log + .log.1 (midnight-UTC rotation makes .log.1 the
+# yesterday file). Always sufficient for a 24h cutoff regardless of run time.
+# Cohort split (live vs shadow/<label>) derived from the .journal_path field.
+echo ""
+echo "7. Position recovery events in last 24h"
+REC_TOTAL=$(ssh "${TARGET}" "cutoff=\$(date -u -d '24 hours ago' '+%Y-%m-%dT%H:%M:%SZ')
+total=0
+for sym in $SYMBOLS_LC; do
+  for f in /var/log/paper-live/\${sym}.log /var/log/paper-live/\${sym}.log.1; do
+    [[ -f \"\$f\" ]] || continue
+    n=\$(jq -rc --arg cutoff \"\$cutoff\" 'select(.msg == \"position recovered from journal\" and .time >= \$cutoff)' \"\$f\" 2>/dev/null | wc -l)
+    total=\$((total + n))
+  done
+done
+echo \$total")
+
+if [[ "$REC_TOTAL" == "0" ]]; then
+    ok "no position recoveries in last 24h"
+else
+    # ⓘ rather than ⚠: a recovery isn't inherently a problem (planned deploy
+    # restarts will trigger it), but the operator should verify each is expected.
+    echo "  ⓘ  $REC_TOTAL recovery event(s) in last 24h — verify each is a planned restart"
+    ssh "${TARGET}" "cutoff=\$(date -u -d '24 hours ago' '+%Y-%m-%dT%H:%M:%SZ')
+    for sym in $SYMBOLS_LC; do
+      for f in /var/log/paper-live/\${sym}.log /var/log/paper-live/\${sym}.log.1; do
+        [[ -f \"\$f\" ]] || continue
+        jq -rc --arg cutoff \"\$cutoff\" 'select(.msg == \"position recovered from journal\" and .time >= \$cutoff) | .time[0:19] + \"  \" + .symbol + \"  \" + .side + \"  entry=\" + (.entry | tostring) + \"  cohort=\" + (if (.journal_path | test(\"/shadow/\")) then (.journal_path | split(\"/\") | last) else \"live\" end)' \"\$f\" 2>/dev/null
+      done
+    done | sort -u" | sed 's/^/    /'
+fi
+
 # ── Verdict ───────────────────────────────────────────────────────────────────
 echo ""
 echo "════════════════════════════════════════════════════════════════════════════════"
