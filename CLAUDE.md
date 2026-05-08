@@ -33,6 +33,28 @@ Headline outcomes (verdict docs are the authoritative records):
 
 **Prior-day findings:** `docs/findings/2026-05-06.md`. Today's session log: pending writeup.
 
+### Operational hardening pass (2026-05-08 mid-day, post-milestone)
+
+Mode is MONITORING — backtest investigation closed; the 60-day forward-paper countdown anchors to the first close ts. Used the morning to close real visibility/test gaps that today's tooling depends on.
+
+Operational tooling:
+- `forward_paper_status.sh` — surfaces currently-held positions per cohort (was hidden behind "(no data yet)"); now also pre-fetches Binance prices and shows current `now=… ±X% to stop` for each open
+- `run_drift_check.sh` — wraps `live_vs_backtest_drift.py` with state persistence to `results/drift_check_history.jsonl` + per-run logs; mechanically evaluates the locked two-firings-≥7d-apart auto-kill rule. Cron not yet wired (deployment-surface tradeoffs noted).
+- `post_deploy_check.sh` — section 7 added: "position recovery events in last 24h" greps engine logs for the recovery line, surfaces the audit signal that was previously buried.
+- `scripts/README.md` — new catalog of all 75+ scripts tiered by frequency of use.
+- `README.md` banner — refreshed (was stale: said "32 symbols" since reduced to 16; old completion date superseded by the locked real-money protocol).
+
+Defensive moat (test fills for paths every claim transitively depends on):
+- `pkg/indicators/ema.go` — 11 tests on priming, post-prime formula, smoothing factor (foundational; previously zero coverage)
+- `pkg/strategy/bias.go` — 15 tests on the 4H-bias state machine and `Allows()` gate
+- `pkg/marketdata/replay.go` — 12 tests on CSVReplay; surfaced + pinned a `csv.Reader` field-count footgun (silent stream termination on mid-file column-count mismatch)
+- `pkg/strategy/engine.go` — 13 tests on Bug 5 staleness gate (stale-candle suppression in liveMode), HandleCandle/HandleTick routing, and Run() lifecycle (channels-closed vs ctx-cancelled have different Summary semantics)
+- `pkg/marketdata/heartbeat.go` — 10 tests; 90s threshold pinned as a named constant
+- `pkg/marketdata/fanout.go` — symmetric coverage added for `FanOutTicks` (matched the 4 existing `FanOutCandles` lifecycle tests)
+- `pkg/strategy/funding_filter.go` — 8 tests on the dormant short-only gate (defensive against future Cat F2 reactivation)
+
+First empirical run of the extended status script surfaced that the LIVE cohort fired its first signal since the journal-replay deploy: XLMUSDT SHORT @ 0.15832 at 2026-05-08T08:00 UTC (currently +11.6% adverse).
+
 ## Build & Run
 
 ```bash
