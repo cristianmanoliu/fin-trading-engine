@@ -118,3 +118,81 @@ func TestFanOutTicks_BroadcastsToAllConsumers(t *testing.T) {
 		}
 	}
 }
+
+// Lifecycle tests for FanOutTicks mirror the FanOutCandles set above.
+// FanOutTicks and FanOutCandles share identical structure (select-loop with
+// per-consumer fanout + ctx-aware send) — these tests pin that the Tick
+// variant honors the same lifecycle contract, so a future refactor that
+// touches one path can't silently diverge from the other.
+
+func TestFanOutTicks_ClosesOutputsWhenInputCloses(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	in := make(chan models.Tick, 1)
+	outs := FanOutTicks(ctx, in, 2)
+	close(in)
+
+	for i, o := range outs {
+		select {
+		case _, ok := <-o:
+			if ok {
+				_, ok2 := <-o
+				if ok2 {
+					t.Errorf("out[%d] still open after input closed", i)
+				}
+			}
+		case <-time.After(time.Second):
+			t.Errorf("out[%d] did not close within 1s of input close", i)
+		}
+	}
+}
+
+func TestFanOutTicks_ClosesOutputsOnContextCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	in := make(chan models.Tick, 1)
+	outs := FanOutTicks(ctx, in, 2)
+
+	cancel()
+
+	for i, o := range outs {
+		select {
+		case _, ok := <-o:
+			if ok {
+				_, ok2 := <-o
+				if ok2 {
+					t.Errorf("out[%d] still open after ctx cancel", i)
+				}
+			}
+		case <-time.After(time.Second):
+			t.Errorf("out[%d] did not close within 1s of ctx cancel", i)
+		}
+	}
+}
+
+func TestFanOutTicks_ZeroConsumers(t *testing.T) {
+	// n=0 should return nil cleanly (no panic, no goroutine spawned).
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	in := make(chan models.Tick)
+	outs := FanOutTicks(ctx, in, 0)
+	if outs != nil {
+		t.Errorf("n=0 should return nil, got %v", outs)
+	}
+}
+
+func TestFanOutTicks_NegativeConsumers(t *testing.T) {
+	// Defensive: n<0 should also return nil (the n<=0 guard at the top of
+	// FanOutTicks). FanOutCandles has the same guard but isn't tested for
+	// it; pin the symmetric behavior here.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	in := make(chan models.Tick)
+	outs := FanOutTicks(ctx, in, -1)
+	if outs != nil {
+		t.Errorf("n=-1 should return nil (n<=0 guard), got %v", outs)
+	}
+}
