@@ -134,6 +134,16 @@ if [[ "$STALE_COUNT" -eq 0 && "$NO_TICK_EVER" -eq 0 ]]; then
     ok "all engines have recent tick activity"
 fi
 
+# Compute fleet-min uptime from CHECK_RESULTS for use by sections 5 and 6:
+# transient startup errors (WS reconnect failures, initial rate-limit bursts
+# during the WS→REST fallback at t≈180s) are documented and self-clearing,
+# so they should not flip a STRICT=1 run when at least one engine is still
+# in its first 5 minutes. After all engines reach 5min the gate releases.
+MIN_UPTIME=$(echo "$CHECK_RESULTS" | awk -F'|' 'BEGIN{min=999999} NF>=5 && $5+0 < min {min=$5+0} END{print min}')
+if [[ -z "$MIN_UPTIME" ]] || [[ "$MIN_UPTIME" == "999999" ]]; then
+    MIN_UPTIME=0
+fi
+
 # ── 5. Recent ERROR-level events ──────────────────────────────────────────────
 # NB: previous version compared $0 (entire JSON line starting with `{`) against
 # a timestamp cutoff lexicographically — `{` > `2026-...` for ANY timestamp,
@@ -146,6 +156,17 @@ for sym in $SYMBOLS_LC; do
 done | wc -l")
 if [[ "$ERR_TOTAL" == "0" ]]; then
     ok "no ERROR-level events in last 5 min"
+elif [[ "$MIN_UPTIME" -lt 5 ]]; then
+    # Fleet warming up — surface as info but do not increment FAIL. Errors
+    # fired during the WS→REST fallback gap (t < 3min) are documented
+    # transients; a real failure will still be visible after engines reach
+    # 5min uptime, at which point the gate releases and any persistent
+    # error flips back to a warn.
+    echo "  ⓘ  $ERR_TOTAL ERROR-level events in last 5 min (fleet warming up: min uptime ${MIN_UPTIME}min — re-run after fleet ages 5+ min):"
+    ssh "${TARGET}" "now_iso=\$(date -u -d '5 minutes ago' '+%Y-%m-%dT%H:%M:%SZ')
+    for sym in $SYMBOLS_LC; do
+      jq -rc --arg cutoff \"\$now_iso\" 'select(.level == \"ERROR\" and .time >= \$cutoff)' /var/log/paper-live/\${sym}.log 2>/dev/null | head -3 | sed \"s/^/    /\"
+    done"
 else
     warn "$ERR_TOTAL ERROR-level events in last 5 min — investigate:"
     ssh "${TARGET}" "now_iso=\$(date -u -d '5 minutes ago' '+%Y-%m-%dT%H:%M:%SZ')
@@ -166,6 +187,10 @@ if [[ "$RL_TOTAL" -lt 50 ]]; then
     ok "$RL_TOTAL rate-limit warnings in 5 min ($RL_PER_MIN/min — comfortable)"
 elif [[ "$RL_TOTAL" -lt 200 ]]; then
     ok "$RL_TOTAL rate-limit warnings in 5 min ($RL_PER_MIN/min — typical post-restart, monitor)"
+elif [[ "$MIN_UPTIME" -lt 5 ]]; then
+    # 200+ during the warm-up window can come from the simultaneous WS→REST
+    # transition across all 16 engines at t≈180s. Surface but do not FAIL.
+    echo "  ⓘ  $RL_TOTAL rate-limit warnings in 5 min ($RL_PER_MIN/min — fleet warming up; re-run after 5+ min uptime)"
 else
     warn "$RL_TOTAL rate-limit warnings in 5 min ($RL_PER_MIN/min — high)"
 fi

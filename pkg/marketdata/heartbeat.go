@@ -21,12 +21,22 @@ import (
 // Warn-level heartbeats also emit a SeverityWarn alert per the locked telegram
 // alert design rule. The Notifier itself enforces rate limiting + mute hours,
 // so this code does not gate the call.
+//
+// StartupGrace suppresses Warn alerts during the first N seconds after Run()
+// starts. The Binance source can take up to ~3 minutes to deliver its first
+// live tick after restart (backfill ~30s + WebSocket read deadline 90s ×
+// wsMaxStalls 2 = 180s before the REST aggTrade fallback engages). Without
+// grace, every redeploy fires ~16 stale-feed Telegram alerts that auto-clear
+// — pure noise that desensitizes the operator. Default 0 preserves the legacy
+// alert-immediately behavior for tests and any caller that does not set it.
 type Heartbeat struct {
 	lastTick  atomic.Pointer[time.Time] // pointer so it's nullable before first tick
 	tickCount atomic.Int64
 	symbol    string
 
-	Notifier *notify.Notifier // optional; nil disables Telegram alerts
+	Notifier     *notify.Notifier // optional; nil disables Telegram alerts
+	StartupGrace time.Duration    // optional; 0 disables the grace window
+	startupAt    time.Time        // set by Run; consulted by snapshotForLog
 }
 
 // heartbeatStaleThreshold is the age beyond which a heartbeat log line is
@@ -34,6 +44,13 @@ type Heartbeat struct {
 // rely on this contract — changing it (or the > vs >= comparison) silently
 // alters which intervals trigger the post-deploy check's STALE warning.
 const heartbeatStaleThreshold = 90 * time.Second
+
+// DefaultStartupGrace covers backfill (~30s) + WebSocket read deadline
+// (90s) × wsMaxStalls (2) = the boundary at which BinanceFutures.readLoop
+// gives up on the WebSocket and switches to REST aggTrade polling. Tracked
+// here as a package constant so the heartbeat grace and the binance.go
+// fallback boundary can drift in lockstep if they ever change.
+const DefaultStartupGrace = 3 * time.Minute
 
 func NewHeartbeat(symbol string) *Heartbeat {
 	return &Heartbeat{symbol: symbol}
@@ -51,11 +68,25 @@ func (h *Heartbeat) Observe(tick models.Tick) {
 // stale → Warn, otherwise Info) is unit-testable without spinning up a ticker
 // and capturing slog output. Returns the post-snapshot tickCount so the caller
 // can advance prevCount for the next interval.
+//
+// During the startup grace window (StartupGrace > 0 and time.Since(startupAt)
+// within grace), Warn outcomes are downgraded to Info "warming up" so the
+// transient WS→REST fallback gap on engine startup does not flood Telegram.
+// Once grace expires the level rules return to their normal contract — a
+// real stalled feed will fire Warn at the next interval after grace ends.
 func (h *Heartbeat) snapshotForLog(prevCount int64) (level slog.Level, msg string, args []any, count int64) {
 	count = h.tickCount.Load()
 	delta := count - prevCount
 	last := h.lastTick.Load()
+
+	inGrace := h.StartupGrace > 0 && !h.startupAt.IsZero() &&
+		time.Since(h.startupAt) < h.StartupGrace
+
 	if last == nil {
+		if inGrace {
+			return slog.LevelInfo, "heartbeat: warming up (no ticks yet)",
+				[]any{"symbol", h.symbol, "uptime", time.Since(h.startupAt).Round(time.Second)}, count
+		}
 		return slog.LevelWarn, "heartbeat: no ticks received yet",
 			[]any{"symbol", h.symbol}, count
 	}
@@ -66,6 +97,10 @@ func (h *Heartbeat) snapshotForLog(prevCount int64) (level slog.Level, msg strin
 		"last_tick_age", age,
 	}
 	if age > heartbeatStaleThreshold {
+		if inGrace {
+			args = append(args, "uptime", time.Since(h.startupAt).Round(time.Second))
+			return slog.LevelInfo, "heartbeat: warming up (feed not yet established)", args, count
+		}
 		return slog.LevelWarn, "heartbeat: feed appears stalled", args, count
 	}
 	return slog.LevelInfo, "heartbeat", args, count
@@ -74,7 +109,13 @@ func (h *Heartbeat) snapshotForLog(prevCount int64) (level slog.Level, msg strin
 // Run emits a heartbeat log every interval until ctx is cancelled.
 // When Notifier is set, Warn-level heartbeats also fire a SeverityWarn
 // Telegram alert (the Notifier handles its own rate limiting and mute hours).
+//
+// Run records the wall-clock start time for the StartupGrace check —
+// snapshotForLog consults it to suppress Warn alerts during the post-restart
+// window. Direct callers of snapshotForLog in tests can set startupAt via
+// the test helper if they want to exercise the grace path.
 func (h *Heartbeat) Run(ctx context.Context, interval time.Duration) {
+	h.startupAt = time.Now()
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 

@@ -367,6 +367,213 @@ func TestHeartbeat_Run_WithNotifier_FiresWarnAlert(t *testing.T) {
 	}
 }
 
+// ── StartupGrace tests ───────────────────────────────────────────────────────
+//
+// The grace window suppresses Warn outcomes for the first StartupGrace
+// duration after Run() begins (or after startupAt is set in tests). It exists
+// because the Binance source can take ~3 minutes to deliver its first live
+// tick after restart (backfill → WS read deadline × wsMaxStalls → REST
+// fallback). Without grace, every redeploy floods Telegram with stale-feed
+// WARN alerts that auto-clear within 3 minutes — pure noise.
+//
+// The contract is: during grace, Warn outcomes (no-ticks-yet, stale) become
+// Info "warming up" lines. After grace, the original level rules apply.
+
+func TestHeartbeat_StartupGrace_NoTicks_DowngradedToInfo(t *testing.T) {
+	// During grace, snapshotForLog with no observed ticks must return Info
+	// "warming up", not the legacy Warn "no ticks received yet".
+	h := NewHeartbeat("BTCUSDT")
+	h.StartupGrace = 3 * time.Minute
+	h.startupAt = time.Now() // just started
+	level, msg, _, _ := h.snapshotForLog(0)
+	if level != slog.LevelInfo {
+		t.Errorf("in-grace + no-ticks: level = %v, want Info (Warn alerts must be suppressed)", level)
+	}
+	if !strings.Contains(msg, "warming up") {
+		t.Errorf("in-grace msg = %q, want contains 'warming up'", msg)
+	}
+}
+
+func TestHeartbeat_StartupGrace_StaleTicks_DowngradedToInfo(t *testing.T) {
+	// During grace, a stale tick (legitimate stale by the 90s threshold)
+	// must also be suppressed — this is the actual XLMUSDT/etc post-restart
+	// failure mode the grace is designed for.
+	h := NewHeartbeat("BTCUSDT")
+	h.StartupGrace = 3 * time.Minute
+	h.startupAt = time.Now()
+	staleTS := time.Now().Add(-2 * heartbeatStaleThreshold)
+	h.Observe(models.Tick{Timestamp: staleTS})
+
+	level, msg, _, _ := h.snapshotForLog(0)
+	if level != slog.LevelInfo {
+		t.Errorf("in-grace + stale-tick: level = %v, want Info (Warn alerts must be suppressed)", level)
+	}
+	if !strings.Contains(msg, "warming up") {
+		t.Errorf("in-grace stale msg = %q, want contains 'warming up'", msg)
+	}
+}
+
+func TestHeartbeat_StartupGrace_FreshTicks_StillInfo(t *testing.T) {
+	// In grace + fresh tick: same as legacy fresh path — Info "heartbeat",
+	// no warming-up phrasing. The grace only downgrades Warn outcomes; it
+	// must not perturb the normal fresh-tick log line shape that
+	// post_deploy_check.sh's section 4 parses.
+	h := NewHeartbeat("BTCUSDT")
+	h.StartupGrace = 3 * time.Minute
+	h.startupAt = time.Now()
+	h.Observe(models.Tick{Timestamp: time.Now()})
+
+	level, msg, _, _ := h.snapshotForLog(0)
+	if level != slog.LevelInfo {
+		t.Errorf("in-grace + fresh-tick: level = %v, want Info", level)
+	}
+	if msg != "heartbeat" {
+		t.Errorf("in-grace fresh msg = %q, want bare \"heartbeat\" (post_deploy_check.sh greps this exact string)", msg)
+	}
+}
+
+func TestHeartbeat_StartupGrace_Expired_StaleTicks_BecomeWarn(t *testing.T) {
+	// After grace expires, stale ticks must escalate to Warn as the legacy
+	// code did. This is the safety property: the grace must not permanently
+	// suppress real stalled-feed alerts.
+	h := NewHeartbeat("BTCUSDT")
+	h.StartupGrace = 100 * time.Millisecond
+	h.startupAt = time.Now().Add(-200 * time.Millisecond) // grace already expired
+	staleTS := time.Now().Add(-2 * heartbeatStaleThreshold)
+	h.Observe(models.Tick{Timestamp: staleTS})
+
+	level, msg, _, _ := h.snapshotForLog(0)
+	if level != slog.LevelWarn {
+		t.Errorf("post-grace + stale-tick: level = %v, want Warn (grace must not permanently mask stale-feed)", level)
+	}
+	if msg != "heartbeat: feed appears stalled" {
+		t.Errorf("post-grace stale msg = %q, want \"heartbeat: feed appears stalled\"", msg)
+	}
+}
+
+func TestHeartbeat_StartupGrace_Disabled_ZeroValue_LegacyBehavior(t *testing.T) {
+	// StartupGrace=0 (zero value) preserves legacy alert-immediately
+	// behavior. This guards every existing test + any caller that hasn't
+	// opted in to the grace window — they must observe identical behavior.
+	h := NewHeartbeat("BTCUSDT")
+	// StartupGrace left at zero
+	h.startupAt = time.Now() // should not matter
+
+	level, _, _, _ := h.snapshotForLog(0)
+	if level != slog.LevelWarn {
+		t.Errorf("StartupGrace=0 + no-ticks: level = %v, want Warn (legacy behavior)", level)
+	}
+}
+
+func TestHeartbeat_StartupGrace_DefaultConstant_Is3Min(t *testing.T) {
+	// DefaultStartupGrace must equal the WS→REST fallback boundary
+	// (wsReadDeadline * wsMaxStalls = 90s * 2 = 180s = 3min). Pinning this
+	// here so changing the binance.go fallback parameters cannot silently
+	// re-enable the post-restart noise floor.
+	if DefaultStartupGrace != 3*time.Minute {
+		t.Errorf("DefaultStartupGrace = %v, want 3m (= wsReadDeadline × wsMaxStalls)", DefaultStartupGrace)
+	}
+}
+
+func TestHeartbeat_Run_InGrace_NoTelegramAlertOnStaleStartup(t *testing.T) {
+	// End-to-end: Run() with StartupGrace set should NOT fire any Telegram
+	// alert during the grace window even when there are no observed ticks.
+	// This is the operationally observable change — the failure mode that
+	// produced 16+ stale-feed alerts on every redeploy.
+	var mu sync.Mutex
+	var bodies []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		var msg map[string]string
+		_ = json.Unmarshal(b, &msg)
+		mu.Lock()
+		bodies = append(bodies, msg["text"])
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+
+	n := &notify.Notifier{
+		BotToken: "tok",
+		ChatID:   "chat",
+		HTTPClient: &http.Client{
+			Timeout:   5 * time.Second,
+			Transport: rewriteTransport{base: http.DefaultTransport, target: srv.URL},
+		},
+	}
+	h := NewHeartbeat("BTCUSDT")
+	h.Notifier = n
+	h.StartupGrace = 1 * time.Second // long enough to cover several ticker fires below
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		h.Run(ctx, 20*time.Millisecond) // 20ms ticker → ~25 fires in 500ms
+	}()
+
+	// Run for half the grace window — every snapshot should be Info, no Telegram.
+	time.Sleep(500 * time.Millisecond)
+	cancel()
+	<-done
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(bodies) != 0 {
+		t.Errorf("expected zero Telegram alerts during grace window, got %d: %v", len(bodies), bodies)
+	}
+}
+
+func TestHeartbeat_Run_GraceExpired_TelegramAlertFires(t *testing.T) {
+	// Inverse of the above: once the grace window expires, the next stale
+	// snapshot must escalate to Warn and fire a Telegram alert. This proves
+	// the grace is a window, not a permanent mute.
+	var mu sync.Mutex
+	var bodies []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		var msg map[string]string
+		_ = json.Unmarshal(b, &msg)
+		mu.Lock()
+		bodies = append(bodies, msg["text"])
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+
+	n := &notify.Notifier{
+		BotToken: "tok",
+		ChatID:   "chat",
+		HTTPClient: &http.Client{
+			Timeout:   5 * time.Second,
+			Transport: rewriteTransport{base: http.DefaultTransport, target: srv.URL},
+		},
+	}
+	h := NewHeartbeat("BTCUSDT")
+	h.Notifier = n
+	h.StartupGrace = 50 * time.Millisecond // expires almost immediately
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		h.Run(ctx, 20*time.Millisecond)
+	}()
+
+	time.Sleep(300 * time.Millisecond) // well past grace; multiple ticker fires happen post-grace
+	cancel()
+	<-done
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(bodies) == 0 {
+		t.Fatal("expected ≥1 Telegram alert post-grace, got 0 (grace must not permanently suppress)")
+	}
+	if !strings.Contains(bodies[0], "no ticks received yet") {
+		t.Errorf("post-grace alert msg = %q, want contains 'no ticks received yet'", bodies[0])
+	}
+}
+
 // rewriteTransport intercepts outbound HTTP requests and rewrites the URL
 // to point at the test server. This is the cleanest way to redirect a
 // production-shaped Notifier to a test server without modifying the

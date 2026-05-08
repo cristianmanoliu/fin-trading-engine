@@ -421,7 +421,8 @@ func main() {
 	}
 
 	hb := marketdata.NewHeartbeat(cfg.Symbol)
-	hb.Notifier = notifier // wire Telegram WARN alerts on stale-feed detection
+	hb.Notifier = notifier                              // wire Telegram WARN alerts on stale-feed detection
+	hb.StartupGrace = marketdata.DefaultStartupGrace    // suppress Warn alerts during the post-restart WS→REST fallback gap
 
 	g, gctx := errgroup.WithContext(ctx)
 
