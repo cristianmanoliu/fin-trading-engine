@@ -48,6 +48,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -63,6 +64,19 @@ type entry struct {
 	Symbol  string  `json:"symbol"`
 	TS      string  `json:"ts"`
 	Outcome string  `json:"outcome,omitempty"`
+
+	// Cost-decomposition fields (close events only, schema from commit
+	// 7939786). Invariant per pkg/execution/stub.go:718:
+	//   PnlUSD == GrossUSD - FeeUSD - SlipUSD - FundingUSD
+	// Each engine-side field is rounded to cents (math.Round(*100)/100).
+	// Validator gates the invariant check on Notional > 0 to skip
+	// pre-decomp closes where all cost fields are zero.
+	GrossUSD   float64 `json:"gross_usd,omitempty"`
+	FeeUSD     float64 `json:"fee_usd,omitempty"`
+	SlipUSD    float64 `json:"slip_usd,omitempty"`
+	FundingUSD float64 `json:"funding_usd,omitempty"`
+	Notional   float64 `json:"notional_usd,omitempty"`
+	PnlUSD     float64 `json:"pnl_usd,omitempty"`
 }
 
 // issue is a single validation finding.
@@ -349,6 +363,26 @@ func validateFile(path string, state *symbolState) ([]issue, error) {
 				// PARTIAL closes leave the position in flight (B2 mid-R
 				// partial-take followed by a later terminal close).
 				state.inFlight[e.Symbol]--
+			}
+
+			// Cost-decomposition invariant (gated on Notional > 0 to skip
+			// pre-decomp closes whose cost fields are all zero by virtue
+			// of being absent from the JSON):
+			//   pnl_usd ≈ gross_usd - fee_usd - slip_usd - funding_usd
+			// Tolerance is 5 cents — each engine-side field is rounded to
+			// cents (math.Round(*100)/100), so worst-case round-off across
+			// 4 fields is ~2 cents; 5 cents gives margin for edge cases.
+			if e.Notional > 0 {
+				expected := e.GrossUSD - e.FeeUSD - e.SlipUSD - e.FundingUSD
+				if math.Abs(e.PnlUSD-expected) > 0.05 {
+					issues = append(issues, issue{
+						Severity: "ERROR",
+						File:     path,
+						Line:     lineno,
+						Msg: fmt.Sprintf("cost-decomp invariant violated: pnl_usd=%.2f vs gross-fee-slip-funding=%.2f (diff=%.4f) [g=%.2f f=%.2f s=%.2f fund=%.2f]",
+							e.PnlUSD, expected, e.PnlUSD-expected, e.GrossUSD, e.FeeUSD, e.SlipUSD, e.FundingUSD),
+					})
+				}
 			}
 		}
 	}

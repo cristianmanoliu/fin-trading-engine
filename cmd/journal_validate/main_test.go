@@ -300,6 +300,86 @@ func TestDiscoverJournals_RecursesShadowSubdirs(t *testing.T) {
 	}
 }
 
+func TestValidateFile_CostDecomp_ValidInvariant_NoIssue(t *testing.T) {
+	// pnl_usd = gross - fee - slip - funding. With round-cent precision,
+	// e.g. gross=100, fee=10, slip=5, funding=2 → pnl=83. Within tolerance.
+	closeWithCosts := `{"event":"close","symbol":"BTCUSDT","ts":"2026-05-08T10:00:00Z","side":"LONG","entry":100,"outcome":"TARGET","gross_usd":100.00,"fee_usd":10.00,"slip_usd":5.00,"funding_usd":2.00,"notional_usd":50000,"pnl_usd":83.00}`
+	p := writeJournal(t,
+		openLine("BTCUSDT", "2026-05-08T08:00:00Z"),
+		closeWithCosts,
+	)
+	issues, err := validateFile(p, newSymbolState())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(issues) != 0 {
+		t.Errorf("valid cost decomp should not flag: %+v", issues)
+	}
+}
+
+func TestValidateFile_CostDecomp_InvalidInvariant_Errors(t *testing.T) {
+	// pnl_usd doesn't match gross - fee - slip - funding. gross=100, fee=10,
+	// slip=5, funding=0 → expected pnl=85, but pnl_usd=99 (way off).
+	closeWithBadCosts := `{"event":"close","symbol":"BTCUSDT","ts":"2026-05-08T10:00:00Z","side":"LONG","entry":100,"outcome":"TARGET","gross_usd":100.00,"fee_usd":10.00,"slip_usd":5.00,"funding_usd":0.00,"notional_usd":50000,"pnl_usd":99.00}`
+	p := writeJournal(t,
+		openLine("BTCUSDT", "2026-05-08T08:00:00Z"),
+		closeWithBadCosts,
+	)
+	issues, err := validateFile(p, newSymbolState())
+	if err != nil {
+		t.Fatal(err)
+	}
+	hasErr := false
+	for _, iss := range issues {
+		if iss.Severity == "ERROR" && strings.Contains(iss.Msg, "cost-decomp invariant") {
+			hasErr = true
+		}
+	}
+	if !hasErr {
+		t.Errorf("expected cost-decomp ERROR, got %+v", issues)
+	}
+}
+
+func TestValidateFile_CostDecomp_PreDecompSchemaSkipped(t *testing.T) {
+	// Old close event without the cost-decomp fields — Notional defaults
+	// to 0 on JSON unmarshal (omitempty + zero value). Validator should
+	// skip the invariant check rather than false-positive.
+	oldClose := `{"event":"close","symbol":"BTCUSDT","ts":"2026-05-08T10:00:00Z","side":"LONG","entry":100,"exit":110,"outcome":"TARGET","pnl_usd":10.00}`
+	p := writeJournal(t,
+		openLine("BTCUSDT", "2026-05-08T08:00:00Z"),
+		oldClose,
+	)
+	issues, err := validateFile(p, newSymbolState())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(issues) != 0 {
+		t.Errorf("pre-decomp close should not be flagged: %+v", issues)
+	}
+}
+
+func TestValidateFile_CostDecomp_RoundOffWithinTolerance(t *testing.T) {
+	// Each field is rounded to cents on engine side; sum can drift by a
+	// few cents from the rounded sum. 5-cent tolerance covers it.
+	// Construct: gross=100.005, fee=10.005, slip=5.005, funding=2.005 →
+	// rounded to {100.01, 10.01, 5.01, 2.01}. Sum: 100.01-10.01-5.01-2.01=82.98.
+	// With pnl_usd=83.00 (also rounded), diff=0.02 — within 0.05 tolerance.
+	closeRounded := `{"event":"close","symbol":"BTCUSDT","ts":"2026-05-08T10:00:00Z","side":"LONG","entry":100,"outcome":"TARGET","gross_usd":100.01,"fee_usd":10.01,"slip_usd":5.01,"funding_usd":2.01,"notional_usd":50000,"pnl_usd":83.00}`
+	p := writeJournal(t,
+		openLine("BTCUSDT", "2026-05-08T08:00:00Z"),
+		closeRounded,
+	)
+	issues, err := validateFile(p, newSymbolState())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, iss := range issues {
+		if strings.Contains(iss.Msg, "cost-decomp") {
+			t.Errorf("rounding within tolerance should not flag: %+v", iss)
+		}
+	}
+}
+
 func TestValidateFile_MultipleSymbolsIndependent(t *testing.T) {
 	// open ETH then close BTC (without ETH being closed first) is OK only if
 	// BTC was previously opened. Cross-symbol pairing is per-symbol.
