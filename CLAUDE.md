@@ -12,7 +12,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Validation status:** SUPPORTIVE walk-forward verdict (4H short EMA 9/21 mh504, 6 windows). Mean +$130k/yr with 95% CI [−$111k, +$372k] — **CI includes negative; uncertainty is irreducible from history alone.** Trade-level block bootstrap (5y × 16 sym × 2,210 trades, stationary bootstrap at L=√N=47) gives a much tighter CI [+$42k, +$220k]/yr, P(>$0)=99.9%, P(>$50k)=96.5% — but walk-forward CI is **2.8× wider**, confirming regime-variance (quarter-level) dominates trade-level autocorrelation (lag-1 ρ=+0.32). **Anchor expectations to walk-forward, not bootstrap** — bootstrap underestimates per-quarter regime swings. See `results/bootstrap_ci_verdict_2026-05-07.md`.
 
-**Real-money allocation:** ZERO. Gated on forward-paper validation (≥150 trades, ≥60 days net-positive, see `## Forward-paper go/no-go criteria`).
+**Real-money allocation:** ZERO. Executor code complete (5 commits this evening; see `### Real-money executor implementation pass (2026-05-08 evening)` below). Gated on forward-paper validation (≥150 trades, ≥60 days net-positive, see `## Forward-paper go/no-go criteria`) PLUS Layer 2 testnet integration + Layer 3 7-day shadow parity per `results/real_money_executor_architecture_decision_rule_2026-05-08.md`.
 
 ## Today's findings (2026-05-07 EOS)
 
@@ -68,6 +68,28 @@ Pre-registration banked for next milestone:
 - `results/telegram_alert_design_decision_rule_2026-05-08.md` — three severity tiers (INFO / WARN / CRITICAL) with locked rate limits, mute-hour semantics, and message format per tier. Per-event tier assignments table for every alertable event referenced by other locked rules. CRITICAL never muted, unlimited rate (response window 30min); WARN ≤5/hour, partial mute (response 4h); INFO ≤10/hour, full mute (response 24h). Implementation contract: extend `pkg/notify/telegram.go` with `SendStructured(severity, body)` — best-effort delivery, goroutine-safe, falls back to slog.Error on POST failure.
 - `results/INDEX.md` — navigable catalog for all 53 results/ docs (26 decision rules + 22 verdicts + 5 syntheses) organized by lifecycle stage and category, plus charter section explaining the pre-registration discipline philosophy and a cross-reference graph showing how the locks compose.
 
+### Real-money executor implementation pass (2026-05-08 evening)
+
+Five commits ship the BinanceLive executor end-to-end per the locked
+`real_money_executor_architecture_decision_rule_2026-05-08.md`. The Go binary is now promotion-ready — remaining gates are operational, not code.
+
+- `7770047` — **`PositionReconciler` real impl**: clamped 60s polling loop ([30s, 300s] floor/ceiling), drift detection on three orthogonal axes (qty ≥0.01 contracts, side mismatch, entry-price ≥10 bps), leading-edge CRITICAL alerts via Notifier, `IsDrifted`/`MarkDrift`/`ClearDrift` surface for the OnSignal drift gate. 23 unit tests.
+- `802fd31` — **`BinanceLive.OnSignal` + `OnTick` full path**: drift gate → SafetyGates → goroutine async `OrderRouter.SendOrder` → journal in Stub-identical schema; OnTick exit detection (stop / target / MaxHoldHours) with `exitPending` double-close prevention; PnL math mirrors `Stub.closePosition` exactly, with exchange-reported fill prices and slip-from-actual-vs-modeled. 14 unit tests; race-clean.
+- `78d94b7` — **`BinanceLive.RecoverFromJournal` with mandatory exchange verification**: scans current+prior month journal mirroring Stub's state machine, then queries `/fapi/v2/positionRisk` and runs `detectDrift`. Returns `ErrRecoveryDrift` on divergence so `cmd/engine` refuses to start per "Engine restarts mid-real-money-trade" in the locked rule. 11 unit tests.
+- `cf5777b` — **`cmd/engine --executor` flag**: default `stub` keeps today's paper-live deploy unchanged; `binance_live` opt-in requires `BINANCE_API_KEY` + `BINANCE_API_SECRET` env. Hoists the funding-provider load above the executor branch. Adds `PositionReconciler.Run` to the errgroup. `ErrRecoveryDrift` → `os.Exit(2)` with CRITICAL Telegram alert (distinct exit code so systemd watchdog logs distinguish recovery-drift from generic startup failures).
+- `d89862b` — **`cmd/kill_switch` operator CLI** for Path C real-money close-all (Phase 2 of `auto_kill_execution_decision_rule_2026-05-08.md`). `CONFIRM` positional gate is the human-in-the-loop safety net the rule explicitly requires. Pre-fire + post-fire CRITICAL alerts; per-symbol outcome printed in artifact-ready form for Phase 4. `ParseClosePositionSpec` helper with 14 parser tests.
+
+Totals: ~75 unit tests added across the five commits; `go test ./... -race -count=1` clean; `go vet` clean. Smoke-tested both binaries (`--help`, dry-run, bad-input, missing-creds — all behave correctly).
+
+Pre-promotion checklist status (per locked rule):
+- Code merged + reviewed: ✅
+- Unit tests passing (mocked HTTP): ✅
+- Layer 2 testnet integration: ⏳ (operator step, needs testnet credentials)
+- Layer 3 7-day shadow-mode parity run: ⏳ (pre-flip operational gate)
+- STAGE_1 promotion runbook: ⏳ (separate doc)
+
+Forward-paper unaffected by this work — the live cohort fired its first close today (XLMUSDT SHORT @ 0.15832 → STOP @ 0.1591, pnl=−$1306.24, costs realized exactly at modeled 10 bp / 5 bp). n=1, expected variance, no read-into for ~149 more trades AND ~59 more days minimum.
+
 ## Build & Run
 
 ```bash
@@ -80,8 +102,21 @@ go run ./cmd/backtest --config configs/btcusdt.yaml
 # Override date without editing config
 go run ./cmd/backtest --config configs/btcusdt.yaml --year 2024 --month 06
 
-# Run live engine (paper trading via Binance WebSocket)
+# Run live engine (paper trading via Binance WebSocket — DEFAULT)
 go run ./cmd/engine --config configs/btcusdt.yaml
+
+# Run live engine in REAL-MONEY mode (STAGE_1+ promotion ONLY; default is stub).
+# Requires Layer 2 (testnet) + Layer 3 (7d shadow parity) gates passed first
+# per real_money_executor_architecture_decision_rule_2026-05-08.md.
+BINANCE_API_KEY=... BINANCE_API_SECRET=... \
+  go run ./cmd/engine --config configs/btcusdt.yaml --executor binance_live
+
+# Emergency Path C real-money close-all (operator-driven only — see
+# auto_kill_execution_decision_rule_2026-05-08.md). Dry-run by default;
+# append CONFIRM to fire. CRITICAL Telegram alerts pre/post-fire.
+BINANCE_API_KEY=... BINANCE_API_SECRET=... \
+  go run ./cmd/kill_switch --reason drift_kill_<date> \
+                           --positions "BTCUSDT,LONG,0.5;ETHUSDT,SHORT,2" CONFIRM
 
 # Run all tests
 go test ./...
