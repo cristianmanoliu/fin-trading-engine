@@ -12,83 +12,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Validation status:** SUPPORTIVE walk-forward verdict (4H short EMA 9/21 mh504, 6 windows). Mean +$130k/yr with 95% CI [−$111k, +$372k] — **CI includes negative; uncertainty is irreducible from history alone.** Trade-level block bootstrap (5y × 16 sym × 2,210 trades, stationary bootstrap at L=√N=47) gives a much tighter CI [+$42k, +$220k]/yr, P(>$0)=99.9%, P(>$50k)=96.5% — but walk-forward CI is **2.8× wider**, confirming regime-variance (quarter-level) dominates trade-level autocorrelation (lag-1 ρ=+0.32). **Anchor expectations to walk-forward, not bootstrap** — bootstrap underestimates per-quarter regime swings. See `results/bootstrap_ci_verdict_2026-05-07.md`.
 
-**Real-money allocation:** ZERO. Executor code complete (5 commits this evening; see `### Real-money executor implementation pass (2026-05-08 evening)` below). Gated on forward-paper validation (≥150 trades, ≥60 days net-positive, see `## Forward-paper go/no-go criteria`) PLUS Layer 2 testnet integration + Layer 3 7-day shadow parity per `results/real_money_executor_architecture_decision_rule_2026-05-08.md`.
+**Real-money allocation:** ZERO. BinanceLive executor code complete; Go binary is promotion-ready. Gated on forward-paper validation (≥150 trades, ≥60 days net-positive, see `## Forward-paper go/no-go criteria`) PLUS Layer 2 testnet integration + Layer 3 7-day shadow parity per `results/real_money_executor_architecture_decision_rule_2026-05-08.md`.
 
-## Today's findings (2026-05-07 EOS)
+## Recent session logs
 
-**Foundational claim validation set is COMPLETE.** A1 (block bootstrap CI), A3 (sample-split bootstrap), and edge-stability all confirm the +$130k/yr cumulative claim is real, regime-independent, and not time-decaying.
+- `docs/findings/2026-05-08.md` — combined 2026-05-07/08 session: milestone-1 backtest investigation closure (5-fold strategy validation, F1×F2 mechanism class rejected, drift detector deployed at α=0.001, journal-replay shipped), operational hardening pass (forward_paper_status.sh / run_drift_check.sh / 9 defensive test suites / 10 pre-regs), and BinanceLive executor implementation (5 commits, ~75 tests, promotion-ready pending Layer 2/3 operational gates).
+- `docs/findings/2026-05-06.md` — walk-forward framework, mechanism analysis, regime finding, funding-loader bug fix.
 
-**Operational kill mechanism is RESOLVED.** Threshold-based kill criteria in `forward_paper_status.sh` were Monte-Carlo-calibrated → NEEDS_RECALIBRATION (30-40% FP under null) → recalibration attempt → NO_KILL_BAR (statistical impossibility at 90d due to distribution overlap; shift/SD ≈ 0.6, need ≥1.68 for FP≤20% AND TP≥80%). The drift detector (`scripts/live_vs_backtest_drift.py`) was then calibrated as the alternative → **DETECTOR_VIABLE**: TP=100% under deg30/deg50/dead at every operating point in the locked grid. Deployed at α_family=0.001, N_LIVE=50 (FP=12.1%, TP=100%) per recalibration verdict.
-
-**Architectural fix shipped.** `Stub.RecoverFromJournal()` reads current+prior month journal on engine startup, reconstructs in-flight position from last unclosed open. Pre-open tick guard skips backfill ticks predating recovered position. 11 unit tests cover edge cases (empty/closed/partial/cross-month/corrupt-line/pre-existing-position/pre-open-tick-guard). Verified end-to-end against the IMX bb20 orphan from yesterday morning.
-
-Headline outcomes (verdict docs are the authoritative records):
-- A1 / A3 / edge-stability: cumulative claim validated three independent ways
-- Kill bar: threshold-based criteria mis-calibrated then statistically impossible at 90d → distribution-based detector is the path forward
-- Drift detector: calibrated, verified VIABLE, tightened to α=0.001
-- Engine recovery: deployed, 7 orphans recovered cleanly, today's journal cost-decomposition schema activated for future closes
-- Cat G F1∧F2 composite: pre-registered today for next milestone, not yet executed
-
-**Pre-registered decision rules archived in:** `results/sample_split_bootstrap_decision_rule_2026-05-07.md`, `results/edge_stability_decision_rule_2026-05-07.md`, `results/kill_bar_calibration_decision_rule_2026-05-07.md`, `results/kill_bar_recal_decision_rule_2026-05-07.md`, `results/drift_detector_calibration_decision_rule_2026-05-07.md`, `results/cat_g_f1xf2_composite_decision_rule_2026-05-07.md`.
-
-**Prior-day findings:** `docs/findings/2026-05-06.md`. Today's session log: pending writeup.
-
-### Operational hardening pass (2026-05-08 mid-day, post-milestone)
-
-Mode is MONITORING — backtest investigation closed; the 60-day forward-paper countdown anchors to the first close ts. Used the morning to close real visibility/test gaps that today's tooling depends on.
-
-Operational tooling:
-- `forward_paper_status.sh` — surfaces currently-held positions per cohort (was hidden behind "(no data yet)"); now also pre-fetches Binance prices and shows current `now=… ±X% to stop` for each open
-- `run_drift_check.sh` — wraps `live_vs_backtest_drift.py` with state persistence to `results/drift_check_history.jsonl` + per-run logs; mechanically evaluates the locked two-firings-≥7d-apart auto-kill rule. Cron deployment design locked at `results/drift_wrapper_cron_decision_rule_2026-05-08.md` (phased by STAGE: manual through STAGE_2, VPS systemd timer required at STAGE_3+).
-- `post_deploy_check.sh` — section 7 added: "position recovery events in last 24h" greps engine logs for the recovery line, surfaces the audit signal that was previously buried.
-- `scripts/README.md` — new catalog of all 75+ scripts tiered by frequency of use.
-- `README.md` banner — refreshed (was stale: said "32 symbols" since reduced to 16; old completion date superseded by the locked real-money protocol).
-
-Defensive moat (test fills for paths every claim transitively depends on):
-- `pkg/indicators/ema.go` — 11 tests on priming, post-prime formula, smoothing factor (foundational; previously zero coverage)
-- `pkg/strategy/bias.go` — 15 tests on the 4H-bias state machine and `Allows()` gate
-- `pkg/marketdata/replay.go` — 12 tests on CSVReplay; surfaced + pinned a `csv.Reader` field-count footgun (silent stream termination on mid-file column-count mismatch)
-- `pkg/strategy/engine.go` — 13 tests on Bug 5 staleness gate (stale-candle suppression in liveMode), HandleCandle/HandleTick routing, and Run() lifecycle (channels-closed vs ctx-cancelled have different Summary semantics)
-- `pkg/marketdata/heartbeat.go` — 10 tests; 90s threshold pinned as a named constant
-- `pkg/marketdata/fanout.go` — symmetric coverage added for `FanOutTicks` (matched the 4 existing `FanOutCandles` lifecycle tests)
-- `pkg/strategy/funding_filter.go` — 8 tests on the dormant short-only gate (defensive against future Cat F2 reactivation)
-
-First empirical run of the extended status script surfaced that the LIVE cohort fired its first signal since the journal-replay deploy: XLMUSDT SHORT @ 0.15832 at 2026-05-08T08:00 UTC (currently +11.6% adverse).
-
-Pre-registration banked for next milestone:
-- `results/drift_wrapper_cron_decision_rule_2026-05-08.md` — phased cron deployment by STAGE
-- `results/strategy_backlog_milestone2_2026-05-08.md` — 8 mechanism ideas with locked verdict criteria, prioritization rubric, and recommended milestone-2 selection (A2 ATR-sizing + C1 funding-extremum + A1 vol-regime-filter + B2 BB-squeeze + D1 session-filter). Discipline contract at the top: do NOT execute before milestone 2 begins.
-- `results/drift_firing_investigation_decision_rule_2026-05-08.md` — three-tier playbook (A/B/C by firing strength) for the operator's response to wrapper exit code 1. Required cross-checks per tier, required `results/drift_firings/<date>.md` artifact per investigation, time budgets halve under STAGE_1+ real-money. Pre-locks the response so the first firing is mechanical-rule-application, not improvised under stress.
-- `results/auto_kill_execution_decision_rule_2026-05-08.md` — six-phase execution sequence (HALT, OPEN-POSITIONS, ARCHIVE, DOCUMENT, NOTIFY, POSTMORTEM) for when a kill trigger fires (drift exit 4, TRIAGE-C escalation, threshold criteria, drawdown, operational). Two tiers (SOFT pause-and-fix, HARD milestone-close) by trigger type. Verification gates between phases prevent state corruption. Closes the loop: detection → investigation → kill execution.
-- `results/per_symbol_pause_decision_rule_2026-05-08.md` — single-engine pause/kill at the symbol level. Resolves the tension with "Don't reshuffle the deployed-32" by mechanical attribution: external/operational/regulatory causes (b) ALLOW pause; performance-driven causes (a) FORBID pause and require fleet-wide handling. Required artifact per pause includes a discipline-checklist verifying no selection bias (other similar-loss symbols are NOT being paused).
-- `results/real_money_executor_architecture_decision_rule_2026-05-08.md` — design for the real-money executor that replaces `Stub` at STAGE_1 promotion. Locks: 5-component decomposition (`BinanceLive`, `OrderRouter`, `PositionReconciler`, `SafetyGates`, `KillSwitch`), F1-F5 failure-mode taxonomy (transient net, sustained net, exchange bad-request, rate limit, partial-fill drift), three safety gates (max-position cap, daily-loss circuit breaker, entry-price sanity), three-layer testing (unit + testnet integration + 7d shadow-mode). Implementation details (HTTP client, concurrency, retry params) deliberately NOT locked — defer to STAGE_1 implementation feedback.
-- `results/forward_paper_completion_review_decision_rule_2026-05-08.md` — qualitative audit gate between mechanical DEPLOY-READY verdict and STAGE_1 promotion. Three sections (cost realization, empirical-vs-prediction shape, anomaly + qualitative) with locked GREEN/AMBER/RED thresholds per check. Composite verdict via worst-of conjunctive filter; AMBER resolution path with mandatory re-review. Required artifact `results/forward_paper_completion_review_<date>.md` per review (initial + each re-run); 24h cooling period after first DEPLOY-READY before promotion is allowed. Closes the gateway between forward-paper discipline and real-money execution.
-- `results/stage_promotion_runbook_decision_rule_2026-05-08.md` — six-phase execution sequence applied to every STAGE-up promotion (paper→1, 1→2, 2→3, 3→4). Per-stage parameter table covers stake, prior-stage trade/day requirements, abbreviated review (for promotions other than paper→STAGE_1), monitoring window length, first-N-trade manual verification count, and daily-loss circuit breaker M. Rollback path: revert config + redeploy + SOFT pause cooling period. Each promotion produces `results/stage_promotion_<date>_<from>_to_<to>.md`. STAGE_4 is the terminal stage in this protocol — STAGE_5 would require a new milestone with new pre-registration.
-- `results/postmortem_template_decision_rule_2026-05-08.md` — locked structure for the postmortem appended to every kill / promotion-rollback / extended-pause artifact. 8 sections (timeline, mechanism diagnosis, hypothesis evaluation, detection latency, milestone-2 implication, what-we'd-do-differently, action items, cross-references). REQUIRED within 7 days of HARD kills + extended SOFTs + per-symbol HARDs; RECOMMENDED for promotion-rollback + extended-SOFT-pause within 14 days. Mechanism-diagnosis taxonomy: GONE / REGIME-CONDITIONED / COST-DOMINATED / CONFOUNDED. Action items in Section 7 are the accountability mechanism — convert reflection to milestone-2 design changes.
-- `results/telegram_alert_design_decision_rule_2026-05-08.md` — three severity tiers (INFO / WARN / CRITICAL) with locked rate limits, mute-hour semantics, and message format per tier. Per-event tier assignments table for every alertable event referenced by other locked rules. CRITICAL never muted, unlimited rate (response window 30min); WARN ≤5/hour, partial mute (response 4h); INFO ≤10/hour, full mute (response 24h). Implementation contract: extend `pkg/notify/telegram.go` with `SendStructured(severity, body)` — best-effort delivery, goroutine-safe, falls back to slog.Error on POST failure.
-- `results/INDEX.md` — navigable catalog for all 53 results/ docs (26 decision rules + 22 verdicts + 5 syntheses) organized by lifecycle stage and category, plus charter section explaining the pre-registration discipline philosophy and a cross-reference graph showing how the locks compose.
-
-### Real-money executor implementation pass (2026-05-08 evening)
-
-Five commits ship the BinanceLive executor end-to-end per the locked
-`real_money_executor_architecture_decision_rule_2026-05-08.md`. The Go binary is now promotion-ready — remaining gates are operational, not code.
-
-- `7770047` — **`PositionReconciler` real impl**: clamped 60s polling loop ([30s, 300s] floor/ceiling), drift detection on three orthogonal axes (qty ≥0.01 contracts, side mismatch, entry-price ≥10 bps), leading-edge CRITICAL alerts via Notifier, `IsDrifted`/`MarkDrift`/`ClearDrift` surface for the OnSignal drift gate. 23 unit tests.
-- `802fd31` — **`BinanceLive.OnSignal` + `OnTick` full path**: drift gate → SafetyGates → goroutine async `OrderRouter.SendOrder` → journal in Stub-identical schema; OnTick exit detection (stop / target / MaxHoldHours) with `exitPending` double-close prevention; PnL math mirrors `Stub.closePosition` exactly, with exchange-reported fill prices and slip-from-actual-vs-modeled. 14 unit tests; race-clean.
-- `78d94b7` — **`BinanceLive.RecoverFromJournal` with mandatory exchange verification**: scans current+prior month journal mirroring Stub's state machine, then queries `/fapi/v2/positionRisk` and runs `detectDrift`. Returns `ErrRecoveryDrift` on divergence so `cmd/engine` refuses to start per "Engine restarts mid-real-money-trade" in the locked rule. 11 unit tests.
-- `cf5777b` — **`cmd/engine --executor` flag**: default `stub` keeps today's paper-live deploy unchanged; `binance_live` opt-in requires `BINANCE_API_KEY` + `BINANCE_API_SECRET` env. Hoists the funding-provider load above the executor branch. Adds `PositionReconciler.Run` to the errgroup. `ErrRecoveryDrift` → `os.Exit(2)` with CRITICAL Telegram alert (distinct exit code so systemd watchdog logs distinguish recovery-drift from generic startup failures).
-- `d89862b` — **`cmd/kill_switch` operator CLI** for Path C real-money close-all (Phase 2 of `auto_kill_execution_decision_rule_2026-05-08.md`). `CONFIRM` positional gate is the human-in-the-loop safety net the rule explicitly requires. Pre-fire + post-fire CRITICAL alerts; per-symbol outcome printed in artifact-ready form for Phase 4. `ParseClosePositionSpec` helper with 14 parser tests.
-
-Totals: ~75 unit tests added across the five commits; `go test ./... -race -count=1` clean; `go vet` clean. Smoke-tested both binaries (`--help`, dry-run, bad-input, missing-creds — all behave correctly).
-
-Pre-promotion checklist status (per locked rule):
-- Code merged + reviewed: ✅
-- Unit tests passing (mocked HTTP): ✅
-- Layer 2 testnet integration: ⏳ (operator step, needs testnet credentials)
-- Layer 3 7-day shadow-mode parity run: ⏳ (pre-flip operational gate)
-- STAGE_1 promotion runbook: ⏳ (separate doc)
-
-Forward-paper unaffected by this work — the live cohort fired its first close today (XLMUSDT SHORT @ 0.15832 → STOP @ 0.1591, pnl=−$1306.24, costs realized exactly at modeled 10 bp / 5 bp). n=1, expected variance, no read-into for ~149 more trades AND ~59 more days minimum.
+The full pre-registration catalog is in `results/INDEX.md` (53 docs: 26 decision rules + 22 verdicts + 5 syntheses).
 
 ## Build & Run
 
