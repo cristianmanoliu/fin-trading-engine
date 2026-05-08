@@ -301,6 +301,43 @@ else
     printf '%s\n' "$STALE_REPORT"
 fi
 
+# ── 10. Disk space + log size sanity ──────────────────────────────────────────
+# Engines write JSONL journals + structured logs continuously. Daily log
+# rotation bounds growth in steady state, but a runaway logging loop, stuck
+# process, or filled / could all silently corrupt journals (write-failure on
+# an already-locked engine doesn't crash it, just produces missing events).
+# Two thresholds: ample-headroom for free space + per-file ceiling for
+# runaway logs.
+echo ""
+echo "10. Disk space"
+DISK_REPORT=$(ssh "${TARGET}" "free_mb=\$(df -BM / | tail -1 | awk '{print \$4}' | sed 's/M\$//')
+largest_bytes=\$(ls -l /var/log/paper-live/*.log 2>/dev/null | awk '{print \$5}' | sort -n | tail -1)
+largest_bytes=\${largest_bytes:-0}
+echo \"\$free_mb|\$largest_bytes\"")
+IFS='|' read -r FREE_MB LARGEST_BYTES <<<"$DISK_REPORT"
+FREE_MB="${FREE_MB:-0}"
+LARGEST_BYTES="${LARGEST_BYTES:-0}"
+LARGEST_MB=$(( LARGEST_BYTES / 1048576 ))
+
+if [[ "$FREE_MB" -lt 1024 ]]; then
+    warn "low disk space: ${FREE_MB}M free on / (engine journal writes will fail when full)"
+elif [[ "$FREE_MB" -lt 5120 ]]; then
+    echo "  ⓘ  ${FREE_MB}M free on / (warn threshold ≥1024M; ample ≥5120M)"
+else
+    ok "${FREE_MB}M free on / (ample headroom)"
+fi
+
+# Largest current log: rotation runs daily, so steady-state ≤ ~1d × ~10MB/day
+# per engine. >500MB in a single .log file means logging-rate is an order of
+# magnitude above expected — investigate before rotation hides it.
+if [[ "$LARGEST_BYTES" -gt 1073741824 ]]; then     # 1GB
+    warn "largest engine log file is ${LARGEST_MB}M (>1GB — investigate logging loop)"
+elif [[ "$LARGEST_BYTES" -gt 524288000 ]]; then     # 500MB
+    echo "  ⓘ  largest engine log file is ${LARGEST_MB}M (above typical; rotation will trim daily)"
+else
+    ok "largest engine log file is ${LARGEST_MB}M (within typical bounds)"
+fi
+
 # ── Verdict ───────────────────────────────────────────────────────────────────
 echo ""
 echo "════════════════════════════════════════════════════════════════════════════════"
