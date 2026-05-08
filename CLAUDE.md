@@ -58,6 +58,7 @@ First empirical run of the extended status script surfaced that the LIVE cohort 
 Pre-registration banked for next milestone:
 - `results/drift_wrapper_cron_decision_rule_2026-05-08.md` — phased cron deployment by STAGE
 - `results/strategy_backlog_milestone2_2026-05-08.md` — 8 mechanism ideas with locked verdict criteria, prioritization rubric, and recommended milestone-2 selection (A2 ATR-sizing + C1 funding-extremum + A1 vol-regime-filter + B2 BB-squeeze + D1 session-filter). Discipline contract at the top: do NOT execute before milestone 2 begins.
+- `results/drift_firing_investigation_decision_rule_2026-05-08.md` — three-tier playbook (A/B/C by firing strength) for the operator's response to wrapper exit code 1. Required cross-checks per tier, required `results/drift_firings/<date>.md` artifact per investigation, time budgets halve under STAGE_1+ real-money. Pre-locks the response so the first firing is mechanical-rule-application, not improvised under stress.
 
 ## Build & Run
 
