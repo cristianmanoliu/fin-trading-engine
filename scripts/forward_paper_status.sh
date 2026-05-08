@@ -51,8 +51,11 @@ remote_or_local() {
 }
 
 # Aggregate journal data on the (remote or local) host. Outputs:
-#   STRATEGY|<label>|<first_ts>|<last_ts>|<trades>|<wins>|<net_pnl>
+#   STRATEGY|<label>|<first_ts>|<last_ts>|<trades>|<wins>|<net_pnl>|<fee>|<slip>|<notional>|<notional_losers>
+#   STRATEGY|<label>|NODATA                                            (no closes — may still have OPEN records)
 #   SYMBOL|<label>|<symbol>|<sym_pnl>|<sym_trades>
+#   CLOSE|<label>|<ts>|<symbol>|<pnl>|<outcome>                        (per-close, fed to HODL helper)
+#   OPEN|<label>|<symbol>|<side>|<entry>|<stop>|<target>|<open_ts>     (currently-held — opens > closes)
 DATA=$(remote_or_local '
 set -euo pipefail
 shopt -s nullglob
@@ -64,34 +67,56 @@ aggregate() {
         echo "STRATEGY|${label}|NODATA"
         return
     fi
-    # Concatenate close events (regular + partial) and aggregate via awk.
+    # Concatenate open + close events and aggregate via awk. Open records are
+    # emitted so the local side can render currently-held positions even when
+    # no closes exist yet (the "(no data yet)" gap that hides riding trades).
     # Cost columns (fee_usd, slip_usd, notional_usd) carry "//0" defaults so
     # older close events written before the schema extension still parse.
     # The same awk emits per-close TSV records (CLOSE|...) so the local-side
     # BTC-HODL benchmark helper can do windowed comparison without re-parsing
     # journals — no process substitution (which does not survive bash -s heredoc).
-    cat "${files[@]}" | jq -r '"'"'select(.event=="close") | [.ts, .symbol, (.pnl_usd // 0), (.outcome // "STOP"), (.fee_usd // 0), (.slip_usd // 0), (.notional_usd // 0)] | @tsv'"'"' 2>/dev/null \
+    cat "${files[@]}" | jq -r '"'"'select(.event=="open" or .event=="close") | [.event, .ts, .symbol, (.pnl_usd // 0), (.outcome // "STOP"), (.fee_usd // 0), (.slip_usd // 0), (.notional_usd // 0), (.side // ""), (.entry // 0), (.stop // 0), (.target // 0)] | @tsv'"'"' 2>/dev/null \
     | awk -F"\t" -v label="$label" '"'"'
         BEGIN { first_ts=""; last_ts=""; total=0; wins=0; pnl=0
                 fee_usd=0; slip_usd_losers=0; notional=0; notional_losers=0 }
-        {
+        $1 == "close" {
             # Emit per-close TSV record for downstream HODL comparator.
-            printf "CLOSE|%s|%s|%s|%s|%s\n", label, $1, $2, $3, $4
-            if (first_ts=="") first_ts=$1
-            last_ts=$1
+            printf "CLOSE|%s|%s|%s|%s|%s\n", label, $2, $3, $4, $5
+            if (first_ts=="") first_ts=$2
+            last_ts=$2
             total++
-            if ($4=="TARGET" || $4=="PARTIAL") wins++
-            pnl += $3
-            fee_usd += $5
-            notional += $7
-            if ($4=="STOP") {
-                slip_usd_losers += $6
-                notional_losers += $7
+            if ($5=="TARGET" || $5=="PARTIAL") wins++
+            pnl += $4
+            fee_usd += $6
+            notional += $8
+            if ($5=="STOP") {
+                slip_usd_losers += $7
+                notional_losers += $8
             }
-            sym_pnl[$2] += $3
-            sym_count[$2]++
+            sym_pnl[$3] += $4
+            sym_count[$3]++
+            closes_count[$3]++
+        }
+        $1 == "open" {
+            opens_count[$3]++
+            # Track LATEST open per symbol; END emits details for any symbol
+            # whose opens > closes (= position currently held). Files are
+            # cat-ed in lexicographic order (which matches chronological order
+            # for the YYYY-MM filename suffix), so the last assignment wins.
+            last_open_side[$3]   = $9
+            last_open_entry[$3]  = $10
+            last_open_stop[$3]   = $11
+            last_open_target[$3] = $12
+            last_open_ts[$3]     = $2
         }
         END {
+            for (s in opens_count) {
+                if (opens_count[s] > (closes_count[s] + 0)) {
+                    printf "OPEN|%s|%s|%s|%s|%s|%s|%s\n", \
+                        label, s, last_open_side[s], last_open_entry[s], \
+                        last_open_stop[s], last_open_target[s], last_open_ts[s]
+                }
+            }
             if (total==0) { printf "STRATEGY|%s|NODATA\n", label; exit }
             printf "STRATEGY|%s|%s|%s|%d|%d|%.2f|%.2f|%.2f|%.2f|%.2f\n", \
                 label, first_ts, last_ts, total, wins, pnl, \
@@ -134,8 +159,32 @@ echo "$SEP"
 
 # Iterate strategy lines
 echo "$DATA" | grep "^STRATEGY|" | while IFS='|' read -r _ label first_ts last_ts trades wins pnl fee_usd slip_usd_losers notional notional_losers; do
+    # Currently-held positions for this cohort (regardless of close status).
+    open_pos_lines=$(echo "$DATA" | awk -F'|' -v lbl="$label" '$1=="OPEN" && $2==lbl {print}')
+    open_count=0
+    open_longs=0
+    open_shorts=0
+    if [[ -n "$open_pos_lines" ]]; then
+        open_count=$(printf '%s\n' "$open_pos_lines" | wc -l | tr -d ' ')
+        open_longs=$(printf '%s\n' "$open_pos_lines" | awk -F'|' '$4=="LONG"' | wc -l | tr -d ' ')
+        open_shorts=$(printf '%s\n' "$open_pos_lines" | awk -F'|' '$4=="SHORT"' | wc -l | tr -d ' ')
+    fi
+    render_open_table() {
+        # %.6g strips FP serialization noise (0.005360641999999999 → 0.00536064)
+        # while preserving 6 sig figs — sufficient for an eyeball status check.
+        printf '%s\n' "$open_pos_lines" | awk -F'|' '
+            { printf "      %-13s %-5s  entry=%-10.6g stop=%-10.6g target=%-10.6g opened=%s\n",
+                     $3, $4, $5+0, $6+0, $7+0, substr($8, 1, 19) }'
+    }
+
     if [[ "$first_ts" == "NODATA" ]]; then
-        printf "\n  %-26s  (no data yet)\n" "$label"
+        if [[ "$open_count" -eq 0 ]]; then
+            printf "\n  %-26s  (no data yet)\n" "$label"
+        else
+            printf "\n  %-26s  no closes yet — %d open (%d LONG, %d SHORT)\n" \
+                "$label" "$open_count" "$open_longs" "$open_shorts"
+            render_open_table
+        fi
         continue
     fi
     # Defaults for old strategy lines that predate the cost columns.
@@ -286,6 +335,11 @@ echo "$DATA" | grep "^STRATEGY|" | while IFS='|' read -r _ label first_ts last_t
     fi
     printf "    First trade:         %s\n" "${first_ts:0:19}"
     printf "    Last trade:          %s\n" "${last_ts:0:19}"
+    if [[ "$open_count" -gt 0 ]]; then
+        printf "    Open positions:      %d (%d LONG, %d SHORT)\n" \
+            "$open_count" "$open_longs" "$open_shorts"
+        render_open_table
+    fi
     printf "    >>> VERDICT: %s\n" "$overall"
 done
 
@@ -297,6 +351,8 @@ echo "  - Slip bps computed on the losing-trade (outcome=STOP) subsample only �
 echo "    and full target hits are excluded since slippage is modeled on losers only"
 echo "  - n/a means no closes carry the cost decomposition yet (engine restart needed before"
 echo "    new closes will land in the journal — old closes pre-extension show as 0 fee/slip)"
+echo "  - Open positions = symbols where opens > closes in the journal — visibility for trades"
+echo "    riding pre-first-close (e.g. fresh-deploy windows or rare-signal cohorts)"
 echo "  - Kill criteria 'first 60 days net-negative' = same as Net PnL FAIL post 60-day mark"
 echo "  - BTC-HODL benchmark notional: \$$BENCHMARK_NOTIONAL (override via BENCHMARK_NOTIONAL env);"
 echo "    consecutive 30d window kill threshold: \$$KILL_HODL_WINDOW_USD (override via KILL_HODL_WINDOW_USD)"
