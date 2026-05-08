@@ -338,6 +338,51 @@ else
     ok "largest engine log file is ${LARGEST_MB}M (within typical bounds)"
 fi
 
+# ── 11. Drift detector cron freshness ─────────────────────────────────────────
+# The drift detector is the decision-grade kill mechanism (per kill-bar
+# mis-calibration finding). Its launchd job fires weekly (Sunday 09:00
+# local). Silent failure of THAT cron — e.g., job got unloaded, launchd
+# stopped firing it — would leave the operator with no decision-grade
+# signal until forward_paper_status.sh's threshold criteria scream (which
+# are advisory only). Two-stage check: launchd registration + history
+# freshness.
+echo ""
+echo "11. Drift detector cron freshness"
+HISTORY="${ROOT}/results/drift_check_history.jsonl"
+LAUNCHD_LABEL="com.tradingengine.drift-check"
+NOW_EPOCH=$(date -u +%s)
+# Capture launchctl output first — `set -euo pipefail` + `grep -q` causes a
+# false negative because grep -q exits early on match, sending SIGPIPE to
+# launchctl, and the pipeline exit code reflects launchctl's SIGPIPE rather
+# than grep's 0. Capture then grep avoids the pipeline.
+LAUNCHD_LIST="$(launchctl list 2>/dev/null || true)"
+if ! echo "$LAUNCHD_LIST" | grep -q "$LAUNCHD_LABEL"; then
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+        warn "launchd job '$LAUNCHD_LABEL' not loaded — drift detector won't fire"
+        warn "  → run: launchctl load -w ~/Library/LaunchAgents/${LAUNCHD_LABEL}.plist"
+    else
+        echo "  ⓘ  launchd not available on this OS — skipping registration check"
+    fi
+elif [[ ! -s "$HISTORY" ]]; then
+    echo "  ⓘ  drift_check_history.jsonl empty/missing — first cron run pending"
+elif command -v jq >/dev/null 2>&1; then
+    last_ts=$(tail -1 "$HISTORY" | jq -r '.ts')
+    last_epoch=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "$last_ts" +%s 2>/dev/null || \
+                 date -u -d "$last_ts" +%s 2>/dev/null || echo 0)
+    if [[ "$last_epoch" == "0" ]]; then
+        echo "  ⓘ  could not parse last drift_check timestamp — manually verify $HISTORY"
+    else
+        age_days=$(( (NOW_EPOCH - last_epoch) / 86400 ))
+        if [[ "$age_days" -gt 10 ]]; then
+            warn "drift_check last ran ${age_days}d ago (>10d — weekly cron may have stopped firing)"
+        elif [[ "$age_days" -gt 7 ]]; then
+            echo "  ⓘ  drift_check last ran ${age_days}d ago (within 1 cycle of expected weekly cadence)"
+        else
+            ok "drift_check last ran ${age_days}d ago (latest: ${last_ts})"
+        fi
+    fi
+fi
+
 # Telegram alert path uses the shared scripts/lib/notify.sh helper —
 # tier-aware retry (CRITICAL 3 / WARN 2 / INFO 1), graceful no-op when env
 # vars unset. Mirrors the Go engine's pkg/notify package semantics so a
