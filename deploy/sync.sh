@@ -42,10 +42,12 @@ go build -o bin/engine         ./cmd/engine
 go build -o bin/backtest       ./cmd/backtest
 go build -o bin/journal_report ./cmd/journal_report
 # Operator tools — kill_switch (Path C real-money close-all per
-# auto_kill_execution_decision_rule_2026-05-08.md) and journal_diff
-# (Layer 3 shadow-mode parity gate).
-go build -o bin/kill_switch    ./cmd/kill_switch
-go build -o bin/journal_diff   ./cmd/journal_diff
+# auto_kill_execution_decision_rule_2026-05-08.md), journal_diff
+# (Layer 3 shadow-mode parity gate), journal_validate (self-consistency
+# checker for paper-live JSONL journals).
+go build -o bin/kill_switch     ./cmd/kill_switch
+go build -o bin/journal_diff    ./cmd/journal_diff
+go build -o bin/journal_validate ./cmd/journal_validate
 echo "✓ Build complete: \$(ls -lh bin/)"
 EOF
 
