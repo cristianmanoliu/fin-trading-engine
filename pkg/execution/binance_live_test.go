@@ -583,6 +583,312 @@ func TestBinanceLive_PnL_FeeAndSlipDecomposition_Long_Loss(t *testing.T) {
 	}
 }
 
+// ── BinanceLive.RecoverFromJournal ──────────────────────────────────────────
+//
+// Per the locked rule (real_money_executor_architecture_decision_rule_2026-05-08.md
+// "Engine restarts mid-real-money-trade") recovery has TWO phases: scan +
+// verify-against-exchange. Tests cover both paths — scanning behavior mirrors
+// Stub but verification adds a new failure mode (ErrRecoveryDrift) that
+// caller cmd/engine MUST honor.
+
+// blRecoveryServer makes a httptest server that responds to /fapi/v2/positionRisk
+// with the supplied JSON and to /fapi/v1/order with a generic FILLED response.
+// Used by recovery tests where the only HTTP path that matters is positionRisk.
+func blRecoveryServer(positionRiskJSON string) *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		switch {
+		case strings.Contains(req.URL.Path, "/fapi/v2/positionRisk"):
+			_, _ = w.Write([]byte(positionRiskJSON))
+		case strings.Contains(req.URL.Path, "/fapi/v1/order"):
+			_, _ = w.Write([]byte(`{"orderId":1,"status":"FILLED","executedQty":"1","avgPrice":"50000"}`))
+		default:
+			_, _ = w.Write([]byte(`{}`))
+		}
+	}))
+}
+
+// blWriteJournal writes the given JSONL lines to <dir>/<symbol>-<month>.jsonl.
+// Mirrors writeJournal from stub_test.go but kept local for clarity.
+func blWriteJournal(t *testing.T, dir, symbol, month string, lines []string) {
+	t.Helper()
+	path := filepath.Join(dir, symbol+"-"+month+".jsonl")
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		t.Fatalf("create journal: %v", err)
+	}
+	defer f.Close()
+	for _, line := range lines {
+		if _, err := f.WriteString(line + "\n"); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+	}
+}
+
+func TestBinanceLive_Recover_NoJournalPath_NoOp(t *testing.T) {
+	bl := NewBinanceLive("BTCUSDT", 100, "k", "s")
+	bl.JournalPath = "" // explicit
+	recovered, err := bl.RecoverFromJournal(context.Background())
+	if err != nil || recovered {
+		t.Errorf("no JournalPath: got recovered=%v err=%v; want false/nil", recovered, err)
+	}
+}
+
+func TestBinanceLive_Recover_NoUnclosedOpen_NoOp(t *testing.T) {
+	dir := t.TempDir()
+	srv := blRecoveryServer(`[{"symbol":"BTCUSDT","positionAmt":"0","entryPrice":"0","positionSide":"BOTH"}]`)
+	defer srv.Close()
+	bl := newBinanceLiveWithMock(t, srv, dir)
+
+	recovered, err := bl.RecoverFromJournal(context.Background())
+	if err != nil || recovered {
+		t.Errorf("empty journal dir: got recovered=%v err=%v; want false/nil", recovered, err)
+	}
+	if bl.position != nil {
+		t.Error("position set despite no journal recovery")
+	}
+}
+
+func TestBinanceLive_Recover_OpenAndClose_NoOp(t *testing.T) {
+	dir := t.TempDir()
+	month := time.Now().UTC().Format("2006-01")
+	blWriteJournal(t, dir, "BTCUSDT", month, []string{
+		`{"event":"open","symbol":"BTCUSDT","ts":"2026-05-08T08:00:00Z","side":"LONG","entry":50000,"stop":49500,"target":53000,"reason":"r"}`,
+		`{"event":"close","symbol":"BTCUSDT","ts":"2026-05-08T09:00:00Z","side":"LONG","entry":50000,"exit":53000,"outcome":"TARGET","reason":"r"}`,
+	})
+	srv := blRecoveryServer(`[{"symbol":"BTCUSDT","positionAmt":"0","entryPrice":"0","positionSide":"BOTH"}]`)
+	defer srv.Close()
+	bl := newBinanceLiveWithMock(t, srv, dir)
+
+	recovered, err := bl.RecoverFromJournal(context.Background())
+	if err != nil || recovered {
+		t.Errorf("fully-closed journal: got recovered=%v err=%v; want false/nil", recovered, err)
+	}
+}
+
+func TestBinanceLive_Recover_OpenWithoutClose_VerifiedClean(t *testing.T) {
+	// Journal: LONG 0.5 BTC @ 50000. Exchange: matching LONG 0.5 BTC @ 50000.
+	// Recovery should produce (true, nil), set b.position, and register with
+	// the Reconciler.
+	dir := t.TempDir()
+	month := time.Now().UTC().Format("2006-01")
+	blWriteJournal(t, dir, "BTCUSDT", month, []string{
+		`{"event":"open","symbol":"BTCUSDT","ts":"2026-05-08T08:00:00Z","side":"LONG","entry":50000,"stop":49500,"target":53000,"reason":"r"}`,
+	})
+	// stake/stop_dist = 100 / 500 = 0.2 contracts. Exchange must match.
+	srv := blRecoveryServer(`[{"symbol":"BTCUSDT","positionAmt":"0.2","entryPrice":"50000","positionSide":"BOTH"}]`)
+	defer srv.Close()
+	bl := newBinanceLiveWithMock(t, srv, dir)
+
+	recovered, err := bl.RecoverFromJournal(context.Background())
+	if err != nil {
+		t.Fatalf("clean recovery: unexpected err: %v", err)
+	}
+	if !recovered {
+		t.Fatal("clean recovery: recovered=false; want true")
+	}
+	if bl.position == nil {
+		t.Fatal("clean recovery: b.position not set")
+	}
+	if bl.position.Signal.EntryPrice != 50000 || bl.position.Signal.Side != models.Long {
+		t.Errorf("recovered signal mismatch: %+v", bl.position.Signal)
+	}
+	if bl.position.OriginalStopDist != 500 {
+		t.Errorf("OriginalStopDist: got %v want 500", bl.position.OriginalStopDist)
+	}
+	side, qty, _, ok := bl.PositionReconciler.LocalPosition("BTCUSDT")
+	if !ok || side != models.Long || math.Abs(qty-0.2) > 1e-9 {
+		t.Errorf("Reconciler: side=%v qty=%v ok=%v; want Long/0.2/true", side, qty, ok)
+	}
+	if drifted, _ := bl.PositionReconciler.IsDrifted("BTCUSDT"); drifted {
+		t.Error("clean recovery: drift was flagged")
+	}
+}
+
+func TestBinanceLive_Recover_OpenWithoutClose_ExchangeDisagrees_ReturnsErrRecoveryDrift(t *testing.T) {
+	// Journal: LONG 0.2 BTC @ 50000. Exchange: SHORT 0.2 BTC @ 50000 → side mismatch drift.
+	dir := t.TempDir()
+	month := time.Now().UTC().Format("2006-01")
+	blWriteJournal(t, dir, "BTCUSDT", month, []string{
+		`{"event":"open","symbol":"BTCUSDT","ts":"2026-05-08T08:00:00Z","side":"LONG","entry":50000,"stop":49500,"target":53000,"reason":"r"}`,
+	})
+	srv := blRecoveryServer(`[{"symbol":"BTCUSDT","positionAmt":"-0.2","entryPrice":"50000","positionSide":"BOTH"}]`)
+	defer srv.Close()
+	bl := newBinanceLiveWithMock(t, srv, dir)
+
+	recovered, err := bl.RecoverFromJournal(context.Background())
+	if err == nil {
+		t.Fatal("expected ErrRecoveryDrift on side-mismatch")
+	}
+	if !errors.Is(err, ErrRecoveryDrift) {
+		t.Errorf("err not ErrRecoveryDrift: %v", err)
+	}
+	if !recovered {
+		t.Error("recovered=false on drift; want true (local committed for diagnostics)")
+	}
+	if bl.position == nil {
+		t.Error("position should be committed even on drift (drift gate provides safety; reduceOnly exits would be exchange-rejected if state diverged)")
+	}
+	if drifted, _ := bl.PositionReconciler.IsDrifted("BTCUSDT"); !drifted {
+		t.Error("drift not flagged on Reconciler — OnSignal drift gate would not fire")
+	}
+}
+
+func TestBinanceLive_Recover_OpenWithoutClose_ExchangeFlat_ReturnsErrRecoveryDrift(t *testing.T) {
+	// Journal: LONG 0.2 BTC @ 50000. Exchange: flat → "externally-closed" drift.
+	dir := t.TempDir()
+	month := time.Now().UTC().Format("2006-01")
+	blWriteJournal(t, dir, "BTCUSDT", month, []string{
+		`{"event":"open","symbol":"BTCUSDT","ts":"2026-05-08T08:00:00Z","side":"LONG","entry":50000,"stop":49500,"target":53000,"reason":"r"}`,
+	})
+	srv := blRecoveryServer(`[{"symbol":"BTCUSDT","positionAmt":"0","entryPrice":"0","positionSide":"BOTH"}]`)
+	defer srv.Close()
+	bl := newBinanceLiveWithMock(t, srv, dir)
+
+	_, err := bl.RecoverFromJournal(context.Background())
+	if !errors.Is(err, ErrRecoveryDrift) {
+		t.Errorf("exchange-flat: want ErrRecoveryDrift, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "externally") {
+		t.Errorf("err reason should mention externally-closed: %v", err)
+	}
+}
+
+func TestBinanceLive_Recover_PartialClose_RecoversWithMidRHit(t *testing.T) {
+	dir := t.TempDir()
+	month := time.Now().UTC().Format("2006-01")
+	blWriteJournal(t, dir, "BTCUSDT", month, []string{
+		`{"event":"open","symbol":"BTCUSDT","ts":"2026-05-08T08:00:00Z","side":"LONG","entry":50000,"stop":49500,"target":53000,"reason":"r"}`,
+		`{"event":"close","symbol":"BTCUSDT","ts":"2026-05-08T09:00:00Z","side":"LONG","entry":50000,"exit":51500,"outcome":"PARTIAL","reason":"r"}`,
+	})
+	// Remaining qty after partial = stake × 0.5 / stop_dist = 100 × 0.5 / 500 = 0.1.
+	srv := blRecoveryServer(`[{"symbol":"BTCUSDT","positionAmt":"0.1","entryPrice":"50000","positionSide":"BOTH"}]`)
+	defer srv.Close()
+	bl := newBinanceLiveWithMock(t, srv, dir)
+
+	recovered, err := bl.RecoverFromJournal(context.Background())
+	if err != nil || !recovered {
+		t.Fatalf("partial-close recovery: got recovered=%v err=%v", recovered, err)
+	}
+	if !bl.position.MidRHit {
+		t.Error("MidRHit not set after partial-close recovery")
+	}
+	if bl.position.RemainingFrac != 0.5 {
+		t.Errorf("RemainingFrac: got %v want 0.5", bl.position.RemainingFrac)
+	}
+}
+
+func TestBinanceLive_Recover_PreExistingPosition_NoOverwrite(t *testing.T) {
+	dir := t.TempDir()
+	month := time.Now().UTC().Format("2006-01")
+	blWriteJournal(t, dir, "BTCUSDT", month, []string{
+		`{"event":"open","symbol":"BTCUSDT","ts":"2026-05-08T08:00:00Z","side":"LONG","entry":50000,"stop":49500,"target":53000,"reason":"journal"}`,
+	})
+	srv := blRecoveryServer(`[{"symbol":"BTCUSDT","positionAmt":"0.2","entryPrice":"50000","positionSide":"BOTH"}]`)
+	defer srv.Close()
+	bl := newBinanceLiveWithMock(t, srv, dir)
+	// Plant an existing position.
+	bl.position = &OpenPosition{
+		Signal: &models.Signal{
+			Symbol: "BTCUSDT", Side: models.Short, EntryPrice: 999,
+			StopLoss: 1100, TakeProfit: 500, Timestamp: time.Now(),
+		},
+		OriginalStopDist: 101, RemainingFrac: 1.0,
+	}
+	recovered, err := bl.RecoverFromJournal(context.Background())
+	if err != nil || recovered {
+		t.Errorf("preexisting-position: got recovered=%v err=%v; want false/nil", recovered, err)
+	}
+	if bl.position.Signal.EntryPrice != 999 {
+		t.Error("preexisting position was overwritten by recovery")
+	}
+}
+
+func TestBinanceLive_Recover_CrossMonthRecovery(t *testing.T) {
+	dir := t.TempDir()
+	priorMonth := time.Now().UTC().AddDate(0, -1, 0).Format("2006-01")
+	blWriteJournal(t, dir, "BTCUSDT", priorMonth, []string{
+		`{"event":"open","symbol":"BTCUSDT","ts":"2026-04-25T08:00:00Z","side":"LONG","entry":50000,"stop":49500,"target":53000,"reason":"crossmonth"}`,
+	})
+	srv := blRecoveryServer(`[{"symbol":"BTCUSDT","positionAmt":"0.2","entryPrice":"50000","positionSide":"BOTH"}]`)
+	defer srv.Close()
+	bl := newBinanceLiveWithMock(t, srv, dir)
+
+	recovered, err := bl.RecoverFromJournal(context.Background())
+	if err != nil || !recovered {
+		t.Errorf("cross-month: got recovered=%v err=%v", recovered, err)
+	}
+	if bl.position == nil {
+		t.Fatal("position not set after cross-month recovery")
+	}
+}
+
+func TestBinanceLive_Recover_AfterRecovery_OnTick_StopHit_ClosesNormally(t *testing.T) {
+	// Integration sanity: after a clean recovery, OnTick must process the
+	// recovered position correctly. Tick that hits stop fires close + journal.
+	dir := t.TempDir()
+	month := time.Now().UTC().Format("2006-01")
+	blWriteJournal(t, dir, "BTCUSDT", month, []string{
+		`{"event":"open","symbol":"BTCUSDT","ts":"2026-05-08T08:00:00Z","side":"LONG","entry":50000,"stop":49900,"target":50500,"reason":"r"}`,
+	})
+	// stake/stop_dist = 1000/100 = 10 contracts.
+	var orderCalls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		switch {
+		case strings.Contains(req.URL.Path, "/fapi/v2/positionRisk"):
+			_, _ = w.Write([]byte(`[{"symbol":"BTCUSDT","positionAmt":"10","entryPrice":"50000","positionSide":"BOTH"}]`))
+		case strings.Contains(req.URL.Path, "/fapi/v1/order"):
+			atomic.AddInt32(&orderCalls, 1)
+			_, _ = w.Write([]byte(`{"orderId":1,"status":"FILLED","executedQty":"10","avgPrice":"49899"}`))
+		}
+	}))
+	defer srv.Close()
+	bl := newBinanceLiveWithMock(t, srv, dir)
+	bl.StakeUSD = 1000
+
+	if recovered, err := bl.RecoverFromJournal(context.Background()); err != nil || !recovered {
+		t.Fatalf("recovery setup: got recovered=%v err=%v", recovered, err)
+	}
+
+	// Stop-hitting tick — must use a timestamp AFTER the recovered open ts
+	// (2026-05-08T08:00:00Z) since the OnTick pre-open guard skips earlier
+	// ticks.
+	bl.OnTick(models.Tick{
+		Symbol: "BTCUSDT",
+		Timestamp: time.Date(2026, 5, 8, 9, 0, 0, 0, time.UTC),
+		Price: 49899,
+	})
+	bl.Wait()
+
+	if bl.position != nil {
+		t.Fatal("position not cleared after stop hit on recovered position")
+	}
+	if len(bl.results) != 1 {
+		t.Fatalf("results = %d after recovery+stop, want 1", len(bl.results))
+	}
+	if got := atomic.LoadInt32(&orderCalls); got != 1 {
+		t.Errorf("expected exactly 1 exit-order API call, got %d", got)
+	}
+}
+
+func TestPositionReconciler_MarkDrift_SetsDriftWithoutReconcile(t *testing.T) {
+	r := newReconcilerForTest(t, "https://example")
+	if drifted, _ := r.IsDrifted("BTCUSDT"); drifted {
+		t.Fatal("setup: drift already set")
+	}
+	r.MarkDrift("BTCUSDT", "test reason")
+	drifted, reason := r.IsDrifted("BTCUSDT")
+	if !drifted {
+		t.Error("MarkDrift did not set drift")
+	}
+	if reason != "test reason" {
+		t.Errorf("reason: got %q want 'test reason'", reason)
+	}
+	r.ClearDrift("BTCUSDT")
+	if drifted, _ := r.IsDrifted("BTCUSDT"); drifted {
+		t.Error("ClearDrift did not unset drift after MarkDrift")
+	}
+}
+
 func TestBinanceLive_Summary_DrainsGoroutines(t *testing.T) {
 	// Summary calls Wait() internally — invoking Summary right after OnSignal
 	// must not see "no trades closed" if there's an in-flight close goroutine.

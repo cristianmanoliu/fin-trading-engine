@@ -1,11 +1,13 @@
 package execution
 
 import (
+	"bufio"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -21,6 +23,15 @@ import (
 	"github.com/cristianmanoliu/trading-engine/pkg/models"
 	"github.com/cristianmanoliu/trading-engine/pkg/notify"
 )
+
+// ErrRecoveryDrift is returned by BinanceLive.RecoverFromJournal when the
+// journal-recovered local state disagrees with the exchange. Per the locked
+// rule "Engine restarts mid-real-money-trade" in
+// results/real_money_executor_architecture_decision_rule_2026-05-08.md, the
+// engine MUST NOT proceed with tick processing in this case — the operator
+// must investigate, reconcile (close exchange position OR adjust journal),
+// then restart. Use errors.Is(err, ErrRecoveryDrift) to detect.
+var ErrRecoveryDrift = errors.New("recovery drift: exchange disagrees with journal-recovered state")
 
 // BinanceLive is the real-money executor that replaces Stub at STAGE_1
 // promotion. Implements pkg/strategy.Executor (OnSignal / OnTick / Summary)
@@ -586,6 +597,225 @@ func (b *BinanceLive) recent24hLossUSD() float64 {
 	return loss
 }
 
+// RecoverFromJournal scans the symbol's journal files (current + prior month)
+// for an unclosed position from a prior engine session, reconstructs local
+// state to match, and verifies that state against the exchange via
+// PositionReconciler.FetchExchangePosition.
+//
+// Return semantics (caller MUST inspect both):
+//
+//	(false, nil) — nothing to recover (no JournalPath/Symbol; or no unclosed
+//	               open in journal; or b.position already non-nil — no
+//	               overwrite). Engine starts normally.
+//	(true,  nil) — position recovered AND verified clean (or verification
+//	               skipped due to a transient network error — logged at WARN;
+//	               the standard Reconciler loop will catch any drift on its
+//	               next tick). Engine starts; recovered position participates
+//	               in OnTick stop/target/MaxHold evaluation.
+//	(true,  err) where errors.Is(err, ErrRecoveryDrift) — position recovered
+//	               locally AND exchange divergence confirmed. Per the locked
+//	               rule, caller MUST NOT start tick processing. The drift is
+//	               flagged on the Reconciler so any future ReconcileSymbol +
+//	               IsDrifted gate observe the same divergence; an operator
+//	               must investigate, reconcile (close exchange position OR
+//	               adjust journal), and restart the engine.
+//	(false, err) — catastrophic recovery failure (corrupt timestamp / unknown
+//	               side / zero stop distance in the journal open event).
+//	               Caller MUST NOT start.
+//
+// Designed for one-shot invocation on engine startup, AFTER NewBinanceLive
+// but BEFORE the first OnTick.
+func (b *BinanceLive) RecoverFromJournal(ctx context.Context) (bool, error) {
+	if b.JournalPath == "" || b.Symbol == "" {
+		return false, nil
+	}
+
+	b.mu.Lock()
+	if b.position != nil {
+		b.mu.Unlock()
+		return false, nil
+	}
+	b.mu.Unlock()
+
+	lastOpen, midRHit, remainingFrac, err := b.scanJournalForUnclosedOpen()
+	if err != nil {
+		return false, err
+	}
+	if lastOpen == nil {
+		return false, nil
+	}
+
+	// Parse the recovered open into typed fields.
+	var side models.Direction
+	switch lastOpen.Side {
+	case "LONG":
+		side = models.Long
+	case "SHORT":
+		side = models.Short
+	default:
+		return false, fmt.Errorf("recovery: unknown side %q in journal open", lastOpen.Side)
+	}
+	ts, terr := time.Parse(time.RFC3339, lastOpen.TS)
+	if terr != nil {
+		return false, fmt.Errorf("recovery: invalid timestamp %q in journal open: %w", lastOpen.TS, terr)
+	}
+	stopDist := math.Abs(lastOpen.Entry - lastOpen.Stop)
+	if stopDist == 0 {
+		return false, fmt.Errorf("recovery: zero stop distance (entry==stop) in journal open")
+	}
+	if b.StakeUSD <= 0 {
+		return false, fmt.Errorf("recovery: BinanceLive.StakeUSD not set — cannot derive contracts qty")
+	}
+	qty := b.StakeUSD * remainingFrac / stopDist
+
+	// Verify against the exchange. Net failure is logged but does NOT block
+	// recovery — the Reconciler loop will catch any divergence on its next
+	// tick. Drift IS detected here only when the query succeeds.
+	driftReason := ""
+	if b.PositionReconciler != nil {
+		exch, ferr := b.PositionReconciler.FetchExchangePosition(ctx, b.Symbol)
+		if ferr != nil {
+			slog.Warn("recovery verification skipped due to exchange-query error; periodic Reconciler loop will catch any divergence",
+				"symbol", b.Symbol, "err", ferr)
+		} else {
+			tentative := reconcilerPosition{
+				side:     side,
+				qty:      qty,
+				avgEntry: lastOpen.Entry,
+				openedAt: ts,
+			}
+			hasExch := math.Abs(exch.Qty) >= b.PositionReconciler.QtyTolerance
+			drifted, reason := detectDrift(true, tentative, hasExch, exch,
+				b.PositionReconciler.QtyTolerance, b.PositionReconciler.EntryPriceBpsLimit)
+			if drifted {
+				driftReason = "recovery: " + reason
+				b.PositionReconciler.MarkDrift(b.Symbol, driftReason)
+				slog.Error("position recovery: exchange disagrees with journal — TRADING BLOCKED",
+					"symbol", b.Symbol,
+					"reason", reason,
+					"local_side", side, "local_qty", qty, "local_entry", lastOpen.Entry,
+					"exchange_side", exch.Side, "exchange_qty", math.Abs(exch.Qty), "exchange_entry", exch.AvgEntry)
+				if b.Notifier != nil {
+					_ = b.Notifier.SendStructured(ctx, notify.SeverityCritical,
+						fmt.Sprintf("Recovery drift on %s — TRADING BLOCKED until operator reconciles + restarts\nreason: %s\nrecovered: side=%v qty=%v entry=%v\nexchange: side=%v qty=%v entry=%v",
+							b.Symbol, reason, side, qty, lastOpen.Entry,
+							exch.Side, math.Abs(exch.Qty), exch.AvgEntry))
+				}
+			}
+		}
+	}
+
+	// Commit local state. We commit even on drift so diagnostic tooling and
+	// the Reconciler have a coherent view; the caller's drift-error check is
+	// what enforces "BLOCK startup". The drift gate also blocks new OnSignal
+	// orders, and reduceOnly OnTick exits would be rejected by the exchange
+	// if state is truly diverged — defense in depth.
+	sig := &models.Signal{
+		Symbol:     lastOpen.Symbol,
+		Side:       side,
+		EntryPrice: lastOpen.Entry,
+		StopLoss:   lastOpen.Stop,
+		TakeProfit: lastOpen.Target,
+		Timestamp:  ts,
+		Reason:     lastOpen.Reason,
+	}
+	b.mu.Lock()
+	b.position = &OpenPosition{
+		Signal:           sig,
+		MaxAdverse:       sig.EntryPrice,
+		LastPrice:        sig.EntryPrice,
+		LastTime:         sig.Timestamp,
+		OriginalStopDist: stopDist,
+		MidRHit:          midRHit,
+		RemainingFrac:    remainingFrac,
+	}
+	b.mu.Unlock()
+
+	if b.PositionReconciler != nil {
+		b.PositionReconciler.SetLocalPosition(b.Symbol, side, qty, lastOpen.Entry, ts)
+	}
+
+	if driftReason != "" {
+		return true, fmt.Errorf("%w: %s", ErrRecoveryDrift, driftReason)
+	}
+
+	slog.Info("position recovered + verified",
+		"symbol", b.Symbol,
+		"side", side,
+		"entry", lastOpen.Entry,
+		"stop", lastOpen.Stop,
+		"target", lastOpen.Target,
+		"qty", qty,
+		"midRHit", midRHit,
+		"remainingFrac", remainingFrac,
+		"ts", lastOpen.TS,
+	)
+	return true, nil
+}
+
+// scanJournalForUnclosedOpen walks current + prior month's journal files
+// for the symbol and returns the most recent unclosed-open entry along with
+// the partial-close state (MidRHit + RemainingFrac).
+//
+// Mirrors Stub.RecoverFromJournal's scanning loop exactly — same
+// chronological order (prior month first, then current), same
+// open/close/PARTIAL state machine, same corrupt-line tolerance. Duplicated
+// rather than shared to keep the journal-schema parity contract explicit.
+func (b *BinanceLive) scanJournalForUnclosedOpen() (*journalEntry, bool, float64, error) {
+	now := time.Now().UTC()
+	currentMonth := now.Format("2006-01")
+	priorMonth := now.AddDate(0, -1, 0).Format("2006-01")
+	files := []string{
+		filepath.Join(b.JournalPath, fmt.Sprintf("%s-%s.jsonl", b.Symbol, priorMonth)),
+		filepath.Join(b.JournalPath, fmt.Sprintf("%s-%s.jsonl", b.Symbol, currentMonth)),
+	}
+
+	var lastOpen *journalEntry
+	midRHit := false
+	remainingFrac := 1.0
+
+	for _, fname := range files {
+		f, openErr := os.Open(fname)
+		if openErr != nil {
+			continue
+		}
+		sc := bufio.NewScanner(f)
+		sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+		for sc.Scan() {
+			line := sc.Bytes()
+			if len(line) == 0 {
+				continue
+			}
+			var e journalEntry
+			if jerr := json.Unmarshal(line, &e); jerr != nil {
+				// Tolerated: a partial trailing line from an engine killed
+				// mid-flush. Skip and keep scanning.
+				continue
+			}
+			switch e.Event {
+			case "open":
+				eCopy := e
+				lastOpen = &eCopy
+				midRHit = false
+				remainingFrac = 1.0
+			case "close":
+				if e.Outcome == "PARTIAL" {
+					midRHit = true
+					if remainingFrac > 0.5 {
+						remainingFrac -= 0.5
+					}
+				} else {
+					lastOpen = nil
+					midRHit = false
+					remainingFrac = 1.0
+				}
+			}
+		}
+		_ = f.Close()
+	}
+	return lastOpen, midRHit, remainingFrac, nil
+}
+
 // appendJournal writes a single JSONL line to the per-symbol monthly journal.
 // Mirrors Stub.appendJournal exactly — same path scheme (<JournalPath>/<Symbol>-<YYYY-MM>.jsonl)
 // and same JSON schema. Duplicated here rather than shared because the locked
@@ -900,6 +1130,22 @@ func (r *PositionReconciler) ClearDrift(symbol string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	delete(r.drifted, symbol)
+}
+
+// MarkDrift sets the drift flag for a symbol without going through the
+// full ReconcileSymbol pass. Used by BinanceLive.RecoverFromJournal when
+// the recovery-time exchange query already proved divergence — calling
+// ReconcileSymbol again would just repeat the same comparison.
+//
+// The reason should be prefixed (e.g., "recovery: ...") so the operator
+// log distinguishes recovery-time drift from steady-state drift.
+func (r *PositionReconciler) MarkDrift(symbol, reason string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.drifted == nil {
+		r.drifted = make(map[string]string)
+	}
+	r.drifted[symbol] = reason
 }
 
 // FetchExchangePosition queries Binance USDT-M Futures /fapi/v2/positionRisk
