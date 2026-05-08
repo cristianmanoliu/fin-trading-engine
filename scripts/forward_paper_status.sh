@@ -432,6 +432,62 @@ echo "$DATA" | grep "^STRATEGY|" | while IFS='|' read -r _ label first_ts last_t
     printf "    >>> VERDICT: %s\n" "$overall"
 done
 
+# ── Promotion countdown (paper → STAGE_1) ────────────────────────────────────
+# Surfaces the binding gate: ≥ MIN_TRADES AND ≥ MIN_DAYS net-positive on the
+# LIVE cohort. Calendar-day countdown is exact; trade-count countdown uses an
+# observed rate (from live history) once enough data accumulates, otherwise
+# falls back to the expected fleet rate documented in CLAUDE.md (~1.18/day).
+LIVE_DATA=$(echo "$DATA" | awk -F'|' '$1=="STRATEGY" && $2=="live" {print}')
+if [[ -n "$LIVE_DATA" ]]; then
+    IFS='|' read -r _ _ live_first_ts live_last_ts live_trades _live_rest <<<"$LIVE_DATA"
+    if [[ "$live_first_ts" != "NODATA" ]] && [[ -n "$live_first_ts" ]]; then
+        live_first_epoch=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "${live_first_ts%%.*}Z" +%s 2>/dev/null || \
+                           date -d "${live_first_ts}" +%s 2>/dev/null || echo "$NOW")
+        live_days=$(( (NOW - live_first_epoch) / 86400 ))
+        days_to_go=$(( MIN_DAYS - live_days ))
+        (( days_to_go < 0 )) && days_to_go=0
+        trades_to_go=$(( MIN_TRADES - live_trades ))
+        (( trades_to_go < 0 )) && trades_to_go=0
+
+        # Use observed rate when n ≥ 10 (else single-sample noise dominates).
+        # Fall back to documented fleet rate (CLAUDE.md: ~1.18 trades/day).
+        EXPECTED_RATE_PER_DAY=1.18
+        if [[ "$live_trades" -ge 10 ]] && [[ "$live_days" -gt 0 ]]; then
+            rate=$(awk "BEGIN{printf \"%.2f\", $live_trades / $live_days}")
+            rate_source="observed"
+        else
+            rate=$EXPECTED_RATE_PER_DAY
+            rate_source="expected (CLAUDE.md fleet rate)"
+        fi
+        days_for_trades=$(awk "BEGIN{r=$rate; if(r<=0) r=$EXPECTED_RATE_PER_DAY; printf \"%.0f\", $trades_to_go / r}")
+        binding=$days_to_go
+        binding_label="days"
+        if [[ "$days_for_trades" -gt "$binding" ]]; then
+            binding=$days_for_trades
+            binding_label="trades"
+        fi
+        gate_epoch=$(( NOW + binding * 86400 ))
+        gate_date=$(date -u -r "$gate_epoch" '+%Y-%m-%d' 2>/dev/null || \
+                    date -u -d "@$gate_epoch" '+%Y-%m-%d' 2>/dev/null || echo "?")
+
+        echo
+        echo "$SEP"
+        echo "  Promotion countdown (paper → STAGE_1)"
+        echo "$SEP"
+        printf "    Live cohort:    %d / %d trades   |   %d / %d days\n" \
+               "$live_trades" "$MIN_TRADES" "$live_days" "$MIN_DAYS"
+        printf "    Trades to go:   %d at %s rate (%s/day) → ~%d days\n" \
+               "$trades_to_go" "$rate_source" "$rate" "$days_for_trades"
+        printf "    Days to go:     %d\n" "$days_to_go"
+        if [[ "$binding" -gt 0 ]]; then
+            printf "    Binding gate:   %s (max of days/trades) → earliest STAGE_1 ~%s\n" \
+                   "$binding_label" "$gate_date"
+        else
+            printf "    Both gates met — STAGE_1 eligible pending completion-review document\n"
+        fi
+    fi
+fi
+
 echo
 echo "$SEP"
 echo "  Notes:"
