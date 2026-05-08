@@ -166,6 +166,21 @@ func main() {
 		if fp != nil {
 			fundingProvider = fp
 			slog.Info("loaded historical funding", "symbol", cfg.Symbol, "dir", *fundingCSVDir)
+			// Staleness warning: an operator-missed weekly refresh leaves trades
+			// held past the last entry accruing $0 funding silently. Bounded in
+			// steady state (refresh + restart caps drift at ~7d) — but if it
+			// ever exceeds a week, surface it loudly so the operator can run
+			// scripts/refresh_funding.sh + redeploy.
+			if last := fp.LastTS(); !last.IsZero() {
+				age := time.Since(last)
+				if age > 7*24*time.Hour {
+					slog.Warn("funding CSV is stale; trades held past last entry will accrue $0 funding — run scripts/refresh_funding.sh + redeploy",
+						"symbol", cfg.Symbol,
+						"last_funding_ts", last.UTC().Format(time.RFC3339),
+						"stale_days", age.Hours()/24,
+					)
+				}
+			}
 		} else {
 			slog.Warn("no historical funding file for symbol — falling back to constant rate", "symbol", cfg.Symbol)
 		}

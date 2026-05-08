@@ -215,3 +215,38 @@ func itoa(n int64) string {
 	}
 	return string(buf[i:])
 }
+
+// LastTS returns zero on an empty table, and the most recent event's UTC
+// timestamp on a populated one. cmd/engine uses this to detect a stale CSV
+// at engine startup so an operator-missed weekly refresh becomes a loud Warn
+// rather than a silent $0-funding accrual.
+func TestHistoricalProvider_LastTS(t *testing.T) {
+	// Empty CSV (header only) → zero time.
+	emptyPath := writeCSV(t, nil)
+	hEmpty, err := NewHistorical("TEST", emptyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := hEmpty.LastTS(); !got.IsZero() {
+		t.Errorf("empty table LastTS: want zero, got %v", got)
+	}
+
+	// Populated, intentionally NOT in ascending order to also exercise the
+	// loader's sort-on-load path (interleaved pagination boundaries).
+	t1 := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC).UnixMilli()
+	t2 := time.Date(2024, 1, 1, 8, 0, 0, 0, time.UTC).UnixMilli()
+	t3 := time.Date(2024, 1, 1, 16, 0, 0, 0, time.UTC).UnixMilli()
+	path := writeCSV(t, [][2]string{
+		{itoa(t2), "0.0001"},
+		{itoa(t3), "-0.0002"},
+		{itoa(t1), "0.0001"},
+	})
+	h, err := NewHistorical("TEST", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := time.Date(2024, 1, 1, 16, 0, 0, 0, time.UTC)
+	if got := h.LastTS(); !got.Equal(want) {
+		t.Errorf("LastTS: want %v, got %v", want, got)
+	}
+}

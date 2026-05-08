@@ -266,6 +266,25 @@ else
     echo "     ONE symbol promotes at a time and other symbols stay on stub."
 fi
 
+# ── 9. Funding CSV staleness ──────────────────────────────────────────────────
+# cmd/engine logs `slog.Warn("funding CSV is stale; ...")` once at startup if
+# the loaded historical funding CSV's last entry is >7d old. Section 5
+# (ERROR-level last 5min) misses this — it's a WARN and the audit is often
+# run >5min after restart. Scan the current log for the literal message.
+echo ""
+echo "9. Funding CSV staleness"
+STALE_REPORT=$(ssh "${TARGET}" "stale_lines=\$(for sym in $SYMBOLS_LC; do
+  jq -rc 'select(.msg == \"funding CSV is stale; trades held past last entry will accrue \$0 funding — run scripts/refresh_funding.sh + redeploy\") | \"  \" + .symbol + \"  stale_days=\" + (.stale_days|tostring) + \"  last_funding_ts=\" + .last_funding_ts' /var/log/paper-live/\${sym}.log 2>/dev/null | tail -1
+done | grep -v '^\$' || true)
+echo -n \"\$stale_lines\"")
+if [[ -z "$STALE_REPORT" ]]; then
+    ok "no stale funding-CSV warnings (all engines started with ≤7d-old data)"
+else
+    n=$(printf '%s\n' "$STALE_REPORT" | wc -l | tr -d ' ')
+    warn "$n engine(s) started with stale funding CSV — run scripts/refresh_funding.sh + redeploy:"
+    printf '%s\n' "$STALE_REPORT"
+fi
+
 # ── Verdict ───────────────────────────────────────────────────────────────────
 echo ""
 echo "════════════════════════════════════════════════════════════════════════════════"

@@ -170,3 +170,14 @@ func LoadFromDir(dir, symbol string) (*Historical, error) {
 	}
 	return NewHistorical(symbol, path)
 }
+
+// LastTS returns the timestamp of the most recent funding event in the table,
+// or zero time if the table is empty. Used by callers (cmd/engine) to detect
+// stale CSVs at engine startup — an operator-missed weekly refresh leaves
+// trades held past the last entry accruing $0 funding silently.
+func (h *Historical) LastTS() time.Time {
+	if len(h.times) == 0 {
+		return time.Time{}
+	}
+	return h.times[len(h.times)-1]
+}
