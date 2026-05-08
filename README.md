@@ -1,6 +1,6 @@
 # trading-engine
 
-> **⚠️ This README describes the LEGACY absorption/breakout strategy.** Current live strategy is **Strategy B (P4-Shorts-Only)** running on 32 symbols since 2026-05-05. See `CLAUDE.md` for the actual current state, deployment status, and operational commands. README rewrite is deferred until forward-paper validation completes (~2026-05-27).
+> **⚠️ This README describes the LEGACY absorption/breakout strategy — falsified by realistic fee modeling on 2026-05-05 and no longer in production.** The current paper-trading engine runs **P4-Combined** (4H EMA9/21 cross, shorts-only, 6:1 RR, 504h max-hold) on 16 symbols across 4 cohorts (1 live + 3 shadow strategies per engine). Real-money allocation is **zero**, gated on a pre-registered 4-stage deployment protocol (STAGE_1=$100/trade earliest after 30+ days of clean drift detection; STAGE_4=$1k/trade earliest ~2027-03-09). See `CLAUDE.md` for the canonical current state, operational commands, and locked decision rules. README rewrite is deferred until forward-paper validation produces a decision-grade verdict.
 
 A Go-based algorithmic trading engine implementing a multi-timeframe breakout/reversal strategy on Binance Futures. Tested on 8 instruments (BTC, ETH, SOL, BNB, XRP, LINK, LTC, DOGE) over 6 years.
 
