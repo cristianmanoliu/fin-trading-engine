@@ -2,11 +2,13 @@ package marketdata
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"sync/atomic"
 	"time"
 
 	"github.com/cristianmanoliu/trading-engine/pkg/models"
+	"github.com/cristianmanoliu/trading-engine/pkg/notify"
 )
 
 // Heartbeat periodically emits a liveness log line showing the last tick timestamp
@@ -14,10 +16,17 @@ import (
 // between ticks is escalated to Warn level so log-based alerting can detect a stalled
 // feed. The Warn line is what scripts/post_deploy_check.sh parses for tick-freshness
 // audits — the threshold and the escalation behavior are operational contract.
+//
+// Notifier is opt-in (nil = no Telegram alerts, just slog as before). When set,
+// Warn-level heartbeats also emit a SeverityWarn alert per the locked telegram
+// alert design rule. The Notifier itself enforces rate limiting + mute hours,
+// so this code does not gate the call.
 type Heartbeat struct {
 	lastTick  atomic.Pointer[time.Time] // pointer so it's nullable before first tick
 	tickCount atomic.Int64
 	symbol    string
+
+	Notifier *notify.Notifier // optional; nil disables Telegram alerts
 }
 
 // heartbeatStaleThreshold is the age beyond which a heartbeat log line is
@@ -63,6 +72,8 @@ func (h *Heartbeat) snapshotForLog(prevCount int64) (level slog.Level, msg strin
 }
 
 // Run emits a heartbeat log every interval until ctx is cancelled.
+// When Notifier is set, Warn-level heartbeats also fire a SeverityWarn
+// Telegram alert (the Notifier handles its own rate limiting and mute hours).
 func (h *Heartbeat) Run(ctx context.Context, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -77,9 +88,27 @@ func (h *Heartbeat) Run(ctx context.Context, interval time.Duration) {
 			prevCount = count
 			if level == slog.LevelWarn {
 				slog.Warn(msg, args...)
+				if h.Notifier != nil {
+					_ = h.Notifier.SendStructured(ctx, notify.SeverityWarn, formatHeartbeatBody(msg, h.symbol, args))
+				}
 			} else {
 				slog.Info(msg, args...)
 			}
 		}
 	}
+}
+
+// formatHeartbeatBody renders the heartbeat slog args into a multi-line body
+// suitable for Telegram. Skips the "symbol" key (already in the prefix line)
+// and renders the remaining key-value pairs as `key: value` lines.
+func formatHeartbeatBody(msg string, symbol string, args []any) string {
+	body := fmt.Sprintf("%s\nsymbol: %s", msg, symbol)
+	for i := 0; i+1 < len(args); i += 2 {
+		k, ok := args[i].(string)
+		if !ok || k == "symbol" {
+			continue
+		}
+		body += fmt.Sprintf("\n%s: %v", k, args[i+1])
+	}
+	return body
 }

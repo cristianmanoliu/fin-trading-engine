@@ -2,11 +2,18 @@ package marketdata
 
 import (
 	"context"
+	"encoding/json"
+	"io"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/cristianmanoliu/trading-engine/pkg/models"
+	"github.com/cristianmanoliu/trading-engine/pkg/notify"
 )
 
 // Heartbeat is the operational liveness signal that scripts/post_deploy_check.sh
@@ -239,4 +246,142 @@ func TestHeartbeat_Run_ContextCancel_ExitsCleanly(t *testing.T) {
 	case <-time.After(200 * time.Millisecond):
 		t.Fatal("Run did not exit within 200ms after ctx cancel — goroutine leak suspected")
 	}
+}
+
+// ── Telegram alert wiring tests ──────────────────────────────────────────────
+
+func TestFormatHeartbeatBody_SkipsSymbolKey(t *testing.T) {
+	// formatHeartbeatBody renders args as multi-line key:value but skips
+	// "symbol" since the symbol is already on its own line.
+	got := formatHeartbeatBody(
+		"heartbeat: feed appears stalled",
+		"BTCUSDT",
+		[]any{
+			"symbol", "BTCUSDT", // should be skipped
+			"ticks_since_last", int64(0),
+			"last_tick_age", 120 * time.Second,
+		},
+	)
+	want := "heartbeat: feed appears stalled\nsymbol: BTCUSDT\nticks_since_last: 0\nlast_tick_age: 2m0s"
+	if got != want {
+		t.Errorf("formatHeartbeatBody mismatch:\n got: %q\nwant: %q", got, want)
+	}
+}
+
+func TestFormatHeartbeatBody_HandlesOddArgsLength(t *testing.T) {
+	// Defensive: if args has an odd length (key without value at the end),
+	// the formatter must not panic.
+	defer func() {
+		if r := recover(); r != nil {
+			t.Errorf("formatHeartbeatBody panicked on odd args: %v", r)
+		}
+	}()
+	_ = formatHeartbeatBody("msg", "BTC", []any{"orphan_key"})
+}
+
+func TestHeartbeat_Run_NoNotifier_NoPanicOnWarn(t *testing.T) {
+	// Heartbeat with Notifier=nil and no Observe calls hits the Warn path
+	// in snapshotForLog ("no ticks received yet"). Must not panic.
+	h := NewHeartbeat("BTCUSDT") // Notifier defaults nil
+	ctx, cancel := context.WithCancel(context.Background())
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		h.Run(ctx, 10*time.Millisecond)
+	}()
+
+	// Wait long enough for at least one ticker fire.
+	time.Sleep(30 * time.Millisecond)
+	cancel()
+
+	select {
+	case <-done:
+		// success
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("Run hung after panic with nil Notifier (regression of nil-safety guard)")
+	}
+}
+
+func TestHeartbeat_Run_WithNotifier_FiresWarnAlert(t *testing.T) {
+	// With Notifier set + Warn-level snapshot (no ticks observed), Run
+	// should fire a SendStructured alert. Verified by intercepting the
+	// HTTP POST to a test server.
+	var mu sync.Mutex
+	var bodies []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		var msg map[string]string
+		_ = json.Unmarshal(b, &msg)
+		mu.Lock()
+		bodies = append(bodies, msg["text"])
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+
+	// Build a Notifier that posts to the test server. Use sendTo via
+	// the public Send wrapper would point at telegram.org; instead we
+	// construct manually with the test URL embedded via the client's
+	// Transport — but the simplest path is to use the existing escape
+	// hatch: a Notifier whose HTTPClient redirects all requests through
+	// a custom RoundTripper that rewrites the URL to the test server.
+	n := &notify.Notifier{
+		BotToken: "tok",
+		ChatID:   "chat",
+		HTTPClient: &http.Client{
+			Timeout: 5 * time.Second,
+			Transport: rewriteTransport{base: http.DefaultTransport, target: srv.URL},
+		},
+	}
+
+	h := NewHeartbeat("BTCUSDT")
+	h.Notifier = n
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		h.Run(ctx, 20*time.Millisecond)
+	}()
+
+	// Wait for at least one ticker fire.
+	time.Sleep(80 * time.Millisecond)
+	cancel()
+	<-done
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(bodies) == 0 {
+		t.Fatal("expected ≥1 Telegram alert from Warn-level heartbeat, got 0")
+	}
+	if !strings.Contains(bodies[0], "no ticks received yet") {
+		t.Errorf("first alert missing expected msg: %q", bodies[0])
+	}
+	if !strings.Contains(bodies[0], "BTCUSDT") {
+		t.Errorf("first alert missing symbol: %q", bodies[0])
+	}
+	// Severity prefix from SendStructured.
+	if !strings.HasPrefix(bodies[0], "⚠") {
+		t.Errorf("first alert missing ⚠ severity prefix: %q", bodies[0])
+	}
+}
+
+// rewriteTransport intercepts outbound HTTP requests and rewrites the URL
+// to point at the test server. This is the cleanest way to redirect a
+// production-shaped Notifier to a test server without modifying the
+// production code's URL resolution.
+type rewriteTransport struct {
+	base   http.RoundTripper
+	target string // e.g. "http://127.0.0.1:54321"
+}
+
+func (rt rewriteTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	// Replace scheme + host with target's; keep the path.
+	target, err := http.NewRequest(req.Method, rt.target+req.URL.Path, req.Body)
+	if err != nil {
+		return nil, err
+	}
+	target.Header = req.Header
+	return rt.base.RoundTrip(target)
 }

@@ -46,6 +46,20 @@ func main() {
 
 	notifier := notify.FromEnv()
 
+	// Panic-recovery → CRITICAL Telegram alert. Without this, an engine
+	// panic would log to stderr (visible only on log review) but the
+	// operator wouldn't know the engine died until the watchdog or the
+	// next forward-paper status check noticed the missing heartbeat.
+	// CRITICAL severity bypasses rate limit + mute hours per the locked
+	// telegram alert design rule.
+	defer func() {
+		if r := recover(); r != nil {
+			body := fmt.Sprintf("engine panic\nsymbol: %s\nerror: %v", os.Getenv("PAPER_LIVE_SYMBOL"), r)
+			_ = notifier.SendStructured(context.Background(), notify.SeverityCritical, body)
+			panic(r) // re-panic so the process actually dies + stack-trace surfaces
+		}
+	}()
+
 	cfg, err := config.Load(*cfgPath)
 	if err != nil {
 		slog.Error("failed to load config", "err", err)
@@ -313,6 +327,7 @@ func main() {
 	}
 
 	hb := marketdata.NewHeartbeat(cfg.Symbol)
+	hb.Notifier = notifier // wire Telegram WARN alerts on stale-feed detection
 
 	g, gctx := errgroup.WithContext(ctx)
 
