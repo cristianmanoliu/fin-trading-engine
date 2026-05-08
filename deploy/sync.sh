@@ -38,9 +38,14 @@ set -euo pipefail
 export PATH="\$PATH:/usr/local/go/bin"
 cd "${REMOTE_DIR}"
 mkdir -p bin
-go build -o bin/engine        ./cmd/engine
-go build -o bin/backtest      ./cmd/backtest
+go build -o bin/engine         ./cmd/engine
+go build -o bin/backtest       ./cmd/backtest
 go build -o bin/journal_report ./cmd/journal_report
+# Operator tools — kill_switch (Path C real-money close-all per
+# auto_kill_execution_decision_rule_2026-05-08.md) and journal_diff
+# (Layer 3 shadow-mode parity gate).
+go build -o bin/kill_switch    ./cmd/kill_switch
+go build -o bin/journal_diff   ./cmd/journal_diff
 echo "✓ Build complete: \$(ls -lh bin/)"
 EOF
 
