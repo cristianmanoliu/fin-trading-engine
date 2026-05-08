@@ -241,6 +241,8 @@ The threshold-based criteria below are **advisory only.** Pre-registered Monte C
 - **Two firings 7+ days apart, OR drift + threshold-kill match**: strong signals — auto-kill candidate.
 - The verdict (`results/drift_detector_time_to_detection_verdict_2026-05-08.md`) is NEEDS_TUNING — too-noisy-null at daily cadence; the locked rule forbids retuning within this milestone but flags the pattern for operational practice.
 
+**Canonical invocation: `scripts/run_drift_check.sh`** — wrapper around `live_vs_backtest_drift.py` that persists each run to `results/drift_check_history.jsonl` and captures full output to `results/drift_runs/<ts>.log`, then evaluates the two-firings-≥7d rule mechanically across all-time history. Distinct wrapper exit codes for cron severity gating: 0 CLEAN, 1 INVESTIGATION (single firing), 2 INSUFFICIENT, 3 ERROR, 4 AUTO-KILL CANDIDATE (rule tripped, with the firing pair surfaced in the verdict line). Use `--quiet` for cron piping; pass-through args (e.g. `--live-source local`) are forwarded to the underlying detector. Don't invoke `live_vs_backtest_drift.py` directly except for one-off debugging — direct invocation skips the rule eval and won't update the history index, so the next wrapper run can't see that firing.
+
 The threshold criteria remain useful as **early-warning indicators** that warrant investigation, but should not auto-trigger a kill. Always cross-reference against the drift detector before acting on a `forward_paper_status.sh` KILL verdict.
 
 See `results/drift_detector_calibration_verdict_2026-05-07.md` and `results/drift_detector_time_to_detection_verdict_2026-05-08.md` for the full calibration record.
