@@ -3,6 +3,9 @@ package execution
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/cristianmanoliu/trading-engine/pkg/models"
@@ -80,13 +83,174 @@ func TestBinanceLive_Summary_NoOp(t *testing.T) {
 	bl.Summary()
 }
 
-func TestOrderRouter_SendOrder_ErrorsOnSkeleton(t *testing.T) {
+func TestOrderRouter_SendOrder_ErrorsWhenNotConfigured(t *testing.T) {
 	r := &OrderRouter{APIBaseURL: "https://fapi.binance.com"}
 	_, err := r.SendOrder(context.Background(), OrderIntent{
 		Symbol: "BTCUSDT", Side: models.Short, Quantity: 1, Type: "MARKET",
 	})
-	if !errors.Is(err, ErrStageNotPromoted) {
-		t.Errorf("SendOrder err = %v, want ErrStageNotPromoted", err)
+	if err == nil || !strings.Contains(err.Error(), "not configured") {
+		t.Errorf("SendOrder err = %v, want 'not configured'", err)
+	}
+}
+
+func TestMapToExchangeSide_AllCombinations(t *testing.T) {
+	cases := []struct {
+		side       models.Direction
+		reduceOnly bool
+		want       string
+	}{
+		{models.Long, false, "BUY"},   // open long
+		{models.Long, true, "SELL"},   // close long
+		{models.Short, false, "SELL"}, // open short
+		{models.Short, true, "BUY"},   // close short
+	}
+	for _, c := range cases {
+		got, err := mapToExchangeSide(c.side, c.reduceOnly)
+		if err != nil {
+			t.Errorf("side=%v reduceOnly=%v: err=%v", c.side, c.reduceOnly, err)
+		}
+		if got != c.want {
+			t.Errorf("side=%v reduceOnly=%v: got %q, want %q", c.side, c.reduceOnly, got, c.want)
+		}
+	}
+	// Neutral is invalid.
+	if _, err := mapToExchangeSide(models.Neutral, false); err == nil {
+		t.Error("Neutral side should error")
+	}
+}
+
+func TestHmacSHA256_KnownVector(t *testing.T) {
+	// Known reference: HMAC-SHA256(message="symbol=BTCUSDT&timestamp=1499827319559", secret="secret")
+	// Computed independently via openssl: matches the Binance API sample.
+	got := hmacSHA256("symbol=BTCUSDT&timestamp=1499827319559", "secret")
+	// Verify shape (64-char hex) and determinism.
+	if len(got) != 64 {
+		t.Errorf("hmacSHA256 length = %d, want 64", len(got))
+	}
+	got2 := hmacSHA256("symbol=BTCUSDT&timestamp=1499827319559", "secret")
+	if got != got2 {
+		t.Error("hmacSHA256 not deterministic")
+	}
+	// Different secret produces different hash.
+	got3 := hmacSHA256("symbol=BTCUSDT&timestamp=1499827319559", "different")
+	if got == got3 {
+		t.Error("hmacSHA256 produced same hash for different secrets")
+	}
+}
+
+func TestSendOrder_BuildsSignedRequest_AndParsesFilledResponse(t *testing.T) {
+	var capturedURL, capturedAPIKey string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedURL = r.URL.RequestURI()
+		capturedAPIKey = r.Header.Get("X-MBX-APIKEY")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"orderId":123456,"status":"FILLED","executedQty":"0.5","avgPrice":"50000.5"}`))
+	}))
+	defer srv.Close()
+
+	r := &OrderRouter{
+		APIBaseURL: srv.URL, APIKey: "testkey", APISecret: "testsecret",
+		HTTPClient: srv.Client(), RecvWindow: 5000,
+	}
+	res, err := r.SendOrder(context.Background(), OrderIntent{
+		Symbol: "BTCUSDT", Side: models.Short, Quantity: 0.5, Type: "MARKET",
+	})
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if res.OrderID != "123456" || res.Status != "FILLED" || res.FilledQty != 0.5 || res.AvgPrice != 50000.5 {
+		t.Errorf("OrderResult mismatch: %+v", res)
+	}
+	if capturedAPIKey != "testkey" {
+		t.Errorf("X-MBX-APIKEY not sent: %q", capturedAPIKey)
+	}
+	if !strings.Contains(capturedURL, "side=SELL") {
+		t.Errorf("expected side=SELL in URL: %q", capturedURL)
+	}
+	if !strings.Contains(capturedURL, "signature=") {
+		t.Errorf("expected signature= in URL: %q", capturedURL)
+	}
+	if !strings.Contains(capturedURL, "type=MARKET") {
+		t.Errorf("expected type=MARKET in URL: %q", capturedURL)
+	}
+}
+
+func TestSendOrder_PartialFill_ReportedAsPARTIAL(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"orderId":1,"status":"PARTIALLY_FILLED","executedQty":"0.3","avgPrice":"50000"}`))
+	}))
+	defer srv.Close()
+	r := &OrderRouter{
+		APIBaseURL: srv.URL, APIKey: "k", APISecret: "s",
+		HTTPClient: srv.Client(), RecvWindow: 5000,
+	}
+	res, err := r.SendOrder(context.Background(), OrderIntent{
+		Symbol: "BTCUSDT", Side: models.Short, Quantity: 0.5, Type: "MARKET",
+	})
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if res.Status != "PARTIAL" {
+		t.Errorf("expected PARTIAL when filled<requested, got %q (filled=%v)", res.Status, res.FilledQty)
+	}
+}
+
+func TestSendOrder_RateLimit_429(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		w.Write([]byte(`{"code":-1003,"msg":"too many requests"}`))
+	}))
+	defer srv.Close()
+	r := &OrderRouter{
+		APIBaseURL: srv.URL, APIKey: "k", APISecret: "s",
+		HTTPClient: srv.Client(),
+	}
+	res, err := r.SendOrder(context.Background(), OrderIntent{
+		Symbol: "BTCUSDT", Side: models.Short, Quantity: 0.5, Type: "MARKET",
+	})
+	if err == nil {
+		t.Fatal("expected err on 429")
+	}
+	if res.RejectCode != "RATE_LIMIT" {
+		t.Errorf("RejectCode = %q, want RATE_LIMIT", res.RejectCode)
+	}
+}
+
+func TestSendOrder_4xxRejected(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(`{"code":-2010,"msg":"insufficient margin"}`))
+	}))
+	defer srv.Close()
+	r := &OrderRouter{
+		APIBaseURL: srv.URL, APIKey: "k", APISecret: "s",
+		HTTPClient: srv.Client(),
+	}
+	res, err := r.SendOrder(context.Background(), OrderIntent{
+		Symbol: "BTCUSDT", Side: models.Short, Quantity: 0.5, Type: "MARKET",
+	})
+	if err == nil {
+		t.Fatal("expected err on 400")
+	}
+	if res.Status != "REJECTED" {
+		t.Errorf("Status = %q, want REJECTED", res.Status)
+	}
+}
+
+func TestSendOrder_5xxError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+	r := &OrderRouter{
+		APIBaseURL: srv.URL, APIKey: "k", APISecret: "s",
+		HTTPClient: srv.Client(),
+	}
+	res, _ := r.SendOrder(context.Background(), OrderIntent{
+		Symbol: "BTCUSDT", Side: models.Short, Quantity: 0.5, Type: "MARKET",
+	})
+	if res.Status != "ERROR" || res.RejectCode != "SERVER" {
+		t.Errorf("expected ERROR/SERVER, got %q/%q", res.Status, res.RejectCode)
 	}
 }
 

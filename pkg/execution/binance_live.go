@@ -2,9 +2,17 @@ package execution
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
+	"net/http"
+	"net/url"
+	"strconv"
 	"sync"
 	"time"
 
@@ -65,6 +73,10 @@ func NewBinanceLive(symbol string, stakeUSD float64, apiKey, apiSecret string) *
 		APISecret: apiSecret,
 		OrderRouter: &OrderRouter{
 			APIBaseURL: "https://fapi.binance.com",
+			APIKey:     apiKey,
+			APISecret:  apiSecret,
+			HTTPClient: &http.Client{Timeout: 10 * time.Second},
+			RecvWindow: 5000,
 		},
 		PositionReconciler: &PositionReconciler{
 			PollInterval: 60 * time.Second,
@@ -114,12 +126,14 @@ func (b *BinanceLive) Summary() {
 // ── Component skeletons ─────────────────────────────────────────────────────
 
 // OrderRouter sends orders to Binance USDT-M Futures. Stateless — every
-// SendOrder is independent. Real implementation will use a signed HTTP
-// client; skeleton has placeholder fields.
+// SendOrder is independent. Uses HMAC-SHA256 request signing per Binance
+// Futures API spec.
 type OrderRouter struct {
 	APIBaseURL string
-	// HTTPClient *http.Client (deferred to implementation per pre-reg)
-	// signer for HMAC request signing (deferred)
+	APIKey     string
+	APISecret  string
+	HTTPClient *http.Client
+	RecvWindow int64 // ms; default 5000 if zero
 }
 
 // OrderIntent is the input to SendOrder. Captures what the strategy wants
@@ -144,9 +158,118 @@ type OrderResult struct {
 	RejectCode string  // populated when Status == "REJECTED" or "ERROR"
 }
 
-// SendOrder posts an order to the exchange. Skeleton: errors.
-func (r *OrderRouter) SendOrder(_ context.Context, _ OrderIntent) (OrderResult, error) {
-	return OrderResult{}, ErrStageNotPromoted
+// SendOrder posts a signed order to Binance USDT-M Futures. Implements the
+// MARKET-order path per the locked architecture (LIMIT_IOC deferred to STAGE_3+).
+// Returns the parsed OrderResult on 2xx; F3-class REJECTED on 4xx other than
+// rate limit; F4-class RATE_LIMIT on 418/429; F1-class ERROR on 5xx or network
+// failure.
+func (r *OrderRouter) SendOrder(ctx context.Context, intent OrderIntent) (OrderResult, error) {
+	if r.APIKey == "" || r.APISecret == "" {
+		return OrderResult{}, fmt.Errorf("OrderRouter not configured: APIKey/APISecret missing")
+	}
+	if r.HTTPClient == nil {
+		return OrderResult{}, fmt.Errorf("OrderRouter not configured: HTTPClient nil")
+	}
+
+	exchangeSide, err := mapToExchangeSide(intent.Side, intent.ReduceOnly)
+	if err != nil {
+		return OrderResult{}, err
+	}
+	recvWin := r.RecvWindow
+	if recvWin == 0 {
+		recvWin = 5000
+	}
+
+	params := url.Values{}
+	params.Set("symbol", intent.Symbol)
+	params.Set("side", exchangeSide)
+	params.Set("type", intent.Type)
+	params.Set("quantity", strconv.FormatFloat(intent.Quantity, 'f', -1, 64))
+	if intent.ReduceOnly {
+		params.Set("reduceOnly", "true")
+	}
+	if intent.Type == "LIMIT_IOC" {
+		params.Set("price", strconv.FormatFloat(intent.LimitPrice, 'f', -1, 64))
+		params.Set("timeInForce", "IOC")
+	}
+	params.Set("recvWindow", strconv.FormatInt(recvWin, 10))
+	params.Set("timestamp", strconv.FormatInt(time.Now().UnixMilli(), 10))
+
+	queryStr := params.Encode()
+	signature := hmacSHA256(queryStr, r.APISecret)
+	fullURL := r.APIBaseURL + "/fapi/v1/order?" + queryStr + "&signature=" + signature
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, nil)
+	if err != nil {
+		return OrderResult{}, err
+	}
+	req.Header.Set("X-MBX-APIKEY", r.APIKey)
+
+	resp, err := r.HTTPClient.Do(req)
+	if err != nil {
+		return OrderResult{Status: "ERROR", RejectCode: "NETWORK"}, fmt.Errorf("network: %w", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+
+	switch {
+	case resp.StatusCode == 418 || resp.StatusCode == 429:
+		return OrderResult{Status: "ERROR", RejectCode: "RATE_LIMIT"}, fmt.Errorf("rate limit %d: %s", resp.StatusCode, body)
+	case resp.StatusCode >= 400 && resp.StatusCode < 500:
+		return OrderResult{Status: "REJECTED", RejectCode: string(body)}, fmt.Errorf("4xx %d: %s", resp.StatusCode, body)
+	case resp.StatusCode >= 500:
+		return OrderResult{Status: "ERROR", RejectCode: "SERVER"}, fmt.Errorf("5xx %d: %s", resp.StatusCode, body)
+	}
+
+	var br struct {
+		OrderID     int64  `json:"orderId"`
+		Status      string `json:"status"`
+		ExecutedQty string `json:"executedQty"`
+		AvgPrice    string `json:"avgPrice"`
+	}
+	if err := json.Unmarshal(body, &br); err != nil {
+		return OrderResult{Status: "ERROR", RejectCode: "PARSE"}, fmt.Errorf("parse: %w", err)
+	}
+	qty, _ := strconv.ParseFloat(br.ExecutedQty, 64)
+	avg, _ := strconv.ParseFloat(br.AvgPrice, 64)
+	status := "FILLED"
+	if qty < intent.Quantity {
+		status = "PARTIAL"
+	}
+	return OrderResult{
+		OrderID:   strconv.FormatInt(br.OrderID, 10),
+		Status:    status,
+		FilledQty: qty,
+		AvgPrice:  avg,
+	}, nil
+}
+
+// hmacSHA256 computes Binance's signed-request signature: HMAC-SHA256 of the
+// query string with the API secret as key, hex-encoded.
+func hmacSHA256(message, secret string) string {
+	h := hmac.New(sha256.New, []byte(secret))
+	h.Write([]byte(message))
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// mapToExchangeSide translates our (position-direction + reduceOnly) intent
+// into the exchange's (BUY/SELL) order side. Open: Long→BUY, Short→SELL.
+// Close (reduceOnly): flipped — Long position closing → SELL, Short → BUY.
+func mapToExchangeSide(side models.Direction, reduceOnly bool) (string, error) {
+	switch side {
+	case models.Long:
+		if reduceOnly {
+			return "SELL", nil
+		}
+		return "BUY", nil
+	case models.Short:
+		if reduceOnly {
+			return "BUY", nil
+		}
+		return "SELL", nil
+	default:
+		return "", fmt.Errorf("invalid side: %v (must be Long or Short)", side)
+	}
 }
 
 // PositionReconciler runs a background loop that periodically queries the
