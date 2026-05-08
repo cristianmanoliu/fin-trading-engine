@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -38,6 +39,7 @@ func main() {
 	emaFastPeriod := flag.Int("ema-fast-period", 0, "fast EMA period for live strategy (default 9 when EMAMode is true)")
 	emaSlowPeriod := flag.Int("ema-slow-period", 0, "slow EMA period for live strategy (default 21 when EMAMode is true)")
 	signalContextDir := flag.String("signal-context-dir", "", "directory for signal-context JSONL sidecars; written per-runner under <dir>/<label>/<symbol>-<month>.jsonl. Off by default; when unset and PAPER_LIVE_SIGNAL_CONTEXT_DIR env is set, that env value is used.")
+	executorMode := flag.String("executor", "stub", "executor mode: stub (paper-money default — current paper-live deploy) | binance_live (real money, STAGE_1+ promotion). binance_live requires BINANCE_API_KEY and BINANCE_API_SECRET env vars and only governs the LIVE runner — shadow runners always use stub by design.")
 	flag.Parse()
 
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
@@ -148,17 +150,12 @@ func main() {
 		journalDir = "./logs/journal"
 	}
 
-	exec := &execution.Stub{
-		StakeUSDT:        cfg.Strategy.StakeUSDT,
-		JournalPath:      journalDir,
-		Symbol:           cfg.Symbol,
-		FeeBps:           *feeBps,
-		StopSlippageBps:  *stopSlippageBps,
-		FundingBpsPerDay: *fundingBpsPerDay,
-		MaxHoldHours:     *maxHoldHours,
-	}
-
-	// Per-symbol historical funding overrides the constant rate when the file is present.
+	// Load funding provider once, before the executor branch — both Stub
+	// (legacy paper-live path) and the always-Stub shadow runners reference
+	// it. BinanceLive doesn't model funding locally; the locked design
+	// "Exchange-reported funding cost differs from local model" specifies
+	// that real-money runs use exchange-reported funding only.
+	var fundingProvider funding.Provider
 	if *fundingCSVDir != "" {
 		fp, err := funding.LoadFromDir(*fundingCSVDir, cfg.Symbol)
 		if err != nil {
@@ -166,26 +163,108 @@ func main() {
 			os.Exit(1)
 		}
 		if fp != nil {
-			exec.FundingProvider = fp
-			exec.FundingBpsPerDay = 0 // historical replaces constant
+			fundingProvider = fp
 			slog.Info("loaded historical funding", "symbol", cfg.Symbol, "dir", *fundingCSVDir)
 		} else {
 			slog.Warn("no historical funding file for symbol — falling back to constant rate", "symbol", cfg.Symbol)
 		}
 	}
 
-	// Recover any unclosed paper position from the journal before any tick
-	// flow starts. This bridges the orphan-open gap that previously existed
-	// when an engine restart wiped Stub.position while the journal still had
-	// the corresponding open event with no matching close.
-	if recovered, err := exec.RecoverFromJournal(); err != nil {
-		slog.Warn("live position recovery failed", "err", err, "symbol", cfg.Symbol)
-		_ = notifier.SendStructured(ctx, notify.SeverityWarn,
-			fmt.Sprintf("live recovery FAILED\nsymbol: %s\nerror: %v", cfg.Symbol, err))
-	} else if recovered {
-		slog.Info("live position recovery: in-flight trade restored", "symbol", cfg.Symbol)
-		_ = notifier.SendStructured(ctx, notify.SeverityWarn,
-			fmt.Sprintf("live position recovered from journal\nsymbol: %s\ncohort: live", cfg.Symbol))
+	// Branch on --executor: paper-money Stub (default, today's deployed
+	// behavior) vs real-money BinanceLive (STAGE_1+ promotion only).
+	// Shadow runners are ALWAYS Stub regardless of this flag — real money
+	// goes to one strategy at a time per the locked stage-promotion rule.
+	var exec strategy.Executor
+	var liveBinance *execution.BinanceLive
+
+	switch *executorMode {
+	case "stub", "":
+		stub := &execution.Stub{
+			StakeUSDT:        cfg.Strategy.StakeUSDT,
+			JournalPath:      journalDir,
+			Symbol:           cfg.Symbol,
+			FeeBps:           *feeBps,
+			StopSlippageBps:  *stopSlippageBps,
+			FundingBpsPerDay: *fundingBpsPerDay,
+			MaxHoldHours:     *maxHoldHours,
+			FundingProvider:  fundingProvider,
+		}
+		if fundingProvider != nil {
+			stub.FundingBpsPerDay = 0 // historical replaces constant
+		}
+
+		// Recover any unclosed paper position from the journal before any tick
+		// flow starts. Bridges the orphan-open gap that previously existed
+		// when an engine restart wiped Stub.position while the journal still
+		// had the corresponding open event with no matching close.
+		if recovered, err := stub.RecoverFromJournal(); err != nil {
+			slog.Warn("live position recovery failed", "err", err, "symbol", cfg.Symbol)
+			_ = notifier.SendStructured(ctx, notify.SeverityWarn,
+				fmt.Sprintf("live recovery FAILED\nsymbol: %s\nerror: %v", cfg.Symbol, err))
+		} else if recovered {
+			slog.Info("live position recovery: in-flight trade restored", "symbol", cfg.Symbol)
+			_ = notifier.SendStructured(ctx, notify.SeverityWarn,
+				fmt.Sprintf("live position recovered from journal\nsymbol: %s\ncohort: live", cfg.Symbol))
+		}
+		exec = stub
+
+	case "binance_live":
+		apiKey := os.Getenv("BINANCE_API_KEY")
+		apiSecret := os.Getenv("BINANCE_API_SECRET")
+		if apiKey == "" || apiSecret == "" {
+			slog.Error("--executor=binance_live requires BINANCE_API_KEY and BINANCE_API_SECRET env vars",
+				"symbol", cfg.Symbol)
+			_ = notifier.SendStructured(ctx, notify.SeverityCritical,
+				fmt.Sprintf("STARTUP FAILED on %s — --executor=binance_live without BINANCE_API_KEY/BINANCE_API_SECRET env vars",
+					cfg.Symbol))
+			os.Exit(1)
+		}
+		bl := execution.NewBinanceLive(cfg.Symbol, cfg.Strategy.StakeUSDT, apiKey, apiSecret)
+		bl.JournalPath = journalDir
+		bl.FeeBps = *feeBps
+		bl.StopSlippageBps = *stopSlippageBps
+		bl.MaxHoldHours = *maxHoldHours
+		bl.Notifier = notifier
+		bl.PositionReconciler.Notifier = notifier
+
+		// Recover + verify against exchange before any tick flow starts.
+		// ErrRecoveryDrift maps to "BLOCK startup" per the locked rule
+		// (real_money_executor_architecture_decision_rule_2026-05-08.md
+		// "Engine restarts mid-real-money-trade"). os.Exit(2) is used so
+		// systemd watchdog logs distinguish a recovery-drift exit from a
+		// generic os.Exit(1).
+		if recovered, err := bl.RecoverFromJournal(ctx); err != nil {
+			if errors.Is(err, execution.ErrRecoveryDrift) {
+				slog.Error("STARTUP BLOCKED: real-money recovery drift — operator must reconcile + restart",
+					"symbol", cfg.Symbol, "err", err)
+				_ = notifier.SendStructured(ctx, notify.SeverityCritical,
+					fmt.Sprintf("STARTUP BLOCKED on %s — real-money recovery drift\n%v\nOperator must investigate the divergence (close exchange position OR adjust journal) and restart the engine.",
+						cfg.Symbol, err))
+				os.Exit(2)
+			}
+			slog.Error("real-money recovery failed (non-drift)", "err", err, "symbol", cfg.Symbol)
+			_ = notifier.SendStructured(ctx, notify.SeverityCritical,
+				fmt.Sprintf("STARTUP FAILED on %s — real-money recovery error\n%v\nOperator must investigate before restarting.",
+					cfg.Symbol, err))
+			os.Exit(2)
+		} else if recovered {
+			slog.Info("real-money position recovered + verified clean", "symbol", cfg.Symbol)
+			_ = notifier.SendStructured(ctx, notify.SeverityWarn,
+				fmt.Sprintf("real-money position recovered + verified on %s", cfg.Symbol))
+		}
+
+		liveBinance = bl
+		exec = bl
+
+		slog.Warn("REAL-MONEY EXECUTOR ACTIVE — orders will be sent to Binance",
+			"symbol", cfg.Symbol, "stake_usd", cfg.Strategy.StakeUSDT)
+		_ = notifier.SendStructured(ctx, notify.SeverityCritical,
+			fmt.Sprintf("REAL-MONEY engine started on %s\nstake: $%.0f / trade\nhost: %s",
+				cfg.Symbol, cfg.Strategy.StakeUSDT, hostname))
+
+	default:
+		slog.Error("invalid --executor; must be 'stub' or 'binance_live'", "got", *executorMode)
+		os.Exit(1)
 	}
 
 	// Parse shadow specs first so we know how many runners to fan-out to.
@@ -237,7 +316,7 @@ func main() {
 	// Requires Historical funding provider — Constant rate has no time variation
 	// so the filter would be trivially uniform. Mirrors cmd/backtest wiring.
 	if *fundingFilterMaxBpsPerDay > 0 {
-		if hist, ok := exec.FundingProvider.(*funding.Historical); ok {
+		if hist, ok := fundingProvider.(*funding.Historical); ok {
 			runner.SetFundingFilter(&strategy.FundingFilter{
 				Reader:       hist,
 				MaxBpsPerDay: *fundingFilterMaxBpsPerDay,
@@ -281,7 +360,10 @@ func main() {
 			StopSlippageBps:  *stopSlippageBps,
 			FundingBpsPerDay: *fundingBpsPerDay,
 			MaxHoldHours:     spec.MaxHoldHours,
-			FundingProvider:  exec.FundingProvider, // share — provider is read-only
+			FundingProvider:  fundingProvider, // share — provider is read-only
+		}
+		if fundingProvider != nil {
+			shadowExec.FundingBpsPerDay = 0
 		}
 
 		// Same recovery as live — each shadow has its own journal at
@@ -390,6 +472,17 @@ func main() {
 		hb.Run(gctx, 60*time.Second)
 		return nil
 	})
+
+	// PositionReconciler periodic loop — only when real-money executor is
+	// active. Reconciler.Run does an initial reconcile then ticks at 60s,
+	// alerting CRITICAL on the leading edge of any local-vs-exchange
+	// divergence and gating future OnSignal calls via IsDrifted.
+	if liveBinance != nil {
+		g.Go(func() error {
+			_ = liveBinance.PositionReconciler.Run(gctx, cfg.Symbol)
+			return nil
+		})
+	}
 
 	if err := g.Wait(); err != nil {
 		slog.Error("engine error", "err", err)
