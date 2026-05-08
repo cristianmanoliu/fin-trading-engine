@@ -34,7 +34,7 @@
     <array>
         <string>/bin/bash</string>
         <string>-c</string>
-        <string>cd /Users/cristianmanoliu/Main/source.code/github/trading-engine &amp;&amp; ./scripts/run_drift_check.sh --quiet</string>
+        <string>cd /Users/cristianmanoliu/Main/source.code/github/trading-engine &amp;&amp; ./scripts/weekly_audit.sh</string>
     </array>
 
     <!-- Weekly: Sunday (Weekday=0) 09:00 local time. Missed firings (laptop

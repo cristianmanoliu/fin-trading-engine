@@ -147,6 +147,48 @@ verdict_line() {
     esac
 }
 
+# Telegram alert path. Closes the loop between the decision-grade signal and
+# the operator's phone — without it, a Sunday-09:00 launchd firing of
+# AUTO-KILL CANDIDATE only surfaces in launchd.out.log. Reads the same
+# TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID env vars the engine uses; missing
+# vars → silent no-op (same graceful-degrade pattern as the engine's
+# notify package). Output is silenced so the bot token never appears in
+# stdout / stderr (Go's net/http verbatim-URL leak is the rationale for
+# the engine's redactErr helper; we avoid the analog here by sending all
+# curl output to /dev/null and trusting curl's exit code only).
+notify_telegram() {
+    local severity="$1" body="$2"
+    local token="${TELEGRAM_BOT_TOKEN:-}"
+    local chat="${TELEGRAM_CHAT_ID:-}"
+    [[ -z "$token" || -z "$chat" ]] && return 0
+    local prefix
+    case "$severity" in
+        CRITICAL) prefix="🚨 [CRITICAL]" ;;
+        WARN)     prefix="⚠ [WARN]" ;;
+        *)        prefix="ℹ [INFO]" ;;
+    esac
+    curl -s --max-time 10 \
+        -X POST "https://api.telegram.org/bot${token}/sendMessage" \
+        --data-urlencode "chat_id=${chat}" \
+        --data-urlencode "text=${prefix} drift_check on $(hostname)
+${body}" >/dev/null 2>&1 || true
+}
+
+# Dispatch alerts on exit codes 1, 3, 4. Codes 0 (CLEAN) and 2 (INSUFFICIENT)
+# are routine — alerting on them produces the noise the kill-bar
+# mis-calibration finding warned against. Code 3 (ERROR) means the
+# detector itself broke — silent failure of a decision-grade tool, must
+# alert. Code 4 is the explicit auto-kill candidate.
+case "$WRAPPER_EXIT" in
+    1) notify_telegram WARN "$(verdict_line)
+log: $RUN_LOG" ;;
+    3) notify_telegram WARN "$(verdict_line)
+detector itself failed — investigate before next run" ;;
+    4) notify_telegram CRITICAL "$(verdict_line)
+log: $RUN_LOG
+This is a decision-grade kill candidate per the time-to-detection verdict. Cross-check forward_paper_status.sh + the drift run logs before acting." ;;
+esac
+
 if [[ "$QUIET" -eq 1 ]]; then
     echo "$(verdict_line) — $NOW_ISO"
     exit "$WRAPPER_EXIT"

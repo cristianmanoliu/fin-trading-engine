@@ -202,13 +202,17 @@ Key levels (used by absorption/breakout only): PDH, PDL, and optional manual `zo
 
 ## Test Coverage
 
-| File | What it tests |
-|------|--------------|
-| `pkg/marketdata/klines_test.go` | `expandKlineToTicks` — 4 ticks emitted, monotonic timestamps, volume split equally, first/last tick at open/close time |
-| `pkg/execution/stub_test.go` | Journal sink writes `open`+`close` JSONL lines; journal disabled (no files) when `JournalPath` is empty |
-| `pkg/notify/telegram_test.go` | POST body verified via httptest server; no-op when env unset; no-op when only one credential set |
+`go test ./...` runs ~25 packages. Highlights of what's covered:
 
-High-value gaps still missing: `EntryDetector` EMA crossover and absorption/breakout sequences, `DailyLevels` day-roll, `VWAP` session reset, `Stub.Summary` PnL math.
+| Package | Notable tests |
+|---|---|
+| `pkg/strategy` | EMA crossover (8 tests across primed/unprimed × bias × side-filter × fixed-RR target), funding-cross signals, shadow runner |
+| `pkg/execution` | Stub: journal sink, fee/slip math both sides, funding accrual, summary aggregation, max-hold, trailing stop, multi-level TP, journal-replay (11 recovery cases incl. cross-month + corrupt-trailing-line + pre-open-tick guard). BinanceLive: constructor + endpoint defaults, OnSignal happy/drift/safety/reject paths, Layer 2 testnet integration tests (skip-by-default, 4 scenarios incl. round-trip + reconciler drift + KillSwitch) |
+| `pkg/indicators` | EMA priming + numeric stability, ATR, Bollinger, MACD, DailyLevels day-roll at midnight UTC, VWAP session reset + year-boundary |
+| `pkg/marketdata` | `expandKlineToTicks` invariants, heartbeat + startup-grace |
+| `pkg/funding` | Constant + Historical providers, per-side sign, boundary exclusion, `LastTS` |
+| `pkg/notify` | Telegram POST body + tier retries + bot-token redaction; no-op when env unset |
+| `cmd/journal_diff` | Layer 3 parity comparator: pnl ≤0.5%, signal divergence, exit-code contract |
 
 ## Known Bugs
 
@@ -255,6 +259,10 @@ The threshold-based criteria below are **advisory only.** Pre-registered Monte C
 **Canonical invocation: `scripts/run_drift_check.sh`** — wrapper around `live_vs_backtest_drift.py` that persists each run to `results/drift_check_history.jsonl` and captures full output to `results/drift_runs/<ts>.log`, then evaluates the two-firings-≥7d rule mechanically across all-time history. Distinct wrapper exit codes for cron severity gating: 0 CLEAN, 1 INVESTIGATION (single firing), 2 INSUFFICIENT, 3 ERROR, 4 AUTO-KILL CANDIDATE (rule tripped, with the firing pair surfaced in the verdict line). Use `--quiet` for cron piping; pass-through args (e.g. `--live-source local`) are forwarded to the underlying detector. Don't invoke `live_vs_backtest_drift.py` directly except for one-off debugging — direct invocation skips the rule eval and won't update the history index, so the next wrapper run can't see that firing.
 
 **Scheduled execution (macOS launchd).** `deploy/drift-check.launchd.plist` registers `com.tradingengine.drift-check` to run weekly (Sunday 09:00 local) — the locked cadence from the time-to-detection verdict. Install: `cp deploy/drift-check.launchd.plist ~/Library/LaunchAgents/com.tradingengine.drift-check.plist && launchctl load -w ~/Library/LaunchAgents/com.tradingengine.drift-check.plist`. Smoke-test: `launchctl start com.tradingengine.drift-check`. Inspect: `launchctl list | grep tradingengine` (last column = last exit code: 0 CLEAN / 1 INVESTIGATION / 2 INSUFFICIENT / 3 ERROR / 4 AUTO-KILL); launchd-side stdout/stderr go to `results/drift_runs/launchd.{out,err}.log`. Job uses `--live-source vps` (default) so SSH-to-VPS must be passwordless from launchd's environment — macOS Keychain integration handles this automatically when `ssh root@178.105.24.230 echo ok` works without prompting in a fresh Terminal.
+
+The plist actually invokes `scripts/weekly_audit.sh`, a small wrapper that runs `run_drift_check.sh --quiet` for the decision-grade signal AND captures `forward_paper_status.sh` to a dated text snapshot at `results/forward_paper_snapshots/<YYYY-MM-DD>.txt` for longitudinal diffing. Snapshot failure is non-fatal (drift signal is preserved regardless); the wrapper propagates the drift exit code so launchd's last-exit-code reflects the kill signal, not snapshot success. Manual snapshot-only invocation: `./scripts/weekly_audit.sh --no-snapshot` skips the snapshot step.
+
+**Telegram alerts on drift fire.** The drift wrapper POSTs to Telegram on exit codes 1 (INVESTIGATION → ⚠ WARN), 3 (ERROR → ⚠ WARN), 4 (AUTO-KILL CANDIDATE → 🚨 CRITICAL). Reads the same `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` env vars the engine uses; missing vars → silent no-op (graceful degrade, same pattern as the engine's notify package). Code 0 (CLEAN) and 2 (INSUFFICIENT) do NOT alert — the kill-bar mis-calibration finding warned that routine-noise alerts desensitize the operator. To enable Telegram from the launchd context, add `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID` to the plist's `EnvironmentVariables` block (operator-side; secrets stay out of the repo).
 
 The threshold criteria remain useful as **early-warning indicators** that warrant investigation, but should not auto-trigger a kill. Always cross-reference against the drift detector before acting on a `forward_paper_status.sh` KILL verdict.
 
