@@ -39,7 +39,7 @@ Mode is MONITORING — backtest investigation closed; the 60-day forward-paper c
 
 Operational tooling:
 - `forward_paper_status.sh` — surfaces currently-held positions per cohort (was hidden behind "(no data yet)"); now also pre-fetches Binance prices and shows current `now=… ±X% to stop` for each open
-- `run_drift_check.sh` — wraps `live_vs_backtest_drift.py` with state persistence to `results/drift_check_history.jsonl` + per-run logs; mechanically evaluates the locked two-firings-≥7d-apart auto-kill rule. Cron not yet wired (deployment-surface tradeoffs noted).
+- `run_drift_check.sh` — wraps `live_vs_backtest_drift.py` with state persistence to `results/drift_check_history.jsonl` + per-run logs; mechanically evaluates the locked two-firings-≥7d-apart auto-kill rule. Cron deployment design locked at `results/drift_wrapper_cron_decision_rule_2026-05-08.md` (phased by STAGE: manual through STAGE_2, VPS systemd timer required at STAGE_3+).
 - `post_deploy_check.sh` — section 7 added: "position recovery events in last 24h" greps engine logs for the recovery line, surfaces the audit signal that was previously buried.
 - `scripts/README.md` — new catalog of all 75+ scripts tiered by frequency of use.
 - `README.md` banner — refreshed (was stale: said "32 symbols" since reduced to 16; old completion date superseded by the locked real-money protocol).
