@@ -208,6 +208,39 @@ else
     done | sort -u" | sed 's/^/    /'
 fi
 
+# Section 8: Executor mode per engine — surfaces which symbols are running
+# real-money (--executor binance_live) vs paper-money (default stub). Reads
+# the actual ExecStart string from systemd so per-symbol overrides via
+# `systemctl edit paper-live@<sym>.service` are visible. After any STAGE_1+
+# promotion this is the operator's "did the right symbols get flipped"
+# check; pre-promotion it should always show 0 real-money engines.
+echo ""
+echo "8. Executor mode per engine"
+EXEC_REPORT=$(ssh "${TARGET}" "real_count=0
+real_list=''
+for sym in $SYMBOLS_LC; do
+    es=\$(systemctl show -p ExecStart --value paper-live@\${sym}.service 2>/dev/null || true)
+    if [[ \"\$es\" == *'--executor binance_live'* || \"\$es\" == *'--executor=binance_live'* ]]; then
+        real_count=\$((real_count + 1))
+        real_list=\"\$real_list \$sym\"
+    fi
+done
+echo \"\$real_count|\$real_list\"")
+REAL_COUNT="${EXEC_REPORT%%|*}"
+REAL_LIST="${EXEC_REPORT#*|}"
+TOTAL=$(echo "$SYMBOLS_LC" | wc -w | tr -d ' ')
+if [[ "$REAL_COUNT" == "0" ]]; then
+    ok "all $TOTAL engines on stub (paper-money) — pre-STAGE_1 expected state"
+else
+    # Real money is loud: emit an unmistakable banner. This is NOT a warning
+    # in the FAIL sense (real money on a promoted engine is the desired state
+    # post-STAGE_1), but it MUST be visible at every post_deploy_check.
+    echo "  🚨 REAL-MONEY ACTIVE on $REAL_COUNT / $TOTAL engines:$REAL_LIST"
+    echo "     Verify this matches your current STAGE_<N> promotion roster."
+    echo "     Per stage_promotion_runbook_decision_rule_2026-05-08.md, only"
+    echo "     ONE symbol promotes at a time and other symbols stay on stub."
+fi
+
 # ── Verdict ───────────────────────────────────────────────────────────────────
 echo ""
 echo "════════════════════════════════════════════════════════════════════════════════"

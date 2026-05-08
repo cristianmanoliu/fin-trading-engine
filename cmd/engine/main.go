@@ -103,6 +103,7 @@ func main() {
 
 	slog.Info("starting live engine",
 		"symbol", cfg.Symbol,
+		"executor", *executorMode,
 		"ws_url", cfg.Exchange.WSURL,
 		"backfill_hours", cfg.Strategy.BackfillHours)
 
