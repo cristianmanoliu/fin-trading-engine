@@ -80,7 +80,14 @@ func NewBinanceLive(symbol string, stakeUSD float64, apiKey, apiSecret string) *
 			RecvWindow: 5000,
 		},
 		PositionReconciler: &PositionReconciler{
-			PollInterval: 60 * time.Second,
+			PollInterval:       60 * time.Second,
+			APIBaseURL:         "https://fapi.binance.com",
+			APIKey:             apiKey,
+			APISecret:          apiSecret,
+			HTTPClient:         &http.Client{Timeout: 10 * time.Second},
+			RecvWindow:         5000,
+			QtyTolerance:       0.01, // locked: drift fires at |Δqty| ≥ 0.01 contracts
+			EntryPriceBpsLimit: 10,   // locked: drift fires at |Δentry|/entry ≥ 10 bps
 		},
 		SafetyGates: &SafetyGates{
 			// Defaults sized for STAGE_1; real activation overrides per stage.
@@ -275,29 +282,375 @@ func mapToExchangeSide(side models.Direction, reduceOnly bool) (string, error) {
 
 // PositionReconciler runs a background loop that periodically queries the
 // exchange for the current position state on each deployed symbol and
-// compares it to the local view. On mismatch, raises an alert and
-// triggers SOFT pause via the locked per_symbol_pause rule.
+// compares it to the local view. On mismatch, raises an alert and BLOCKS
+// new orders on the affected symbol until an operator clears the drift
+// state via ClearDrift (after manual root-cause investigation per the
+// locked per_symbol_pause_decision_rule).
+//
+// Drift detection (locked thresholds):
+//   - |position-size mismatch| ≥ QtyTolerance (default 0.01 contracts)
+//   - OR side mismatch (one side LONG, the other SHORT or none)
+//   - OR |entry-price drift| ≥ EntryPriceBpsLimit (default 10 bps)
+//
+// Reconciliation does NOT auto-correct; it ALERTS. The operator decides
+// whether to fix local-state-to-match-exchange or
+// fix-exchange-state-to-match-local based on root-cause investigation.
 type PositionReconciler struct {
 	PollInterval time.Duration
 
-	// Local position view per symbol. Populated by BinanceLive's OnSignal
-	// (open) and close-event handler. Mutex-protected because Run() reads
-	// it from a separate goroutine.
+	// API config — same shape as OrderRouter; populated by NewBinanceLive.
+	APIBaseURL string
+	APIKey     string
+	APISecret  string
+	HTTPClient *http.Client
+	RecvWindow int64 // ms; default 5000 if zero
+
+	// Drift detection thresholds. NewBinanceLive sets locked defaults
+	// (0.01 contracts, 10 bps); production may tune via configuration but
+	// re-locking is an explicit decision.
+	QtyTolerance       float64
+	EntryPriceBpsLimit float64
+
+	Notifier *notify.Notifier
+
+	// Local position view + drift map per symbol. Populated by
+	// SetLocalPosition / ClearLocalPosition (the BinanceLive-side write
+	// path) and by ReconcileSymbol (the drift-set/clear path).
 	mu        sync.Mutex
 	positions map[string]reconcilerPosition
+	drifted   map[string]string // symbol → drift reason; absent or "" = clean
 }
 
 type reconcilerPosition struct {
-	side       models.Direction
-	qty        float64
-	avgEntry   float64
-	openedAt   time.Time
+	side     models.Direction
+	qty      float64
+	avgEntry float64
+	openedAt time.Time
 }
 
-// Run starts the reconciliation loop. Skeleton: errors immediately rather
-// than starting a real polling loop.
-func (r *PositionReconciler) Run(_ context.Context, _ string) error {
-	return ErrStageNotPromoted
+// ExchangePosition is the parsed result of a /fapi/v2/positionRisk query.
+// Qty is signed: positive=Long, negative=Short, zero=flat. Side is derived
+// from the sign for callers that prefer the enum.
+type ExchangePosition struct {
+	Qty      float64
+	AvgEntry float64
+	Side     models.Direction
+}
+
+// DriftReport is the per-symbol output of a single ReconcileSymbol pass.
+type DriftReport struct {
+	Symbol           string
+	Drifted          bool
+	Reason           string // empty when Drifted=false
+	HasLocal         bool
+	LocalSide        models.Direction
+	LocalQty         float64
+	LocalAvgEntry    float64
+	HasExchange      bool
+	ExchangeSide     models.Direction
+	ExchangeQty      float64 // absolute (always non-negative)
+	ExchangeAvgEntry float64
+}
+
+// SetLocalPosition records BinanceLive's local view of a position. Called
+// by OnSignal after an open is journaled, and by close-event handling.
+func (r *PositionReconciler) SetLocalPosition(symbol string, side models.Direction, qty, avgEntry float64, openedAt time.Time) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.positions == nil {
+		r.positions = make(map[string]reconcilerPosition)
+	}
+	r.positions[symbol] = reconcilerPosition{
+		side:     side,
+		qty:      qty,
+		avgEntry: avgEntry,
+		openedAt: openedAt,
+	}
+}
+
+// ClearLocalPosition removes the local record. Called after a close is
+// journaled (the position is gone — the next reconcile should see flat-on-both
+// = clean).
+func (r *PositionReconciler) ClearLocalPosition(symbol string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.positions, symbol)
+}
+
+// LocalPosition returns the locally-tracked position; ok=false when nothing
+// is recorded for the symbol.
+func (r *PositionReconciler) LocalPosition(symbol string) (side models.Direction, qty, avgEntry float64, ok bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	pos, found := r.positions[symbol]
+	if !found {
+		return models.Neutral, 0, 0, false
+	}
+	return pos.side, pos.qty, pos.avgEntry, true
+}
+
+// IsDrifted reports whether the symbol is currently in drift. BinanceLive.OnSignal
+// MUST gate on this BEFORE SafetyGates — sending orders on a drifted symbol
+// risks compounding the discrepancy.
+func (r *PositionReconciler) IsDrifted(symbol string) (bool, string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	reason, ok := r.drifted[symbol]
+	if !ok || reason == "" {
+		return false, ""
+	}
+	return true, reason
+}
+
+// ClearDrift unsets the drift flag. Operator-invoked after manual
+// reconciliation (e.g., closing the orphan position via Binance UI, or
+// updating local journal state). NOT auto-called — drift is sticky until
+// human intervention OR until a subsequent reconcile naturally finds the
+// state has converged.
+func (r *PositionReconciler) ClearDrift(symbol string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.drifted, symbol)
+}
+
+// FetchExchangePosition queries Binance USDT-M Futures /fapi/v2/positionRisk
+// for the symbol's current position. Returns ExchangePosition with signed Qty
+// (positive=Long, negative=Short). On hedge-mode accounts the response can
+// contain LONG and SHORT entries separately; we sum them so net exposure is
+// reported coherently regardless of position-mode.
+func (r *PositionReconciler) FetchExchangePosition(ctx context.Context, symbol string) (ExchangePosition, error) {
+	if r.APIKey == "" || r.APISecret == "" {
+		return ExchangePosition{}, fmt.Errorf("PositionReconciler not configured: APIKey/APISecret missing")
+	}
+	if r.HTTPClient == nil {
+		return ExchangePosition{}, fmt.Errorf("PositionReconciler not configured: HTTPClient nil")
+	}
+	recvWin := r.RecvWindow
+	if recvWin == 0 {
+		recvWin = 5000
+	}
+
+	params := url.Values{}
+	params.Set("symbol", symbol)
+	params.Set("recvWindow", strconv.FormatInt(recvWin, 10))
+	params.Set("timestamp", strconv.FormatInt(time.Now().UnixMilli(), 10))
+	queryStr := params.Encode()
+	signature := hmacSHA256(queryStr, r.APISecret)
+	fullURL := r.APIBaseURL + "/fapi/v2/positionRisk?" + queryStr + "&signature=" + signature
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fullURL, nil)
+	if err != nil {
+		return ExchangePosition{}, err
+	}
+	req.Header.Set("X-MBX-APIKEY", r.APIKey)
+
+	resp, err := r.HTTPClient.Do(req)
+	if err != nil {
+		return ExchangePosition{}, fmt.Errorf("network: %w", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode >= 400 {
+		return ExchangePosition{}, fmt.Errorf("positionRisk %d: %s", resp.StatusCode, body)
+	}
+
+	var entries []struct {
+		Symbol       string `json:"symbol"`
+		PositionAmt  string `json:"positionAmt"`
+		EntryPrice   string `json:"entryPrice"`
+		PositionSide string `json:"positionSide"`
+	}
+	if err := json.Unmarshal(body, &entries); err != nil {
+		return ExchangePosition{}, fmt.Errorf("parse positionRisk: %w", err)
+	}
+
+	// Sum signed positionAmt across entries (one in one-way mode; up to two
+	// in hedge mode). Average entry is notional-weighted.
+	var netQty, weightedNotional float64
+	for _, e := range entries {
+		amt, _ := strconv.ParseFloat(e.PositionAmt, 64)
+		entry, _ := strconv.ParseFloat(e.EntryPrice, 64)
+		netQty += amt
+		weightedNotional += math.Abs(amt) * entry
+	}
+
+	pos := ExchangePosition{Qty: netQty}
+	if math.Abs(netQty) > 0 {
+		pos.AvgEntry = weightedNotional / math.Abs(netQty)
+	}
+	switch {
+	case netQty > 0:
+		pos.Side = models.Long
+	case netQty < 0:
+		pos.Side = models.Short
+	default:
+		pos.Side = models.Neutral
+	}
+	return pos, nil
+}
+
+// ReconcileSymbol runs one reconciliation pass: fetch exchange state, compare
+// to local, set/clear drift, alert on the leading edge of a drift episode.
+//
+// "Leading edge" = drift just transitioned from clean → drifted. Repeated
+// drift on consecutive passes does NOT re-alert (locked: prevent operator
+// alert-fatigue from a single unresolved drift).
+func (r *PositionReconciler) ReconcileSymbol(ctx context.Context, symbol string) (DriftReport, error) {
+	exch, err := r.FetchExchangePosition(ctx, symbol)
+	if err != nil {
+		return DriftReport{Symbol: symbol}, err
+	}
+
+	r.mu.Lock()
+	local, hasLocal := r.positions[symbol]
+	wasDrifted := r.drifted[symbol] != ""
+	r.mu.Unlock()
+
+	report := DriftReport{
+		Symbol:      symbol,
+		HasLocal:    hasLocal,
+		HasExchange: math.Abs(exch.Qty) >= r.QtyTolerance,
+	}
+	if hasLocal {
+		report.LocalSide = local.side
+		report.LocalQty = local.qty
+		report.LocalAvgEntry = local.avgEntry
+	}
+	if report.HasExchange {
+		report.ExchangeSide = exch.Side
+		report.ExchangeQty = math.Abs(exch.Qty)
+		report.ExchangeAvgEntry = exch.AvgEntry
+	}
+
+	report.Drifted, report.Reason = detectDrift(hasLocal, local, report.HasExchange, exch, r.QtyTolerance, r.EntryPriceBpsLimit)
+
+	r.mu.Lock()
+	if report.Drifted {
+		if r.drifted == nil {
+			r.drifted = make(map[string]string)
+		}
+		r.drifted[symbol] = report.Reason
+	} else if wasDrifted {
+		delete(r.drifted, symbol)
+	}
+	r.mu.Unlock()
+
+	switch {
+	case report.Drifted && !wasDrifted:
+		slog.Error("position drift detected",
+			"symbol", symbol,
+			"reason", report.Reason,
+			"local_side", report.LocalSide, "local_qty", report.LocalQty, "local_entry", report.LocalAvgEntry,
+			"exchange_side", report.ExchangeSide, "exchange_qty", report.ExchangeQty, "exchange_entry", report.ExchangeAvgEntry)
+		if r.Notifier != nil {
+			_ = r.Notifier.SendStructured(ctx, notify.SeverityCritical,
+				fmt.Sprintf("Position drift on %s — engine BLOCKED for new orders\nreason: %s\nlocal: side=%v qty=%v entry=%v\nexchange: side=%v qty=%v entry=%v\nOperator must reconcile + ClearDrift",
+					symbol, report.Reason,
+					report.LocalSide, report.LocalQty, report.LocalAvgEntry,
+					report.ExchangeSide, report.ExchangeQty, report.ExchangeAvgEntry))
+		}
+	case !report.Drifted && wasDrifted:
+		slog.Info("position drift cleared", "symbol", symbol)
+		if r.Notifier != nil {
+			_ = r.Notifier.SendStructured(ctx, notify.SeverityInfo,
+				fmt.Sprintf("Position drift cleared on %s — local + exchange now agree", symbol))
+		}
+	}
+
+	return report, nil
+}
+
+// detectDrift is the pure-arithmetic decision: given local + exchange state
+// and the locked thresholds, produce drifted-bool + human-readable reason.
+// Extracted so the rule is testable without HTTP plumbing.
+func detectDrift(hasLocal bool, local reconcilerPosition, hasExch bool, exch ExchangePosition, qtyTol, entryBpsLimit float64) (bool, string) {
+	switch {
+	case !hasLocal && !hasExch:
+		return false, ""
+	case !hasLocal && hasExch:
+		return true, fmt.Sprintf("orphan exchange position: side=%v qty=%v entry=%v (local empty)",
+			exch.Side, math.Abs(exch.Qty), exch.AvgEntry)
+	case hasLocal && !hasExch:
+		return true, fmt.Sprintf("externally-closed: local side=%v qty=%v entry=%v (exchange flat)",
+			local.side, local.qty, local.avgEntry)
+	}
+
+	if local.side != exch.Side {
+		return true, fmt.Sprintf("side mismatch: local=%v exchange=%v", local.side, exch.Side)
+	}
+
+	absExchQty := math.Abs(exch.Qty)
+	qtyDelta := math.Abs(local.qty - absExchQty)
+	if qtyDelta >= qtyTol {
+		return true, fmt.Sprintf("qty drift: local=%v exchange=%v (Δ=%v ≥ tol=%v)",
+			local.qty, absExchQty, qtyDelta, qtyTol)
+	}
+
+	if local.avgEntry > 0 {
+		bpsDiff := math.Abs(local.avgEntry-exch.AvgEntry) / local.avgEntry * 10000
+		if bpsDiff >= entryBpsLimit {
+			return true, fmt.Sprintf("entry-price drift: local=%v exchange=%v (%.2f bps ≥ %.2f bps)",
+				local.avgEntry, exch.AvgEntry, bpsDiff, entryBpsLimit)
+		}
+	}
+
+	return false, ""
+}
+
+// effectivePollInterval clamps PollInterval to the locked [30s, 300s] band
+// and substitutes the 60s default when unset. Exposed (lowercase) to permit
+// direct unit tests of the clamp without spinning the loop.
+func (r *PositionReconciler) effectivePollInterval() time.Duration {
+	const (
+		floor   = 30 * time.Second
+		ceiling = 5 * time.Minute
+		def     = 60 * time.Second
+	)
+	switch {
+	case r.PollInterval == 0:
+		return def
+	case r.PollInterval < floor:
+		return floor
+	case r.PollInterval > ceiling:
+		return ceiling
+	default:
+		return r.PollInterval
+	}
+}
+
+// Run starts the periodic reconciliation loop for a single symbol. Errors
+// loudly at entry if API config is missing — this is a real-money component;
+// silent skeleton-mode would be dangerous. Otherwise it issues an initial
+// reconcile (so operator visibility on engine restart doesn't lag the tick
+// interval) then enters a ticker loop until ctx is canceled.
+func (r *PositionReconciler) Run(ctx context.Context, symbol string) error {
+	if r.APIKey == "" || r.APISecret == "" {
+		return fmt.Errorf("PositionReconciler not configured: APIKey/APISecret missing")
+	}
+	if r.HTTPClient == nil {
+		return fmt.Errorf("PositionReconciler not configured: HTTPClient nil")
+	}
+
+	// Initial reconcile — surface pre-existing exchange-side state immediately
+	// (caller of Run is typically the engine startup goroutine).
+	if _, err := r.ReconcileSymbol(ctx, symbol); err != nil {
+		slog.Warn("reconcile error (initial)", "symbol", symbol, "err", err)
+	}
+
+	ticker := time.NewTicker(r.effectivePollInterval())
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+			if _, err := r.ReconcileSymbol(ctx, symbol); err != nil {
+				slog.Warn("reconcile error", "symbol", symbol, "err", err)
+			}
+		}
+	}
 }
 
 // SafetyGates enforces pre-order checks per the locked design. Each gate

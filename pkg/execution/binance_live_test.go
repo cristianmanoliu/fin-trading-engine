@@ -3,10 +3,13 @@ package execution
 import (
 	"context"
 	"errors"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/cristianmanoliu/trading-engine/pkg/models"
 	"github.com/cristianmanoliu/trading-engine/pkg/strategy"
@@ -254,11 +257,463 @@ func TestSendOrder_5xxError(t *testing.T) {
 	}
 }
 
-func TestPositionReconciler_Run_ErrorsOnSkeleton(t *testing.T) {
+func TestPositionReconciler_Run_ErrorsWhenNotConfigured(t *testing.T) {
+	// An unconfigured Reconciler (no API creds) must error LOUDLY at Run-entry
+	// rather than silently spin a periodic loop that fails every fetch.
+	// Misconfiguration on a real-money system should fail fast.
 	r := &PositionReconciler{}
 	err := r.Run(context.Background(), "BTCUSDT")
-	if !errors.Is(err, ErrStageNotPromoted) {
-		t.Errorf("Run err = %v, want ErrStageNotPromoted", err)
+	if err == nil || !strings.Contains(err.Error(), "not configured") {
+		t.Errorf("Run err = %v, want 'not configured'", err)
+	}
+}
+
+// ── PositionReconciler: local state CRUD ─────────────────────────────────────
+
+func newReconcilerForTest(t *testing.T, apiURL string) *PositionReconciler {
+	t.Helper()
+	return &PositionReconciler{
+		PollInterval:       60 * time.Second,
+		APIBaseURL:         apiURL,
+		APIKey:             "k",
+		APISecret:          "s",
+		HTTPClient:         &http.Client{Timeout: 5 * time.Second},
+		RecvWindow:         5000,
+		QtyTolerance:       0.01,
+		EntryPriceBpsLimit: 10,
+	}
+}
+
+func TestPositionReconciler_SetAndLocalPosition(t *testing.T) {
+	r := newReconcilerForTest(t, "https://example")
+	openedAt := time.Date(2026, 5, 8, 8, 0, 0, 0, time.UTC)
+	r.SetLocalPosition("BTCUSDT", models.Long, 0.5, 50000, openedAt)
+	side, qty, entry, ok := r.LocalPosition("BTCUSDT")
+	if !ok {
+		t.Fatal("LocalPosition: ok=false after SetLocalPosition")
+	}
+	if side != models.Long || qty != 0.5 || entry != 50000 {
+		t.Errorf("local pos = side=%v qty=%v entry=%v; want Long/0.5/50000", side, qty, entry)
+	}
+}
+
+func TestPositionReconciler_LocalPosition_NotSet_ReturnsFalse(t *testing.T) {
+	r := newReconcilerForTest(t, "https://example")
+	_, _, _, ok := r.LocalPosition("BTCUSDT")
+	if ok {
+		t.Error("LocalPosition: ok=true on never-set symbol, want false")
+	}
+}
+
+func TestPositionReconciler_ClearLocalPosition(t *testing.T) {
+	r := newReconcilerForTest(t, "https://example")
+	r.SetLocalPosition("BTCUSDT", models.Long, 0.5, 50000, time.Now())
+	r.ClearLocalPosition("BTCUSDT")
+	if _, _, _, ok := r.LocalPosition("BTCUSDT"); ok {
+		t.Error("LocalPosition still present after Clear")
+	}
+}
+
+func TestPositionReconciler_IsDrifted_DefaultsClean(t *testing.T) {
+	r := newReconcilerForTest(t, "https://example")
+	drifted, reason := r.IsDrifted("BTCUSDT")
+	if drifted || reason != "" {
+		t.Errorf("IsDrifted default: %v / %q; want false / \"\"", drifted, reason)
+	}
+}
+
+// ── PositionReconciler: FetchExchangePosition (HTTP path) ───────────────────
+
+func TestPositionReconciler_FetchExchangePosition_ParsesLong(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		w.Write([]byte(`[{"symbol":"BTCUSDT","positionAmt":"0.500","entryPrice":"50000.0","positionSide":"BOTH"}]`))
+	}))
+	defer srv.Close()
+	r := newReconcilerForTest(t, srv.URL)
+	r.HTTPClient = srv.Client()
+	pos, err := r.FetchExchangePosition(context.Background(), "BTCUSDT")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if pos.Side != models.Long || pos.Qty != 0.5 || pos.AvgEntry != 50000 {
+		t.Errorf("Long pos parsed wrong: %+v", pos)
+	}
+}
+
+func TestPositionReconciler_FetchExchangePosition_ParsesShort(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		// SHORT in one-way mode: positionAmt is NEGATIVE.
+		w.Write([]byte(`[{"symbol":"BTCUSDT","positionAmt":"-0.500","entryPrice":"50000.0","positionSide":"BOTH"}]`))
+	}))
+	defer srv.Close()
+	r := newReconcilerForTest(t, srv.URL)
+	r.HTTPClient = srv.Client()
+	pos, err := r.FetchExchangePosition(context.Background(), "BTCUSDT")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if pos.Side != models.Short || pos.Qty != -0.5 || pos.AvgEntry != 50000 {
+		t.Errorf("Short pos parsed wrong: %+v", pos)
+	}
+}
+
+func TestPositionReconciler_FetchExchangePosition_ParsesFlat(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		// Flat: positionAmt zero. entryPrice may be "0.0".
+		w.Write([]byte(`[{"symbol":"BTCUSDT","positionAmt":"0","entryPrice":"0.0","positionSide":"BOTH"}]`))
+	}))
+	defer srv.Close()
+	r := newReconcilerForTest(t, srv.URL)
+	r.HTTPClient = srv.Client()
+	pos, err := r.FetchExchangePosition(context.Background(), "BTCUSDT")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if pos.Side != models.Neutral || pos.Qty != 0 {
+		t.Errorf("Flat pos parsed wrong: %+v", pos)
+	}
+}
+
+func TestPositionReconciler_FetchExchangePosition_HedgeModeSumsLongAndShort(t *testing.T) {
+	// Hedge mode: separate LONG and SHORT entries. Net position = sum.
+	// Defensive parsing — STAGE_1 is one-way mode, but if the account ever
+	// flips to hedge mode the reconciler still gives a coherent answer.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		w.Write([]byte(`[
+			{"symbol":"BTCUSDT","positionAmt":"0.700","entryPrice":"50000.0","positionSide":"LONG"},
+			{"symbol":"BTCUSDT","positionAmt":"-0.200","entryPrice":"51000.0","positionSide":"SHORT"}
+		]`))
+	}))
+	defer srv.Close()
+	r := newReconcilerForTest(t, srv.URL)
+	r.HTTPClient = srv.Client()
+	pos, err := r.FetchExchangePosition(context.Background(), "BTCUSDT")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	// Net qty = 0.7 - 0.2 = 0.5 (LONG bias).
+	if pos.Side != models.Long || math.Abs(pos.Qty-0.5) > 1e-9 {
+		t.Errorf("hedge-mode net: %+v; want Long qty=0.5", pos)
+	}
+}
+
+func TestPositionReconciler_FetchExchangePosition_SignedRequest(t *testing.T) {
+	var capturedQuery, capturedAPIKey string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		capturedQuery = req.URL.RawQuery
+		capturedAPIKey = req.Header.Get("X-MBX-APIKEY")
+		w.Write([]byte(`[{"symbol":"BTCUSDT","positionAmt":"0","entryPrice":"0","positionSide":"BOTH"}]`))
+	}))
+	defer srv.Close()
+	r := newReconcilerForTest(t, srv.URL)
+	r.HTTPClient = srv.Client()
+	if _, err := r.FetchExchangePosition(context.Background(), "BTCUSDT"); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if capturedAPIKey != "k" {
+		t.Errorf("X-MBX-APIKEY missing: %q", capturedAPIKey)
+	}
+	if !strings.Contains(capturedQuery, "signature=") {
+		t.Errorf("query missing signature: %q", capturedQuery)
+	}
+	if !strings.Contains(capturedQuery, "symbol=BTCUSDT") {
+		t.Errorf("query missing symbol: %q", capturedQuery)
+	}
+	if !strings.Contains(capturedQuery, "timestamp=") {
+		t.Errorf("query missing timestamp: %q", capturedQuery)
+	}
+}
+
+func TestPositionReconciler_FetchExchangePosition_5xxError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+	r := newReconcilerForTest(t, srv.URL)
+	r.HTTPClient = srv.Client()
+	if _, err := r.FetchExchangePosition(context.Background(), "BTCUSDT"); err == nil {
+		t.Fatal("expected err on 5xx")
+	}
+}
+
+// ── PositionReconciler: ReconcileSymbol drift detection ──────────────────────
+//
+// The locked rule defines drift as: |qty mismatch| ≥ 0.01 contracts, OR side
+// mismatch, OR entry price differs by ≥10 bps. The cases below tabulate every
+// branch + boundary.
+
+// reconcileWithExchange wires up an httptest server with a canned positionRisk
+// response and runs ReconcileSymbol once. Returns the DriftReport for inspection.
+func reconcileWithExchange(t *testing.T, r *PositionReconciler, exchangeJSON string) DriftReport {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		w.Write([]byte(exchangeJSON))
+	}))
+	t.Cleanup(srv.Close)
+	r.APIBaseURL = srv.URL
+	r.HTTPClient = srv.Client()
+	report, err := r.ReconcileSymbol(context.Background(), "BTCUSDT")
+	if err != nil {
+		t.Fatalf("ReconcileSymbol: %v", err)
+	}
+	return report
+}
+
+func TestReconcileSymbol_BothFlat_Clean(t *testing.T) {
+	r := newReconcilerForTest(t, "")
+	report := reconcileWithExchange(t, r,
+		`[{"symbol":"BTCUSDT","positionAmt":"0","entryPrice":"0","positionSide":"BOTH"}]`)
+	if report.Drifted {
+		t.Errorf("both-flat: drifted=true (%q); want false", report.Reason)
+	}
+}
+
+func TestReconcileSymbol_OrphanExchange_Drifts(t *testing.T) {
+	r := newReconcilerForTest(t, "")
+	// Local has nothing; exchange has a position → orphan-exchange drift.
+	report := reconcileWithExchange(t, r,
+		`[{"symbol":"BTCUSDT","positionAmt":"0.5","entryPrice":"50000","positionSide":"BOTH"}]`)
+	if !report.Drifted {
+		t.Errorf("orphan-exchange: drifted=false; want true")
+	}
+	if !strings.Contains(report.Reason, "orphan") {
+		t.Errorf("reason missing 'orphan': %q", report.Reason)
+	}
+	if drifted, _ := r.IsDrifted("BTCUSDT"); !drifted {
+		t.Error("IsDrifted not set after drift detection")
+	}
+}
+
+func TestReconcileSymbol_ExternallyClosed_Drifts(t *testing.T) {
+	r := newReconcilerForTest(t, "")
+	// Local has position; exchange shows flat → externally-closed drift.
+	r.SetLocalPosition("BTCUSDT", models.Long, 0.5, 50000, time.Now())
+	report := reconcileWithExchange(t, r,
+		`[{"symbol":"BTCUSDT","positionAmt":"0","entryPrice":"0","positionSide":"BOTH"}]`)
+	if !report.Drifted {
+		t.Errorf("externally-closed: drifted=false; want true")
+	}
+	if !strings.Contains(report.Reason, "externally") {
+		t.Errorf("reason missing 'externally': %q", report.Reason)
+	}
+}
+
+func TestReconcileSymbol_SideMismatch_Drifts(t *testing.T) {
+	r := newReconcilerForTest(t, "")
+	r.SetLocalPosition("BTCUSDT", models.Long, 0.5, 50000, time.Now())
+	report := reconcileWithExchange(t, r,
+		`[{"symbol":"BTCUSDT","positionAmt":"-0.5","entryPrice":"50000","positionSide":"BOTH"}]`)
+	if !report.Drifted {
+		t.Error("side mismatch: drifted=false; want true")
+	}
+	if !strings.Contains(report.Reason, "side") {
+		t.Errorf("reason missing 'side': %q", report.Reason)
+	}
+}
+
+func TestReconcileSymbol_QtyDrift_AtThreshold_Drifts(t *testing.T) {
+	r := newReconcilerForTest(t, "")
+	// Local 0.50, exchange 0.51 → Δ=0.01 = locked threshold (>= fires).
+	r.SetLocalPosition("BTCUSDT", models.Long, 0.50, 50000, time.Now())
+	report := reconcileWithExchange(t, r,
+		`[{"symbol":"BTCUSDT","positionAmt":"0.51","entryPrice":"50000","positionSide":"BOTH"}]`)
+	if !report.Drifted {
+		t.Error("qty drift at exact threshold: want drift")
+	}
+	if !strings.Contains(report.Reason, "qty") {
+		t.Errorf("reason missing 'qty': %q", report.Reason)
+	}
+}
+
+func TestReconcileSymbol_QtyDrift_BelowThreshold_Clean(t *testing.T) {
+	r := newReconcilerForTest(t, "")
+	// Local 0.500, exchange 0.505 → Δ=0.005 < 0.01 threshold.
+	r.SetLocalPosition("BTCUSDT", models.Long, 0.500, 50000, time.Now())
+	report := reconcileWithExchange(t, r,
+		`[{"symbol":"BTCUSDT","positionAmt":"0.505","entryPrice":"50000","positionSide":"BOTH"}]`)
+	if report.Drifted {
+		t.Errorf("qty drift below threshold: drifted=true (%q); want false", report.Reason)
+	}
+}
+
+func TestReconcileSymbol_EntryPriceDrift_AtThreshold_Drifts(t *testing.T) {
+	r := newReconcilerForTest(t, "")
+	// Local entry 50000, exchange 50050 → 10.0 bps = locked threshold.
+	r.SetLocalPosition("BTCUSDT", models.Long, 0.5, 50000, time.Now())
+	report := reconcileWithExchange(t, r,
+		`[{"symbol":"BTCUSDT","positionAmt":"0.5","entryPrice":"50050","positionSide":"BOTH"}]`)
+	if !report.Drifted {
+		t.Error("entry-price drift at exact threshold: want drift")
+	}
+	if !strings.Contains(report.Reason, "entry-price") {
+		t.Errorf("reason missing 'entry-price': %q", report.Reason)
+	}
+}
+
+func TestReconcileSymbol_EntryPriceDrift_BelowThreshold_Clean(t *testing.T) {
+	r := newReconcilerForTest(t, "")
+	// Local 50000, exchange 50049 → 9.8 bps < 10 bps.
+	r.SetLocalPosition("BTCUSDT", models.Long, 0.5, 50000, time.Now())
+	report := reconcileWithExchange(t, r,
+		`[{"symbol":"BTCUSDT","positionAmt":"0.5","entryPrice":"50049","positionSide":"BOTH"}]`)
+	if report.Drifted {
+		t.Errorf("entry-price drift below threshold: drifted=true (%q); want false", report.Reason)
+	}
+}
+
+func TestReconcileSymbol_HappyPath_Clean(t *testing.T) {
+	r := newReconcilerForTest(t, "")
+	r.SetLocalPosition("BTCUSDT", models.Long, 0.5, 50000, time.Now())
+	report := reconcileWithExchange(t, r,
+		`[{"symbol":"BTCUSDT","positionAmt":"0.5","entryPrice":"50000","positionSide":"BOTH"}]`)
+	if report.Drifted {
+		t.Errorf("happy path: drifted=true (%q); want false", report.Reason)
+	}
+	if drifted, _ := r.IsDrifted("BTCUSDT"); drifted {
+		t.Error("IsDrifted set on clean reconciliation")
+	}
+}
+
+func TestReconcileSymbol_DriftClearsAfterReconciliation(t *testing.T) {
+	r := newReconcilerForTest(t, "")
+	r.SetLocalPosition("BTCUSDT", models.Long, 0.5, 50000, time.Now())
+
+	// First pass: simulate side-mismatch drift.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		w.Write([]byte(`[{"symbol":"BTCUSDT","positionAmt":"-0.5","entryPrice":"50000","positionSide":"BOTH"}]`))
+	}))
+	r.APIBaseURL = srv.URL
+	r.HTTPClient = srv.Client()
+	if _, err := r.ReconcileSymbol(context.Background(), "BTCUSDT"); err != nil {
+		t.Fatal(err)
+	}
+	if drifted, _ := r.IsDrifted("BTCUSDT"); !drifted {
+		t.Fatal("drift not flagged after side-mismatch")
+	}
+	srv.Close()
+
+	// Second pass: exchange now matches local → drift should clear automatically.
+	srv2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		w.Write([]byte(`[{"symbol":"BTCUSDT","positionAmt":"0.5","entryPrice":"50000","positionSide":"BOTH"}]`))
+	}))
+	defer srv2.Close()
+	r.APIBaseURL = srv2.URL
+	r.HTTPClient = srv2.Client()
+	if _, err := r.ReconcileSymbol(context.Background(), "BTCUSDT"); err != nil {
+		t.Fatal(err)
+	}
+	if drifted, _ := r.IsDrifted("BTCUSDT"); drifted {
+		t.Error("drift not cleared after subsequent clean reconciliation")
+	}
+}
+
+func TestPositionReconciler_ClearDrift_Resets(t *testing.T) {
+	r := newReconcilerForTest(t, "")
+	// Force drift via the orphan-exchange path.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		w.Write([]byte(`[{"symbol":"BTCUSDT","positionAmt":"0.5","entryPrice":"50000","positionSide":"BOTH"}]`))
+	}))
+	defer srv.Close()
+	r.APIBaseURL = srv.URL
+	r.HTTPClient = srv.Client()
+	if _, err := r.ReconcileSymbol(context.Background(), "BTCUSDT"); err != nil {
+		t.Fatal(err)
+	}
+	if drifted, _ := r.IsDrifted("BTCUSDT"); !drifted {
+		t.Fatal("drift not set")
+	}
+	r.ClearDrift("BTCUSDT")
+	if drifted, _ := r.IsDrifted("BTCUSDT"); drifted {
+		t.Error("drift not cleared by ClearDrift")
+	}
+}
+
+// ── PositionReconciler: poll-interval clamping ───────────────────────────────
+
+func TestPositionReconciler_EffectivePollInterval_DefaultsTo60s(t *testing.T) {
+	r := &PositionReconciler{}
+	got := r.effectivePollInterval()
+	if got != 60*time.Second {
+		t.Errorf("default = %v, want 60s", got)
+	}
+}
+
+func TestPositionReconciler_EffectivePollInterval_ClampsLow(t *testing.T) {
+	r := &PositionReconciler{PollInterval: 1 * time.Second}
+	got := r.effectivePollInterval()
+	if got != 30*time.Second {
+		t.Errorf("clamped low = %v, want 30s (locked floor)", got)
+	}
+}
+
+func TestPositionReconciler_EffectivePollInterval_ClampsHigh(t *testing.T) {
+	r := &PositionReconciler{PollInterval: 10 * time.Minute}
+	got := r.effectivePollInterval()
+	if got != 5*time.Minute {
+		t.Errorf("clamped high = %v, want 5m (locked ceiling)", got)
+	}
+}
+
+func TestPositionReconciler_EffectivePollInterval_PassesThroughInRange(t *testing.T) {
+	r := &PositionReconciler{PollInterval: 90 * time.Second}
+	got := r.effectivePollInterval()
+	if got != 90*time.Second {
+		t.Errorf("in-range = %v, want passthrough 90s", got)
+	}
+}
+
+// ── PositionReconciler: Run loop ─────────────────────────────────────────────
+
+func TestPositionReconciler_Run_RespectsContext(t *testing.T) {
+	// The Run loop must return promptly when ctx is canceled, even though
+	// the clamped tick interval is 30s+. The initial reconcile shouldn't
+	// block ctx-cancel forever either.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		w.Write([]byte(`[{"symbol":"BTCUSDT","positionAmt":"0","entryPrice":"0","positionSide":"BOTH"}]`))
+	}))
+	defer srv.Close()
+	r := newReconcilerForTest(t, srv.URL)
+	r.HTTPClient = srv.Client()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- r.Run(ctx, "BTCUSDT") }()
+	// Give the initial reconcile time to fire, then cancel.
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("Run err = %v, want context.Canceled", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run did not return within 2s of ctx cancel")
+	}
+}
+
+func TestPositionReconciler_Run_InitialReconcileFires(t *testing.T) {
+	// Run must do an initial reconcile pass BEFORE waiting for the first
+	// tick — otherwise an engine restart leaves the operator blind for up
+	// to 60s about pre-existing exchange positions.
+	var calls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		w.Write([]byte(`[{"symbol":"BTCUSDT","positionAmt":"0","entryPrice":"0","positionSide":"BOTH"}]`))
+	}))
+	defer srv.Close()
+	r := newReconcilerForTest(t, srv.URL)
+	r.HTTPClient = srv.Client()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- r.Run(ctx, "BTCUSDT") }()
+	// Wait long enough for initial reconcile to land but well short of the
+	// 30s clamped tick.
+	time.Sleep(200 * time.Millisecond)
+	cancel()
+	<-done
+	if got := atomic.LoadInt32(&calls); got < 1 {
+		t.Errorf("initial reconcile calls = %d, want ≥1", got)
 	}
 }
 
