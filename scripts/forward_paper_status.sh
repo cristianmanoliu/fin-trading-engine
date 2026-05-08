@@ -149,6 +149,27 @@ fi
 
 NOW=$(date -u +%s)
 
+# Pre-fetch current prices for any symbols with open positions, so the
+# render_open_table helper can show a "now=…  +X% to stop" column. Gracefully
+# degrades on any failure (network down, timeout, parse error) — the column
+# is simply omitted for that symbol. Hitting Binance fapi /v1/ticker/price
+# is 1 weight per call; even with 16 unique symbols across 4 cohorts that's
+# trivial vs the 6000/min cap. No flag needed: if you're already online
+# enough to ssh to the VPS, you're online enough for this.
+unique_open_symbols=$(echo "$DATA" | awk -F'|' '$1=="OPEN" {print $3}' | sort -u)
+# Space-separated SYM=PRICE pairs — passable to awk via -v without newline
+# parse issues. Empty if all fetches fail or no open positions exist.
+PRICE_TABLE=""
+if [[ -n "$unique_open_symbols" ]]; then
+    for sym in $unique_open_symbols; do
+        price=$(curl -s --max-time 5 "https://fapi.binance.com/fapi/v1/ticker/price?symbol=${sym}" 2>/dev/null \
+                | sed -nE 's/.*"price":"([0-9.]+)".*/\1/p')
+        if [[ -n "$price" ]]; then
+            PRICE_TABLE+="${sym}=${price} "
+        fi
+    done
+fi
+
 # Pretty header
 SEP="$(printf '%0.s═' {1..78})"
 echo
@@ -172,9 +193,37 @@ echo "$DATA" | grep "^STRATEGY|" | while IFS='|' read -r _ label first_ts last_t
     render_open_table() {
         # %.6g strips FP serialization noise (0.005360641999999999 → 0.00536064)
         # while preserving 6 sig figs — sufficient for an eyeball status check.
-        printf '%s\n' "$open_pos_lines" | awk -F'|' '
-            { printf "      %-13s %-5s  entry=%-10.6g stop=%-10.6g target=%-10.6g opened=%s\n",
-                     $3, $4, $5+0, $6+0, $7+0, substr($8, 1, 19) }'
+        # When a current price is available in PRICE_TABLE (pre-fetched at the
+        # top of the script), append "now=… +X% to stop" — positive % means
+        # adverse (toward stop), negative means favorable (toward target).
+        printf '%s\n' "$open_pos_lines" | awk -F'|' -v price_table="$PRICE_TABLE" '
+            BEGIN {
+                # PRICE_TABLE is space-separated "SYM=PRICE" pairs.
+                n = split(price_table, pairs, " ")
+                for (i = 1; i <= n; i++) {
+                    if (pairs[i] != "" && split(pairs[i], kv, "=") == 2) {
+                        prices[kv[1]] = kv[2] + 0
+                    }
+                }
+            }
+            {
+                sym = $3; side = $4
+                entry = $5 + 0; stop = $6 + 0; target = $7 + 0
+                ts = substr($8, 1, 19)
+                if (sym in prices && entry != stop) {
+                    p = prices[sym]
+                    if (side == "SHORT") {
+                        pct = (p - entry) / (stop - entry) * 100
+                    } else {
+                        pct = (entry - p) / (entry - stop) * 100
+                    }
+                    printf "      %-13s %-5s  entry=%-10.6g stop=%-10.6g target=%-10.6g now=%-10.6g %+5.1f%% to stop  opened=%s\n",
+                           sym, side, entry, stop, target, p, pct, ts
+                } else {
+                    printf "      %-13s %-5s  entry=%-10.6g stop=%-10.6g target=%-10.6g (no price)               opened=%s\n",
+                           sym, side, entry, stop, target, ts
+                }
+            }'
     }
 
     if [[ "$first_ts" == "NODATA" ]]; then
@@ -353,6 +402,8 @@ echo "  - n/a means no closes carry the cost decomposition yet (engine restart n
 echo "    new closes will land in the journal — old closes pre-extension show as 0 fee/slip)"
 echo "  - Open positions = symbols where opens > closes in the journal — visibility for trades"
 echo "    riding pre-first-close (e.g. fresh-deploy windows or rare-signal cohorts)"
+echo "  - Open-position prices fetched live from Binance fapi /v1/ticker/price;"
+echo "    +% means adverse (toward stop), -% means favorable (toward target)"
 echo "  - Kill criteria 'first 60 days net-negative' = same as Net PnL FAIL post 60-day mark"
 echo "  - BTC-HODL benchmark notional: \$$BENCHMARK_NOTIONAL (override via BENCHMARK_NOTIONAL env);"
 echo "    consecutive 30d window kill threshold: \$$KILL_HODL_WINDOW_USD (override via KILL_HODL_WINDOW_USD)"
