@@ -194,9 +194,25 @@ echo "$DATA" | grep "^STRATEGY|" | while IFS='|' read -r _ label first_ts last_t
         # %.6g strips FP serialization noise (0.005360641999999999 → 0.00536064)
         # while preserving 6 sig figs — sufficient for an eyeball status check.
         # When a current price is available in PRICE_TABLE (pre-fetched at the
-        # top of the script), append "now=… +X% to stop" — positive % means
-        # adverse (toward stop), negative means favorable (toward target).
-        printf '%s\n' "$open_pos_lines" | awk -F'|' -v price_table="$PRICE_TABLE" '
+        # top of the script), append "R=… (TP=+NR)" — signed R-multiple in the
+        # strategy's native unit. +R = profit toward target, −R = adverse toward
+        # stop (−1R = stop touched, +TP_R = target hit). target-RR varies by
+        # strategy variant so we display it alongside.
+        # Pre-compute opened-timestamp epoch in bash (macOS BSD awk lacks
+        # mktime; doing it in awk would either be wrong-by-TZ-offset or require
+        # gawk). We append the epoch as the 9th pipe-field so awk can read it
+        # directly. Per-line `date -j` invocation is O(n_open); n is small
+        # (≤50 across all cohorts) so the process-spawn cost is negligible.
+        augmented_lines=""
+        while IFS= read -r _line; do
+            [[ -z "$_line" ]] && continue
+            _ts=$(printf '%s' "$_line" | awk -F'|' '{print substr($8,1,19)}')
+            _epoch=$(date -u -j -f "%Y-%m-%dT%H:%M:%S" "$_ts" +%s 2>/dev/null || \
+                     date -u -d "$_ts" +%s 2>/dev/null || echo "0")
+            augmented_lines+="${_line}|${_epoch}"$'\n'
+        done <<<"$open_pos_lines"
+
+        printf '%s' "$augmented_lines" | awk -F'|' -v price_table="$PRICE_TABLE" -v now="$NOW" '
             BEGIN {
                 # PRICE_TABLE is space-separated "SYM=PRICE" pairs.
                 n = split(price_table, pairs, " ")
@@ -210,18 +226,29 @@ echo "$DATA" | grep "^STRATEGY|" | while IFS='|' read -r _ label first_ts last_t
                 sym = $3; side = $4
                 entry = $5 + 0; stop = $6 + 0; target = $7 + 0
                 ts = substr($8, 1, 19)
+                opened_epoch = $9 + 0
+                if (opened_epoch > 0) {
+                    held_h = (now - opened_epoch) / 3600
+                    held_str = sprintf("%5.1fh", held_h)
+                } else {
+                    held_str = "    ?h"
+                }
                 if (sym in prices && entry != stop) {
                     p = prices[sym]
                     if (side == "SHORT") {
-                        pct = (p - entry) / (stop - entry) * 100
+                        # SHORT: profit when price falls; stop above entry, target below
+                        r       = (entry - p)      / (stop - entry)
+                        target_r= (entry - target) / (stop - entry)
                     } else {
-                        pct = (entry - p) / (entry - stop) * 100
+                        # LONG: profit when price rises; stop below entry, target above
+                        r       = (p - entry)      / (entry - stop)
+                        target_r= (target - entry) / (entry - stop)
                     }
-                    printf "      %-13s %-5s  entry=%-10.6g stop=%-10.6g target=%-10.6g now=%-10.6g %+5.1f%% to stop  opened=%s\n",
-                           sym, side, entry, stop, target, p, pct, ts
+                    printf "      %-13s %-5s  entry=%-10.6g stop=%-10.6g target=%-10.6g now=%-10.6g R=%+5.2f (TP=%+.1fR)  held=%s  opened=%s\n",
+                           sym, side, entry, stop, target, p, r, target_r, held_str, ts
                 } else {
-                    printf "      %-13s %-5s  entry=%-10.6g stop=%-10.6g target=%-10.6g (no price)               opened=%s\n",
-                           sym, side, entry, stop, target, ts
+                    printf "      %-13s %-5s  entry=%-10.6g stop=%-10.6g target=%-10.6g (no price)                            held=%s  opened=%s\n",
+                           sym, side, entry, stop, target, held_str, ts
                 }
             }'
     }
@@ -298,9 +325,18 @@ echo "$DATA" | grep "^STRATEGY|" | while IFS='|' read -r _ label first_ts last_t
 
     s_trades=$(pass_or_inprogress "$trades" "$MIN_TRADES" ge)
     s_days=$(pass_or_inprogress "$days_elapsed" "$MIN_DAYS" ge)
+    # PnL/single-sym verdicts are gated on the trade-count floor so n=1 doesn't
+    # spuriously declare FAIL. The threshold criteria are advisory-only per the
+    # kill-bar mis-calibration finding (calibration verdict 2026-05-07); the
+    # decision-grade kill mechanism is scripts/run_drift_check.sh.
     s_wr=$([[ "$trades" -ge "$MIN_TRADES" ]] && pass_or_fail "$wr_pct" "$MIN_WR_PCT" ge || echo "PENDING")
-    s_pnl=$(pass_or_fail "$pnl" "0" ge)
-    s_sym=$(pass_or_fail "$max_sym_pct_val" "$MAX_SYM_PCT" le)
+    if [[ "$trades" -ge "$MIN_TRADES" ]]; then
+        s_pnl=$(pass_or_fail "$pnl" "0" ge)
+        s_sym=$(pass_or_fail "$max_sym_pct_val" "$MAX_SYM_PCT" le)
+    else
+        s_pnl="INSUFFICIENT"
+        s_sym="INSUFFICIENT"
+    fi
 
     # Realized fee/slip bps (from journal cost decomposition). When notional is
     # 0 — either every close predates the schema extension or every closed
@@ -334,7 +370,11 @@ echo "$DATA" | grep "^STRATEGY|" | while IFS='|' read -r _ label first_ts last_t
                 hodl_n_windows hodl_kill_pairs hodl_kill hodl_warning <<<"$hodl_out"
         fi
     fi
-    s_hodl_cumul=$(pass_or_fail "$hodl_delta_usd" "0" ge)
+    if [[ "$trades" -ge "$MIN_TRADES" ]]; then
+        s_hodl_cumul=$(pass_or_fail "$hodl_delta_usd" "0" ge)
+    else
+        s_hodl_cumul="INSUFFICIENT"
+    fi
     if [[ "$hodl_kill" == "1" ]]; then
         s_hodl_window="FAIL"
     elif [[ "$hodl_n_windows" -lt "2" ]]; then
@@ -403,7 +443,11 @@ echo "    new closes will land in the journal — old closes pre-extension show 
 echo "  - Open positions = symbols where opens > closes in the journal — visibility for trades"
 echo "    riding pre-first-close (e.g. fresh-deploy windows or rare-signal cohorts)"
 echo "  - Open-position prices fetched live from Binance fapi /v1/ticker/price;"
-echo "    +% means adverse (toward stop), -% means favorable (toward target)"
+echo "    R-multiple is the strategy's native unit: +R = profit toward target,"
+echo "    −R = adverse toward stop (−1R = stop touched, TP=+NR shows the target R)"
+echo "  - PnL/single-sym/HODL-cumul verdicts gated on trades ≥ \$MIN_TRADES"
+echo "    (kill-bar mis-calibration verdict 2026-05-07 made these advisory-only;"
+echo "    decision-grade kill is scripts/run_drift_check.sh)"
 echo "  - Kill criteria 'first 60 days net-negative' = same as Net PnL FAIL post 60-day mark"
 echo "  - BTC-HODL benchmark notional: \$$BENCHMARK_NOTIONAL (override via BENCHMARK_NOTIONAL env);"
 echo "    consecutive 30d window kill threshold: \$$KILL_HODL_WINDOW_USD (override via KILL_HODL_WINDOW_USD)"
