@@ -96,7 +96,8 @@ func main() {
 	defer cancel()
 
 	hostname, _ := os.Hostname()
-	notifier.Send(ctx, fmt.Sprintf("🟢 *%s* engine started on `%s`", cfg.Symbol, hostname)) //nolint:errcheck
+	_ = notifier.SendStructured(ctx, notify.SeverityInfo,
+		fmt.Sprintf("engine started\nsymbol: %s\nhost: %s", cfg.Symbol, hostname))
 
 	slog.Info("starting live engine",
 		"symbol", cfg.Symbol,
@@ -179,8 +180,12 @@ func main() {
 	// the corresponding open event with no matching close.
 	if recovered, err := exec.RecoverFromJournal(); err != nil {
 		slog.Warn("live position recovery failed", "err", err, "symbol", cfg.Symbol)
+		_ = notifier.SendStructured(ctx, notify.SeverityWarn,
+			fmt.Sprintf("live recovery FAILED\nsymbol: %s\nerror: %v", cfg.Symbol, err))
 	} else if recovered {
 		slog.Info("live position recovery: in-flight trade restored", "symbol", cfg.Symbol)
+		_ = notifier.SendStructured(ctx, notify.SeverityWarn,
+			fmt.Sprintf("live position recovered from journal\nsymbol: %s\ncohort: live", cfg.Symbol))
 	}
 
 	// Parse shadow specs first so we know how many runners to fan-out to.
@@ -284,9 +289,15 @@ func main() {
 		if recovered, err := shadowExec.RecoverFromJournal(); err != nil {
 			slog.Warn("shadow position recovery failed",
 				"err", err, "symbol", cfg.Symbol, "label", spec.Label)
+			_ = notifier.SendStructured(ctx, notify.SeverityWarn,
+				fmt.Sprintf("shadow recovery FAILED\nsymbol: %s\ncohort: %s\nerror: %v",
+					cfg.Symbol, spec.Label, err))
 		} else if recovered {
 			slog.Info("shadow position recovery: in-flight trade restored",
 				"symbol", cfg.Symbol, "label", spec.Label)
+			_ = notifier.SendStructured(ctx, notify.SeverityWarn,
+				fmt.Sprintf("shadow position recovered from journal\nsymbol: %s\ncohort: %s",
+					cfg.Symbol, spec.Label))
 		}
 
 		idx := i + 1 // live = 0, shadows = 1..N
@@ -386,5 +397,6 @@ func main() {
 	}
 
 	slog.Info("engine stopped")
-	notifier.Send(context.Background(), fmt.Sprintf("🔴 *%s* engine stopped (clean)", cfg.Symbol)) //nolint:errcheck
+	_ = notifier.SendStructured(context.Background(), notify.SeverityInfo,
+		fmt.Sprintf("engine stopped (clean)\nsymbol: %s", cfg.Symbol))
 }
