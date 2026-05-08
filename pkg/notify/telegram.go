@@ -4,10 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
+	"math/rand/v2"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -79,8 +82,14 @@ func FromEnv() *Notifier {
 	n := &Notifier{
 		BotToken: os.Getenv("TELEGRAM_BOT_TOKEN"),
 		ChatID:   os.Getenv("TELEGRAM_CHAT_ID"),
+		// Per-request timeout intentionally generous — under synchronized
+		// fleet restart (16 engines posting CRITICAL recovery alerts in the
+		// same second), a 5s timeout fired before api.telegram.org responded
+		// and dropped 5/16 alerts. 2026-05-08T15:00 incident verified.
+		// Combined with tier-aware retry in sendWithRetry, 10s gives Telegram
+		// time to flush a synchronized burst before declaring the attempt failed.
 		HTTPClient: &http.Client{
-			Timeout: 5 * time.Second,
+			Timeout: 10 * time.Second,
 		},
 		rateLimiter: newRateLimiter(),
 	}
@@ -103,8 +112,9 @@ func (n *Notifier) Send(ctx context.Context, msg string) error {
 
 // SendStructured emits an alert with locked tier semantics from the design
 // rule: rate limiting per tier, mute-hour suppression for INFO/WARN, format
-// prefix. Best-effort delivery — a failed POST is logged via slog.Warn and
-// returned, but the caller is expected to ignore it.
+// prefix. Per-tier retry policy on transient failures (see retryAttempts).
+// Final failure for CRITICAL logs via slog.Error per the locked rule; lower
+// tiers via slog.Warn. All log + return paths redact the bot token.
 func (n *Notifier) SendStructured(ctx context.Context, severity Severity, body string) error {
 	return n.sendStructuredAt(ctx, telegramAPIURL, severity, body, time.Now())
 }
@@ -140,15 +150,99 @@ func (n *Notifier) sendStructuredAt(ctx context.Context, urlFmt string, severity
 		msg += fmt.Sprintf("\n(%d additional events suppressed in last hour)", suppressed)
 	}
 
-	return sendTo(ctx, n, urlFmt, msg)
+	return n.sendWithRetry(ctx, urlFmt, msg, severity)
 }
 
-// sendTo is the internal implementation; urlFmt lets tests inject a test server URL.
+// sendTo is the legacy single-attempt path used by Send (unstructured).
+// It does NOT retry — the locked tier rule's retry contract is bound to
+// SendStructured. sendTo still benefits from token redaction.
 func sendTo(ctx context.Context, n *Notifier, urlFmt string, msg string) error {
 	if n.BotToken == "" || n.ChatID == "" {
 		return nil
 	}
+	if err := sendOnce(ctx, n, urlFmt, msg); err != nil {
+		sanitized := n.redactErr(err)
+		slog.Warn("telegram send failed", "err", sanitized)
+		return sanitized
+	}
+	return nil
+}
 
+// retryBackoffBase is the starting backoff between retry attempts. Each
+// subsequent retry doubles. Exposed as a var (not const) so tests can scale
+// it down to milliseconds without inflating runtime by 3+ seconds per case.
+var retryBackoffBase = 1 * time.Second
+
+// retryAttempts encodes the per-tier retry policy. CRITICAL must reach the
+// operator (recovery, drift, kill events) so it gets the most attempts;
+// INFO is fire-and-forget. Failures past the budget are logged via slog at
+// the matching level — slog.Error for CRITICAL per the locked tier rule,
+// slog.Warn otherwise.
+//
+//	CRITICAL: 3 attempts (initial + 2 retries) with backoff 1s, 2s + jitter
+//	WARN:     2 attempts (initial + 1 retry)  with backoff 1s + jitter
+//	INFO:     1 attempt  (no retry)
+func retryAttempts(s Severity) int {
+	switch s {
+	case SeverityCritical:
+		return 3
+	case SeverityWarn:
+		return 2
+	default:
+		return 1
+	}
+}
+
+// sendWithRetry orchestrates per-tier retry around sendOnce. Permanent
+// failures (4xx) skip retry. Synchronized fleet restarts produce a burst
+// of POSTs that occasionally trip the per-request timeout; the jittered
+// backoff de-syncs the retry wave so a thundering herd does not retry in
+// lockstep. All log + return paths redact the bot token.
+func (n *Notifier) sendWithRetry(ctx context.Context, urlFmt string, msg string, severity Severity) error {
+	attempts := retryAttempts(severity)
+	backoff := retryBackoffBase
+	var lastErr error
+
+	for i := 0; i < attempts; i++ {
+		if i > 0 {
+			// Jitter prevents 16 simultaneously-failing engines from retrying
+			// in lockstep — that would re-trigger the same thundering herd
+			// that caused the original failure. Randomized in [base, 2*base).
+			wait := backoff + time.Duration(rand.Int64N(int64(backoff)))
+			timer := time.NewTimer(wait)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return n.redactErr(ctx.Err())
+			case <-timer.C:
+			}
+			backoff *= 2
+		}
+		err := sendOnce(ctx, n, urlFmt, msg)
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+		if isPermanent(err) {
+			break
+		}
+	}
+
+	sanitized := n.redactErr(lastErr)
+	if severity == SeverityCritical {
+		slog.Error("telegram send failed (CRITICAL alert lost)",
+			"err", sanitized, "attempts", attempts)
+	} else {
+		slog.Warn("telegram send failed",
+			"err", sanitized, "attempts", attempts)
+	}
+	return sanitized
+}
+
+// sendOnce performs a single POST without retry or slog. Returns the bare
+// error which may embed the bot token in a Go net/http URL string —
+// callers must run the result through redactErr before logging or returning.
+func sendOnce(ctx context.Context, n *Notifier, urlFmt string, msg string) error {
 	body, err := json.Marshal(map[string]string{
 		"chat_id":    n.ChatID,
 		"text":       msg,
@@ -167,18 +261,61 @@ func sendTo(ctx context.Context, n *Notifier, urlFmt string, msg string) error {
 
 	resp, err := n.HTTPClient.Do(req)
 	if err != nil {
-		slog.Warn("telegram send failed", "err", err)
 		return err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
-		err = fmt.Errorf("telegram API %d", resp.StatusCode)
-		slog.Warn("telegram send failed", "status", resp.StatusCode)
+		return &telegramAPIError{StatusCode: resp.StatusCode}
+	}
+	return nil
+}
+
+// telegramAPIError is the typed error returned by sendOnce for non-2xx
+// responses. Lets isPermanent classify 4xx (don't retry — auth, invalid
+// chat, malformed message) versus 5xx (retry-eligible — server-side hiccup)
+// without string-parsing the message.
+type telegramAPIError struct {
+	StatusCode int
+}
+
+func (e *telegramAPIError) Error() string {
+	return fmt.Sprintf("telegram API %d", e.StatusCode)
+}
+
+// isPermanent reports whether retry is futile. 4xx responses won't recover
+// without operator intervention (rotate token, fix chat_id, escape Markdown);
+// 5xx and network errors typically resolve within seconds.
+func isPermanent(err error) bool {
+	if err == nil {
+		return false
+	}
+	var apiErr *telegramAPIError
+	if errors.As(err, &apiErr) {
+		return apiErr.StatusCode >= 400 && apiErr.StatusCode < 500
+	}
+	return false
+}
+
+// redactErr strips the bot token from an error string so it cannot leak
+// into /var/log on the VPS. Go's net/http embeds the request URL verbatim
+// in transport errors (e.g. `Post "https://api.telegram.org/bot<TOK>/...":
+// timeout`). When this err is logged via slog or returned to a caller that
+// logs, the token is exposed to anyone with read access to the log file.
+//
+// Any future code path that adds err logging in this package MUST go through
+// redactErr — the test suite enforces "no token in any logged err" via a
+// captured slog handler.
+func (n *Notifier) redactErr(err error) error {
+	if err == nil || n.BotToken == "" {
 		return err
 	}
-
-	return nil
+	s := err.Error()
+	redacted := strings.ReplaceAll(s, n.BotToken, "REDACTED")
+	if redacted == s {
+		return err
+	}
+	return errors.New(redacted)
 }
 
 // ── rate limiter ─────────────────────────────────────────────────────────────

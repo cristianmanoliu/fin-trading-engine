@@ -1,15 +1,19 @@
 package notify
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -350,6 +354,296 @@ func TestMuteWindow_NilSafe(t *testing.T) {
 	var mw *muteWindow
 	if mw.inMute(time.Now()) {
 		t.Error("nil muteWindow should never report inMute")
+	}
+}
+
+// ── Retry + redaction tests ──────────────────────────────────────────────────
+//
+// These cover two production failures observed 2026-05-08:
+//   1. Synchronized fleet restart produced 8 concurrent CRITICAL recovery
+//      alerts; 5/16 timed out against api.telegram.org and were dropped
+//      with no retry. Tier-aware retry now compensates.
+//   2. Go's net/http embeds the bot token in transport error strings; the
+//      previous code logged that err verbatim, leaking the token into the
+//      VPS log file. redactErr now strips it at every slog/return site.
+
+// captureSlog redirects slog.Default into a buffer for assertion. Restored
+// on test cleanup. Level is Debug so any tier's output is captured.
+func captureSlog(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var buf bytes.Buffer
+	old := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(old) })
+	return &buf
+}
+
+// withFastRetryBackoff scales retryBackoffBase to 5ms for the duration of
+// the test. Without this, CRITICAL retry tests would each take 3+ seconds.
+func withFastRetryBackoff(t *testing.T) {
+	t.Helper()
+	old := retryBackoffBase
+	retryBackoffBase = 5 * time.Millisecond
+	t.Cleanup(func() { retryBackoffBase = old })
+}
+
+// flakyServer returns 500 for the first failBefore requests, then 200.
+// Useful for testing retry-until-success paths.
+func flakyServer(failBefore int32) (urlFmt string, attempts *int32, cleanup func()) {
+	var counter int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := atomic.AddInt32(&counter, 1)
+		_, _ = io.Copy(io.Discard, r.Body)
+		if n <= failBefore {
+			http.Error(w, "internal", 500)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"ok":true}`))
+	}))
+	return srv.URL + "/bot%s/sendMessage", &counter, srv.Close
+}
+
+// failingServer always returns the configured status code.
+func failingServer(status int) (urlFmt string, attempts *int32, cleanup func()) {
+	var counter int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&counter, 1)
+		_, _ = io.Copy(io.Discard, r.Body)
+		http.Error(w, "fail", status)
+	}))
+	return srv.URL + "/bot%s/sendMessage", &counter, srv.Close
+}
+
+func TestSendStructured_Critical_RetriesOnTransient5xx(t *testing.T) {
+	withFastRetryBackoff(t)
+	urlFmt, attempts, cleanup := flakyServer(2) // 500, 500, 200
+	defer cleanup()
+
+	n := newTestNotifier()
+	now := time.Date(2026, 5, 8, 12, 0, 0, 0, time.UTC)
+	err := n.sendStructuredAt(context.Background(), urlFmt, SeverityCritical, "recovery alert", now)
+	if err != nil {
+		t.Fatalf("expected eventual success after retries, got: %v", err)
+	}
+	if got := atomic.LoadInt32(attempts); got != 3 {
+		t.Errorf("CRITICAL on flaky 5xx: attempts = %d, want 3 (initial + 2 retries)", got)
+	}
+}
+
+func TestSendStructured_Warn_RetriesOnce(t *testing.T) {
+	withFastRetryBackoff(t)
+	urlFmt, attempts, cleanup := flakyServer(1) // 500, 200
+	defer cleanup()
+
+	n := newTestNotifier()
+	now := time.Date(2026, 5, 8, 12, 0, 0, 0, time.UTC)
+	err := n.sendStructuredAt(context.Background(), urlFmt, SeverityWarn, "stale feed", now)
+	if err != nil {
+		t.Fatalf("expected success after 1 retry, got: %v", err)
+	}
+	if got := atomic.LoadInt32(attempts); got != 2 {
+		t.Errorf("WARN on flaky 5xx: attempts = %d, want 2 (initial + 1 retry)", got)
+	}
+}
+
+func TestSendStructured_Info_NoRetry(t *testing.T) {
+	withFastRetryBackoff(t)
+	urlFmt, attempts, cleanup := failingServer(500)
+	defer cleanup()
+
+	n := newTestNotifier()
+	now := time.Date(2026, 5, 8, 12, 0, 0, 0, time.UTC)
+	_ = n.sendStructuredAt(context.Background(), urlFmt, SeverityInfo, "noop ping", now)
+	// 1 attempt regardless of failure — INFO is fire-and-forget.
+	if got := atomic.LoadInt32(attempts); got != 1 {
+		t.Errorf("INFO on persistent failure: attempts = %d, want 1 (no retry)", got)
+	}
+}
+
+func TestSendStructured_Critical_4xxNotRetried(t *testing.T) {
+	withFastRetryBackoff(t)
+	urlFmt, attempts, cleanup := failingServer(401) // unauthorized → don't retry
+	defer cleanup()
+
+	n := newTestNotifier()
+	now := time.Date(2026, 5, 8, 12, 0, 0, 0, time.UTC)
+	err := n.sendStructuredAt(context.Background(), urlFmt, SeverityCritical, "test", now)
+	if err == nil {
+		t.Error("expected 401 to surface as error")
+	}
+	// Even CRITICAL must not retry on permanent 4xx — retries won't fix
+	// auth or invalid chat_id, just hammer Telegram pointlessly.
+	if got := atomic.LoadInt32(attempts); got != 1 {
+		t.Errorf("CRITICAL on 4xx: attempts = %d, want 1 (4xx is permanent, no retry)", got)
+	}
+}
+
+func TestSendStructured_Critical_FinalFailureLogsErrorLevel(t *testing.T) {
+	withFastRetryBackoff(t)
+	buf := captureSlog(t)
+	urlFmt, _, cleanup := failingServer(500)
+	defer cleanup()
+
+	n := newTestNotifier()
+	now := time.Date(2026, 5, 8, 12, 0, 0, 0, time.UTC)
+	_ = n.sendStructuredAt(context.Background(), urlFmt, SeverityCritical, "test", now)
+
+	// Per locked tier rule + post_deploy_check.sh section 5: lost CRITICAL
+	// alerts MUST be logged at ERROR level so the operator notices via the
+	// post-deploy ERROR-events check.
+	out := buf.String()
+	if !strings.Contains(out, `"level":"ERROR"`) {
+		t.Errorf("expected ERROR-level slog for lost CRITICAL, got:\n%s", out)
+	}
+	if !strings.Contains(out, "CRITICAL alert lost") {
+		t.Errorf("expected 'CRITICAL alert lost' phrase in slog message, got:\n%s", out)
+	}
+}
+
+func TestSendStructured_Warn_FinalFailureLogsWarnLevel(t *testing.T) {
+	withFastRetryBackoff(t)
+	buf := captureSlog(t)
+	urlFmt, _, cleanup := failingServer(500)
+	defer cleanup()
+
+	n := newTestNotifier()
+	now := time.Date(2026, 5, 8, 12, 0, 0, 0, time.UTC)
+	_ = n.sendStructuredAt(context.Background(), urlFmt, SeverityWarn, "test", now)
+
+	out := buf.String()
+	if !strings.Contains(out, `"level":"WARN"`) {
+		t.Errorf("expected WARN-level slog for lost WARN, got:\n%s", out)
+	}
+	// Must NOT use the CRITICAL-specific phrasing.
+	if strings.Contains(out, "CRITICAL alert lost") {
+		t.Errorf("WARN failure wrongly tagged as CRITICAL alert lost: %s", out)
+	}
+}
+
+func TestSendStructured_BotTokenNeverInSlog(t *testing.T) {
+	withFastRetryBackoff(t)
+	buf := captureSlog(t)
+	// Server that closes the connection abruptly — produces a transport
+	// error from Go's http.Client whose .Error() string includes the URL
+	// (and therefore the bot token). This is the production leak vector.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hj, ok := w.(http.Hijacker)
+		if !ok {
+			http.Error(w, "no hijack", 500)
+			return
+		}
+		conn, _, err := hj.Hijack()
+		if err != nil {
+			return
+		}
+		conn.Close() // abrupt close → http.Client returns wrapped err with URL
+	}))
+	defer srv.Close()
+
+	const token = "TELEGRAM_BOT_TOKEN_REDACTED"
+	n := &Notifier{
+		BotToken:    token,
+		ChatID:      "chat",
+		HTTPClient:  &http.Client{Timeout: 1 * time.Second},
+		rateLimiter: newRateLimiter(),
+	}
+	urlFmt := srv.URL + "/bot%s/sendMessage"
+	now := time.Date(2026, 5, 8, 12, 0, 0, 0, time.UTC)
+
+	_ = n.sendStructuredAt(context.Background(), urlFmt, SeverityCritical, "test", now)
+
+	out := buf.String()
+	if strings.Contains(out, token) {
+		t.Errorf("bot token leaked into slog output:\n%s", out)
+	}
+	if !strings.Contains(out, "REDACTED") {
+		t.Errorf("expected REDACTED placeholder in slog, got:\n%s", out)
+	}
+}
+
+func TestSendStructured_BotTokenNeverInReturnedError(t *testing.T) {
+	withFastRetryBackoff(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hj, _ := w.(http.Hijacker)
+		conn, _, _ := hj.Hijack()
+		conn.Close()
+	}))
+	defer srv.Close()
+
+	const token = "TELEGRAM_BOT_TOKEN_REDACTED"
+	n := &Notifier{
+		BotToken:    token,
+		ChatID:      "chat",
+		HTTPClient:  &http.Client{Timeout: 1 * time.Second},
+		rateLimiter: newRateLimiter(),
+	}
+	urlFmt := srv.URL + "/bot%s/sendMessage"
+	now := time.Date(2026, 5, 8, 12, 0, 0, 0, time.UTC)
+
+	err := n.sendStructuredAt(context.Background(), urlFmt, SeverityCritical, "test", now)
+	if err == nil {
+		t.Fatal("expected error from closed connection")
+	}
+	if strings.Contains(err.Error(), token) {
+		// Defense-in-depth: even if a caller logs the returned err themselves,
+		// the token must not be in it.
+		t.Errorf("bot token leaked into returned error: %v", err)
+	}
+}
+
+func TestRedactErr_NilSafe(t *testing.T) {
+	n := &Notifier{BotToken: "any"}
+	if got := n.redactErr(nil); got != nil {
+		t.Errorf("redactErr(nil) = %v, want nil", got)
+	}
+}
+
+func TestRedactErr_EmptyTokenIsPassThrough(t *testing.T) {
+	// When the Notifier has no token configured (e.g. legacy zero-value),
+	// redactErr is a no-op — preserves error wrapping for errors.Is/As.
+	n := &Notifier{} // BotToken empty
+	original := errors.New("network down")
+	got := n.redactErr(original)
+	if got != original {
+		t.Errorf("redactErr with empty token should return original err untouched, got %v", got)
+	}
+}
+
+func TestRedactErr_ReplacesAllOccurrences(t *testing.T) {
+	const token = "abc123:secret"
+	n := &Notifier{BotToken: token}
+	in := errors.New("Post \"https://api.telegram.org/bot" + token + "/sendMessage\" failed; bot" + token + " unreachable")
+	out := n.redactErr(in)
+	if strings.Contains(out.Error(), token) {
+		t.Errorf("token still present after redact: %v", out)
+	}
+	if !strings.Contains(out.Error(), "REDACTED") {
+		t.Errorf("expected REDACTED placeholder, got: %v", out)
+	}
+}
+
+func TestIsPermanent_Classification(t *testing.T) {
+	cases := []struct {
+		err  error
+		want bool
+		desc string
+	}{
+		{nil, false, "nil err"},
+		{&telegramAPIError{StatusCode: 400}, true, "400 bad request"},
+		{&telegramAPIError{StatusCode: 401}, true, "401 unauthorized (bad token)"},
+		{&telegramAPIError{StatusCode: 404}, true, "404 not found"},
+		{&telegramAPIError{StatusCode: 429}, true, "429 too many requests (still 4xx; Telegram rejects)"},
+		{&telegramAPIError{StatusCode: 500}, false, "500 internal server"},
+		{&telegramAPIError{StatusCode: 502}, false, "502 bad gateway"},
+		{&telegramAPIError{StatusCode: 503}, false, "503 service unavailable"},
+		{errors.New("net/http: request canceled"), false, "transport error (retry-eligible)"},
+		{context.DeadlineExceeded, false, "context deadline (retry-eligible)"},
+	}
+	for _, c := range cases {
+		if got := isPermanent(c.err); got != c.want {
+			t.Errorf("%s: isPermanent = %v, want %v", c.desc, got, c.want)
+		}
 	}
 }
 
