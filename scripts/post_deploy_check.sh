@@ -412,6 +412,54 @@ else
     done <<< "$RESTART_REPORT"
 fi
 
+# ── 13. Live-config compliance ────────────────────────────────────────────────
+# Catches a real pre-registration risk: someone manually `systemctl edit
+# paper-live@<sym>.service` overrides the locked strategy parameters. §3
+# (binary md5) catches code drift but not config drift — an engine running
+# the right binary with the wrong --target-rr or wrong --shadow specs is
+# silently off-spec. Per CLAUDE.md "Strategy status" + the locked rule
+# stack, the live config is:
+#
+#   --signal-tf 4H --target-rr 6.0 --side-filter short --max-hold-hours 504
+#   --fee-bps 10 --stop-slippage-bps 5
+#   --shadow alt5-15-336:5-15-336,alt5-15-504:5-15-504,bb20:bb:20-2.0-504
+#   --funding-csv-dir <any path; presence required>
+#
+# --executor is intentionally NOT checked here — STAGE_1+ promotion will
+# legitimately switch one symbol to binance_live, and §8 covers that
+# distinction. Funding-csv-dir path varies (relative on dev, absolute on
+# VPS) so we only assert the flag is present.
+echo ""
+echo "13. Live-config compliance"
+DEVIATIONS=$(ssh "${TARGET}" "for sym in $SYMBOLS_LC; do
+    es=\$(systemctl show -p ExecStart --value paper-live@\${sym}.service 2>/dev/null || true)
+    missing=''
+    for spec in \\
+        '--signal-tf 4H' \\
+        '--target-rr 6.0' \\
+        '--side-filter short' \\
+        '--max-hold-hours 504' \\
+        '--fee-bps 10' \\
+        '--stop-slippage-bps 5' \\
+        '--shadow alt5-15-336:5-15-336,alt5-15-504:5-15-504,bb20:bb:20-2.0-504' \\
+        '--funding-csv-dir'; do
+        if [[ \"\$es\" != *\"\$spec\"* ]]; then
+            missing=\"\${missing}\${missing:+; }\$spec\"
+        fi
+    done
+    if [[ -n \"\$missing\" ]]; then
+        echo \"\$sym|\$missing\"
+    fi
+done")
+if [[ -z "$DEVIATIONS" ]]; then
+    ok "all engines run locked CLAUDE.md live-config (signal-tf/target-rr/side/max-hold/fee/slip/shadow)"
+else
+    while IFS='|' read -r sym missing; do
+        [[ -z "$sym" ]] && continue
+        warn "$sym deviates from locked live-config — missing: $missing"
+    done <<< "$DEVIATIONS"
+fi
+
 # Telegram alert path uses the shared scripts/lib/notify.sh helper —
 # tier-aware retry (CRITICAL 3 / WARN 2 / INFO 1), graceful no-op when env
 # vars unset. Mirrors the Go engine's pkg/notify package semantics so a
