@@ -105,26 +105,37 @@ func main() {
 		os.Exit(3)
 	}
 
+	// Group files by (parent_dir, symbol). The parent_dir distinguishes
+	// cohort (live vs shadow/<label>); the symbol is parsed from the
+	// filename. Files within a group are processed in chronological order
+	// (filenames sort lexically because YYYY-MM is well-ordered) so a
+	// position opened in month-N and closed in month-N+1 doesn't trigger
+	// a spurious "close without open" error.
+	groups := groupBySymbolCohort(files)
+
 	totalErr, totalWarn := 0, 0
-	for _, fp := range files {
-		issues, err := validateFile(fp)
-		if err != nil {
-			fmt.Printf("[ERROR] %s: %v\n", fp, err)
-			totalErr++
-			continue
-		}
-		if len(issues) == 0 {
-			if *verbose {
-				fmt.Printf("[OK] %s\n", fp)
-			}
-			continue
-		}
-		for _, iss := range issues {
-			fmt.Printf("[%s] %s:%d  %s\n", iss.Severity, iss.File, iss.Line, iss.Msg)
-			if iss.Severity == "ERROR" {
+	for _, group := range groups {
+		state := newSymbolState()
+		for _, fp := range group {
+			issues, err := validateFile(fp, state)
+			if err != nil {
+				fmt.Printf("[ERROR] %s: %v\n", fp, err)
 				totalErr++
-			} else {
-				totalWarn++
+				continue
+			}
+			if len(issues) == 0 {
+				if *verbose {
+					fmt.Printf("[OK] %s\n", fp)
+				}
+				continue
+			}
+			for _, iss := range issues {
+				fmt.Printf("[%s] %s:%d  %s\n", iss.Severity, iss.File, iss.Line, iss.Msg)
+				if iss.Severity == "ERROR" {
+					totalErr++
+				} else {
+					totalWarn++
+				}
 			}
 		}
 	}
@@ -167,10 +178,78 @@ func discoverJournals(dir string, excludes []string) ([]string, error) {
 	return out, err
 }
 
+// symbolState tracks per-symbol in-flight position state across files for
+// the same (cohort, symbol) group. Carried across month-boundary file
+// transitions so a position opened in month-N and closed in month-N+1
+// doesn't trigger a spurious "close without open" error. Initialized
+// empty for each new group.
+type symbolState struct {
+	// inFlight: count of currently-in-flight opens per symbol. Should be
+	// 0 or 1 (engine rejects a second open while one is in flight). >1
+	// is an invariant violation worth flagging.
+	inFlight map[string]int
+
+	// seenOpens: dedup key for "duplicate open" check, scoped per file
+	// (cleared at file boundary — same (symbol, ts) appearing in adjacent
+	// files isn't a duplicate, just a continuation marker).
+	seenOpens map[openKey]int
+}
+
+type openKey struct{ Sym, TS string }
+
+func newSymbolState() *symbolState {
+	return &symbolState{
+		inFlight:  make(map[string]int),
+		seenOpens: make(map[openKey]int),
+	}
+}
+
+// groupBySymbolCohort groups files by (parent_dir, symbol-prefix). Files
+// in the same group are guaranteed to share a journal cohort (live or a
+// specific shadow label) and the same symbol; they only differ by month.
+// Sort within each group is lexical, which yields chronological order
+// because the filename schema is `<SYMBOL>-YYYY-MM.jsonl`.
+func groupBySymbolCohort(files []string) [][]string {
+	type key struct{ Dir, Sym string }
+	g := map[key][]string{}
+	var order []key
+	for _, p := range files {
+		dir := filepath.Dir(p)
+		base := filepath.Base(p)
+		// Filename schema: <SYMBOL>-YYYY-MM.jsonl  (symbol may contain digits).
+		// Suffix "-YYYY-MM.jsonl" is exactly 14 chars (dash + 4y + dash + 2m + .jsonl).
+		// Counting positions from end: "-YYYY-MM.jsonl"
+		//                              -14 -13     -9   -6
+		// So the suffix matches when: base[-14]='-', base[-9]='-', base[-13]='2'.
+		// Defensive: only strip when schema matches; otherwise treat the whole
+		// basename as the symbol (so off-schema files fall into their own
+		// group rather than being clumped wrongly).
+		sym := base
+		if len(base) > 14 && base[len(base)-14] == '-' && base[len(base)-9] == '-' &&
+			base[len(base)-13] == '2' /* year prefix; will need updating in 1000y */ {
+			sym = base[:len(base)-14]
+		}
+		k := key{Dir: dir, Sym: sym}
+		if _, ok := g[k]; !ok {
+			order = append(order, k)
+		}
+		g[k] = append(g[k], p)
+	}
+	out := make([][]string, 0, len(order))
+	for _, k := range order {
+		grp := g[k]
+		sort.Strings(grp)
+		out = append(out, grp)
+	}
+	return out
+}
+
 // validateFile reads one journal file and returns issues. A genuine I/O
 // error (file unreadable) returns err; per-line content issues are returned
-// as []issue without an outer error.
-func validateFile(path string) ([]issue, error) {
+// as []issue without an outer error. The state pointer carries
+// in-flight-position state across files in the same (cohort, symbol)
+// group so cross-month closes don't false-positive.
+func validateFile(path string, state *symbolState) ([]issue, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -178,9 +257,9 @@ func validateFile(path string) ([]issue, error) {
 	defer f.Close()
 
 	var issues []issue
-	type openKey struct{ Sym, TS string }
-	seenOpens := make(map[openKey]int) // (symbol, ts) → first-seen line number
-	openSyms := make(map[string]bool)  // symbols with at least one un-fully-closed open
+	// Reset per-file dedup state (same (sym, ts) across adjacent files is
+	// a continuation, not a duplicate).
+	state.seenOpens = make(map[openKey]int)
 
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 64*1024), 1024*1024)
@@ -229,7 +308,7 @@ func validateFile(path string) ([]issue, error) {
 		switch e.Event {
 		case "open":
 			k := openKey{e.Symbol, e.TS}
-			if firstLine, dup := seenOpens[k]; dup {
+			if firstLine, dup := state.seenOpens[k]; dup {
 				issues = append(issues, issue{
 					Severity: "WARN",
 					File:     path,
@@ -238,28 +317,39 @@ func validateFile(path string) ([]issue, error) {
 						e.Symbol, e.TS, firstLine),
 				})
 			} else {
-				seenOpens[k] = lineno
+				state.seenOpens[k] = lineno
 			}
-			openSyms[e.Symbol] = true
-
-		case "close":
-			// Invariant 2: close must have a preceding open in same file for
-			// same symbol. We don't pair specific opens with specific closes
-			// (PARTIAL semantics complicate that); just verify ANY open
-			// existed for this symbol earlier in the file.
-			if !openSyms[e.Symbol] {
+			// Invariant: in-flight count should never exceed 1 (engine
+			// rejects a second open while one is in flight).
+			if state.inFlight[e.Symbol] >= 1 {
 				issues = append(issues, issue{
 					Severity: "ERROR",
 					File:     path,
 					Line:     lineno,
-					Msg: fmt.Sprintf("close for %s without preceding open in same file — impossible state",
-						e.Symbol),
+					Msg: fmt.Sprintf("open for %s while already in-flight (count=%d) — engine should have rejected this",
+						e.Symbol, state.inFlight[e.Symbol]),
 				})
 			}
-			// A non-PARTIAL (TARGET/STOP/TIME) close terminates the position
-			// for that symbol, so the next open for the same symbol is fresh.
-			// We don't track this strictly because multiple closes for the
-			// same open (one PARTIAL, one final) are valid by design.
+			state.inFlight[e.Symbol]++
+
+		case "close":
+			// Invariant 2: close must have a preceding open — either earlier
+			// in this file or in a prior-month file in the same cohort
+			// (state map carries across files in a group).
+			if state.inFlight[e.Symbol] == 0 {
+				issues = append(issues, issue{
+					Severity: "ERROR",
+					File:     path,
+					Line:     lineno,
+					Msg: fmt.Sprintf("close for %s with no in-flight open (cohort+symbol stream)",
+						e.Symbol),
+				})
+			} else if e.Outcome != "PARTIAL" {
+				// Terminal close (TARGET/STOP/TIME) decrements in-flight.
+				// PARTIAL closes leave the position in flight (B2 mid-R
+				// partial-take followed by a later terminal close).
+				state.inFlight[e.Symbol]--
+			}
 		}
 	}
 	if err := sc.Err(); err != nil {

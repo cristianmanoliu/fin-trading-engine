@@ -34,7 +34,7 @@ func TestValidateFile_CleanJournal(t *testing.T) {
 		openLine("BTCUSDT", "2026-05-08T12:00:00Z"),
 		closeLine("BTCUSDT", "2026-05-08T14:00:00Z", "STOP"),
 	)
-	issues, err := validateFile(p)
+	issues, err := validateFile(p, newSymbolState())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +50,7 @@ func TestValidateFile_StillOpenAtEndOfFile(t *testing.T) {
 		closeLine("BTCUSDT", "2026-05-08T10:00:00Z", "TARGET"),
 		openLine("BTCUSDT", "2026-05-08T12:00:00Z"),
 	)
-	issues, err := validateFile(p)
+	issues, err := validateFile(p, newSymbolState())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +64,7 @@ func TestValidateFile_TimestampGoesBackwards(t *testing.T) {
 		openLine("BTCUSDT", "2026-05-08T08:00:00Z"),
 		closeLine("BTCUSDT", "2026-05-08T07:00:00Z", "STOP"), // earlier than open!
 	)
-	issues, err := validateFile(p)
+	issues, err := validateFile(p, newSymbolState())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,23 +77,35 @@ func TestValidateFile_TimestampGoesBackwards(t *testing.T) {
 }
 
 func TestValidateFile_DuplicateOpen(t *testing.T) {
-	// Same (symbol, ts) appearing twice = recovery firing twice.
+	// Same (symbol, ts) appearing twice produces two complementary issues:
+	// a WARN ("recovery firing twice?") describing the LIKELY CAUSE, and
+	// an ERROR ("open while already in-flight") describing the INVARIANT
+	// VIOLATION. Operators benefit from seeing both — cause + state.
 	p := writeJournal(t,
 		openLine("BTCUSDT", "2026-05-08T08:00:00Z"),
 		openLine("BTCUSDT", "2026-05-08T08:00:00Z"),
 	)
-	issues, err := validateFile(p)
+	issues, err := validateFile(p, newSymbolState())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(issues) != 1 {
-		t.Fatalf("expected 1 issue, got %d: %+v", len(issues), issues)
+	if len(issues) != 2 {
+		t.Fatalf("expected 2 issues (WARN duplicate + ERROR in-flight), got %d: %+v", len(issues), issues)
 	}
-	if issues[0].Severity != "WARN" {
-		t.Errorf("duplicate open should be WARN, got %s", issues[0].Severity)
+	hasWarn, hasErr := false, false
+	for _, iss := range issues {
+		if iss.Severity == "WARN" && strings.Contains(iss.Msg, "duplicate") {
+			hasWarn = true
+		}
+		if iss.Severity == "ERROR" && strings.Contains(iss.Msg, "in-flight") {
+			hasErr = true
+		}
 	}
-	if !strings.Contains(issues[0].Msg, "duplicate") {
-		t.Errorf("msg should mention duplicate: %q", issues[0].Msg)
+	if !hasWarn {
+		t.Error("missing WARN duplicate-open issue")
+	}
+	if !hasErr {
+		t.Error("missing ERROR in-flight invariant violation")
 	}
 }
 
@@ -102,15 +114,81 @@ func TestValidateFile_CloseWithoutOpen(t *testing.T) {
 	p := writeJournal(t,
 		closeLine("BTCUSDT", "2026-05-08T10:00:00Z", "TARGET"),
 	)
-	issues, err := validateFile(p)
+	issues, err := validateFile(p, newSymbolState())
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(issues) == 0 || issues[0].Severity != "ERROR" {
 		t.Fatalf("expected ERROR for close-without-open, got %+v", issues)
 	}
-	if !strings.Contains(issues[0].Msg, "without preceding open") {
+	if !strings.Contains(issues[0].Msg, "no in-flight open") {
 		t.Errorf("error msg unclear: %q", issues[0].Msg)
+	}
+}
+
+func TestValidateFile_CrossMonth_OpenInPriorFile_NoFalsePositive(t *testing.T) {
+	// Cross-month case: position opened in May, closed in June. The May
+	// file has an open without close (still in flight at end-of-file); the
+	// June file has a close. Without state carry-over across files, June
+	// would false-positive a "close without open" ERROR.
+	dir := t.TempDir()
+	mayFile := filepath.Join(dir, "BTCUSDT-2026-05.jsonl")
+	juneFile := filepath.Join(dir, "BTCUSDT-2026-06.jsonl")
+	if err := os.WriteFile(mayFile,
+		[]byte(openLine("BTCUSDT", "2026-05-31T22:00:00Z")+"\n"),
+		0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(juneFile,
+		[]byte(closeLine("BTCUSDT", "2026-06-01T08:00:00Z", "TARGET")+"\n"),
+		0644); err != nil {
+		t.Fatal(err)
+	}
+
+	state := newSymbolState()
+	mayIssues, err := validateFile(mayFile, state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mayIssues) != 0 {
+		t.Errorf("May file (open without close = still in flight) should be clean: %+v", mayIssues)
+	}
+	juneIssues, err := validateFile(juneFile, state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(juneIssues) != 0 {
+		t.Errorf("June file (close matching prior-month open) should be clean: %+v", juneIssues)
+	}
+	// And the carryover state should now be drained.
+	if state.inFlight["BTCUSDT"] != 0 {
+		t.Errorf("after terminal close in June, in-flight count should be 0, got %d", state.inFlight["BTCUSDT"])
+	}
+}
+
+func TestGroupBySymbolCohort_SortsChronologically(t *testing.T) {
+	// Files are grouped by parent_dir + symbol; within a group, sorted
+	// lexically (= chronologically, since YYYY-MM filename suffix is
+	// well-ordered).
+	dir := t.TempDir()
+	files := []string{
+		filepath.Join(dir, "BTCUSDT-2026-06.jsonl"),
+		filepath.Join(dir, "BTCUSDT-2026-05.jsonl"),
+		filepath.Join(dir, "ETHUSDT-2026-05.jsonl"),
+		filepath.Join(dir, "shadow", "bb20", "BTCUSDT-2026-05.jsonl"),
+	}
+	groups := groupBySymbolCohort(files)
+	if len(groups) != 3 {
+		// BTCUSDT/live (2 files), ETHUSDT/live (1), BTCUSDT/shadow-bb20 (1) = 3 groups
+		t.Fatalf("expected 3 groups, got %d: %v", len(groups), groups)
+	}
+	// Find the BTCUSDT/live group; it must be sorted with May before June.
+	for _, g := range groups {
+		if len(g) == 2 && strings.HasSuffix(filepath.Dir(g[0]), filepath.Base(dir)) {
+			if !strings.Contains(g[0], "2026-05") || !strings.Contains(g[1], "2026-06") {
+				t.Errorf("BTCUSDT/live group not chronological: %v", g)
+			}
+		}
 	}
 }
 
@@ -122,7 +200,7 @@ func TestValidateFile_PartialThenFullClose_OK(t *testing.T) {
 		closeLine("BTCUSDT", "2026-05-08T09:00:00Z", "PARTIAL"),
 		closeLine("BTCUSDT", "2026-05-08T10:00:00Z", "TARGET"),
 	)
-	issues, err := validateFile(p)
+	issues, err := validateFile(p, newSymbolState())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,7 +217,7 @@ func TestValidateFile_TrailingMalformed_TolerantWarn(t *testing.T) {
 		closeLine("BTCUSDT", "2026-05-08T10:00:00Z", "TARGET"),
 		`{"event":"open","symbol":"BTCUSDT"`, // truncated mid-write
 	)
-	issues, err := validateFile(p)
+	issues, err := validateFile(p, newSymbolState())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +240,7 @@ func TestValidateFile_MidFileMalformed_Error(t *testing.T) {
 		`garbage line in the middle`,
 		closeLine("BTCUSDT", "2026-05-08T10:00:00Z", "TARGET"),
 	)
-	issues, err := validateFile(p)
+	issues, err := validateFile(p, newSymbolState())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -231,7 +309,7 @@ func TestValidateFile_MultipleSymbolsIndependent(t *testing.T) {
 		closeLine("BTCUSDT", "2026-05-08T10:00:00Z", "TARGET"),
 		closeLine("ETHUSDT", "2026-05-08T11:00:00Z", "TARGET"),
 	)
-	issues, err := validateFile(p)
+	issues, err := validateFile(p, newSymbolState())
 	if err != nil {
 		t.Fatal(err)
 	}
