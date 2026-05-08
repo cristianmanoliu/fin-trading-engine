@@ -383,6 +383,35 @@ elif command -v jq >/dev/null 2>&1; then
     fi
 fi
 
+# ── 12. Restart-loop detection ────────────────────────────────────────────────
+# Section 1 verifies engines are active *right now* and section 4 checks
+# heartbeat freshness, but neither catches the failure mode where systemd
+# is auto-restarting a crash-on-startup engine. Between restarts the engine
+# IS "active" briefly and section 4's heartbeat may not yet be stale, so a
+# repeated-crash loop hides in plain sight. Count systemd-Started events
+# per engine over the last hour; >2 implies more than one planned restart;
+# >5 implies a real loop.
+echo ""
+echo "12. Restart-loop detection (last 1 hour)"
+RESTART_REPORT=$(ssh "${TARGET}" "for sym in $SYMBOLS_LC; do
+    n=\$(journalctl -u paper-live@\${sym}.service --since '1 hour ago' --no-pager 2>/dev/null | grep -c 'Started paper-live' || true)
+    if [[ \$n -gt 2 ]]; then
+        echo \"\$sym|\$n\"
+    fi
+done")
+if [[ -z "$RESTART_REPORT" ]]; then
+    ok "no engines restarted >2 times in last hour"
+else
+    while IFS='|' read -r sym n; do
+        [[ -z "$sym" ]] && continue
+        if [[ "$n" -gt 5 ]]; then
+            warn "$sym restarted $n times in last hour (>5 — restart LOOP, investigate now)"
+        else
+            warn "$sym restarted $n times in last hour (>2 — verify no crash-on-startup pattern)"
+        fi
+    done <<< "$RESTART_REPORT"
+fi
+
 # Telegram alert path uses the shared scripts/lib/notify.sh helper —
 # tier-aware retry (CRITICAL 3 / WARN 2 / INFO 1), graceful no-op when env
 # vars unset. Mirrors the Go engine's pkg/notify package semantics so a
