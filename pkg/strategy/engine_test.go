@@ -131,3 +131,142 @@ func TestRunner_CandleTooStale_FutureCandle_NotStale(t *testing.T) {
 		t.Error("liveMode=true + future-dated candle: reported stale (clock-skew defense broken)")
 	}
 }
+
+// ── HandleCandle / HandleTick routing tests ───────────────────────────────────
+//
+// HandleCandle and HandleTick form the deterministic backtest pipeline (cmd/backtest
+// drives them directly rather than going through the Run channel-select loop).
+// The routing logic is small but load-bearing: a 4H candle ALWAYS updates bias
+// (regardless of signalTF), and ONLY a candle matching signalTF feeds the
+// EntryDetector. A regression that swapped the order, broke the timeframe
+// match, or routed every candle to the detector would silently change every
+// backtest result.
+
+// recordingExecutor captures executor calls for assertions. Threadsafe is not
+// required since Runner is single-goroutine by design.
+type recordingExecutor struct {
+	ticks   []models.Tick
+	signals []*models.Signal
+	summary int
+}
+
+func (e *recordingExecutor) OnTick(t models.Tick)      { e.ticks = append(e.ticks, t) }
+func (e *recordingExecutor) OnSignal(s *models.Signal) { e.signals = append(e.signals, s) }
+func (e *recordingExecutor) Summary()                  { e.summary++ }
+
+// newTestRunner constructs a minimal Runner. nil channels are fine because
+// HandleCandle/HandleTick don't read from them — only Run() does.
+// EMAMode: true matches the live production config and allocates the
+// detector.ema9/ema21 fields the routing tests inspect.
+func newTestRunner(signalTF models.Timeframe, exec Executor) *Runner {
+	if exec == nil {
+		exec = &recordingExecutor{}
+	}
+	cfg := EntryConfig{SignalTimeframe: signalTF, EMAMode: true}
+	return NewRunner(nil, nil, nil, nil, nil, nil, nil, nil, cfg, exec)
+}
+
+func TestRunner_HandleCandle_4H_UpdatesBias_RegardlessOfSignalTF(t *testing.T) {
+	// 4H candles ALWAYS update the bias tracker, even when signalTF is 5m
+	// (the legacy default). Bias gates breakout entries; detaching it from
+	// 4H would silently change which trades pass the bias filter.
+	r := newTestRunner(models.Timeframe5m, nil) // signalTF != 4H
+	r.HandleCandle(models.Candle{
+		Timeframe: models.Timeframe4H,
+		Open:      100,
+		Close:     110, // green → bullish first candle → Long
+		CloseTime: time.Now(),
+	})
+	if r.bias.Direction() != models.Long {
+		t.Errorf("HandleCandle(4H green) didn't update bias: got %v, want Long", r.bias.Direction())
+	}
+}
+
+func TestRunner_HandleCandle_MatchingSignalTF_FeedsDetector(t *testing.T) {
+	// A candle whose Timeframe matches signalTF is fed to the EntryDetector
+	// via AddCandle. After 9 such candles, the inner EMA9 should be primed.
+	r := newTestRunner(models.Timeframe4H, nil)
+	for i := 0; i < 9; i++ {
+		r.HandleCandle(models.Candle{
+			Timeframe: models.Timeframe4H,
+			Open:      100 + float64(i),
+			Close:     100 + float64(i) + 1,
+			CloseTime: time.Now(),
+		})
+	}
+	if !r.detector.ema9.Primed() {
+		t.Error("HandleCandle(4H, signalTF=4H) × 9 didn't prime EMA9 — detector not receiving matching candles")
+	}
+}
+
+func TestRunner_HandleCandle_NonMatchingSignalTF_DoesNotFeedDetector(t *testing.T) {
+	// signalTF=4H means ONLY 4H candles feed the detector. 5m candles must
+	// pass through HandleCandle without affecting detector state. A regression
+	// that fed everything to the detector would invert backtest signal counts
+	// (5m crosses being read as 4H crosses, or vice versa).
+	r := newTestRunner(models.Timeframe4H, nil)
+	for i := 0; i < 9; i++ {
+		r.HandleCandle(models.Candle{
+			Timeframe: models.Timeframe5m,
+			Open:      100 + float64(i),
+			Close:     100 + float64(i) + 1,
+			CloseTime: time.Now(),
+		})
+	}
+	if r.detector.ema9.Primed() {
+		t.Error("HandleCandle(5m, signalTF=4H) × 9 primed EMA9 — non-matching candles should be filtered out")
+	}
+}
+
+func TestRunner_HandleTick_CallsExecutorOnTick(t *testing.T) {
+	// Every tick must reach the executor (Stub uses OnTick to manage exits).
+	// A regression that dropped this wiring would freeze position lifecycle —
+	// stops/targets/max-hold would never trigger.
+	exec := &recordingExecutor{}
+	r := newTestRunner(models.Timeframe5m, exec)
+	tick := models.Tick{
+		Symbol:    "BTCUSDT",
+		Price:     100,
+		Timestamp: time.Now(),
+		Volume:    1.0,
+	}
+	r.HandleTick(tick)
+	if len(exec.ticks) != 1 {
+		t.Fatalf("HandleTick: executor.OnTick called %d times, want 1", len(exec.ticks))
+	}
+	if exec.ticks[0].Price != 100 {
+		t.Errorf("OnTick received wrong price: %v, want 100", exec.ticks[0].Price)
+	}
+	if exec.ticks[0].Symbol != "BTCUSDT" {
+		t.Errorf("OnTick received wrong symbol: %q, want BTCUSDT", exec.ticks[0].Symbol)
+	}
+}
+
+func TestRunner_HandleTick_UpdatesVWAP(t *testing.T) {
+	// HandleTick must update the VWAP indicator. VWAP feeds entry detection
+	// (signal context records the value at signal-emission time, and VWAP
+	// distance is a feature in the EMA-cross signal context). Skipping the
+	// update here would silently zero out VWAP-derived signals.
+	exec := &recordingExecutor{}
+	r := newTestRunner(models.Timeframe5m, exec)
+	r.HandleTick(models.Tick{
+		Symbol:    "BTCUSDT",
+		Price:     100,
+		Timestamp: time.Now(),
+		Volume:    1.0,
+	})
+	if r.vwap.Value() == 0 {
+		t.Error("HandleTick: VWAP not updated (Value() returned 0 after a non-zero tick)")
+	}
+}
+
+func TestRunner_NewRunner_SignalTFDefaultsTo5m(t *testing.T) {
+	// Per NewRunner: empty SignalTimeframe in config → defaults to 5m.
+	// This is the legacy behavior; current production overrides to 4H, but
+	// the default must be preserved so existing per-symbol configs still
+	// resolve correctly when the field is absent.
+	r := NewRunner(nil, nil, nil, nil, nil, nil, nil, nil, EntryConfig{}, &recordingExecutor{})
+	if r.signalTF != models.Timeframe5m {
+		t.Errorf("NewRunner default signalTF = %q, want %q", r.signalTF, models.Timeframe5m)
+	}
+}
