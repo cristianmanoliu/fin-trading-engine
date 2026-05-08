@@ -92,6 +92,40 @@ func main() {
 	exclude := flag.String("exclude", "", "comma-separated path substrings to skip (e.g., 'archive,old_runs'); useful for frozen historical journals whose pre-fix issues are known and immutable")
 	strict := flag.Bool("strict", false, "treat warnings as errors (exit 2 instead of 1)")
 	verbose := flag.Bool("verbose", false, "print files with no issues too (default: only print files with issues)")
+
+	flag.Usage = func() {
+		fmt.Fprintf(os.Stderr, `journal_validate: self-consistency checker for paper-live JSONL trade journals.
+
+Invariants checked (per-cohort-per-symbol stream, cross-month aware):
+  • timestamps monotonic within each file
+  • no duplicate (symbol, ts) opens (recovery firing twice would emit this)
+  • close events have a preceding in-flight open (cross-file aware so a
+    close in month-N+1 matching an open in month-N doesn't false-positive)
+  • no open while one is already in flight for the same symbol+cohort
+  • cost-decomp invariant on closes: pnl_usd ≈ gross_usd - fee_usd - slip_usd - funding_usd
+    (gated on notional_usd > 0 to skip pre-decomp closes; 5-cent tolerance)
+
+Tolerated (matches engine recovery semantics):
+  • single trailing malformed line → WARN (engine recovery accepts this for crash-mid-flush)
+  • open without close at end-of-stream (position still in flight)
+  • PARTIAL close followed by terminal close (B2 mid-R partial-take)
+
+Exit codes:
+  0  CLEAN              no issues
+  1  WARN-only          warnings present, no errors (--strict promotes to 2)
+  2  ERROR              at least one invariant violated
+  3  USAGE / I/O        bad flags / unreadable directory / no jsonl files
+
+Examples:
+  journal_validate --dir /var/log/paper-live/journal --exclude archive
+  journal_validate --dir ./logs/journal --strict
+  journal_validate --dir ./logs/journal --verbose
+
+Flags:
+`)
+		flag.PrintDefaults()
+	}
+
 	flag.Parse()
 
 	if *dir == "" {
