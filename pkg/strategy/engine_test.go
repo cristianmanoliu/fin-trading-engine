@@ -1,6 +1,7 @@
 package strategy
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -268,5 +269,190 @@ func TestRunner_NewRunner_SignalTFDefaultsTo5m(t *testing.T) {
 	r := NewRunner(nil, nil, nil, nil, nil, nil, nil, nil, EntryConfig{}, &recordingExecutor{})
 	if r.signalTF != models.Timeframe5m {
 		t.Errorf("NewRunner default signalTF = %q, want %q", r.signalTF, models.Timeframe5m)
+	}
+}
+
+// ── Run() lifecycle tests ─────────────────────────────────────────────────────
+//
+// Run is the main event loop. Two distinct exit paths with different semantics:
+//   1. All input channels close naturally → loop exits → executor.Summary() runs
+//      (this is the cmd/backtest path: CSVReplay drains, channels close, the
+//      end-of-run report fires)
+//   2. ctx.Done() fires → return from inside select → Summary() does NOT run
+//      (this is the cmd/engine SIGTERM path: paper-live cleanup is journal-only;
+//      a final summary log line on shutdown would be misleading mid-run)
+//
+// The closed-channel-is-nilled invariant (r.candle4H = nil after !ok) is what
+// prevents busy-looping on the zero-value receive of a closed channel. If
+// removed, the loop would spin at 100% CPU receiving zero candles repeatedly.
+
+// runnerWithChannels is a test helper that builds a Runner over fresh
+// bidirectional channels (so the test can close them) and returns both the
+// Runner and the channels for sending.
+type runnerChannels struct {
+	c4H, c30m, c5m, c1H, c2H, c1D chan models.Candle
+	ticks                         chan models.Tick
+}
+
+func newRunnerWithChannels(exec Executor) (*Runner, runnerChannels) {
+	if exec == nil {
+		exec = &recordingExecutor{}
+	}
+	chs := runnerChannels{
+		c4H:   make(chan models.Candle),
+		c30m:  make(chan models.Candle),
+		c5m:   make(chan models.Candle),
+		c1H:   make(chan models.Candle),
+		c2H:   make(chan models.Candle),
+		c1D:   make(chan models.Candle),
+		ticks: make(chan models.Tick, 1),
+	}
+	r := NewRunner(chs.c4H, chs.c30m, chs.c5m, chs.c1H, chs.c2H, chs.c1D, chs.ticks,
+		nil, EntryConfig{SignalTimeframe: models.Timeframe5m, EMAMode: true}, exec)
+	return r, chs
+}
+
+func TestRunner_Run_AllChannelsClosed_CallsSummaryOnce(t *testing.T) {
+	// Backtest-style termination: every input channel drains naturally. Run
+	// should exit and call executor.Summary exactly once (the end-of-run report).
+	exec := &recordingExecutor{}
+	r, chs := newRunnerWithChannels(exec)
+
+	close(chs.c4H)
+	close(chs.c30m)
+	close(chs.c5m)
+	close(chs.c1H)
+	close(chs.c2H)
+	close(chs.c1D)
+	close(chs.ticks)
+
+	done := make(chan struct{})
+	go func() {
+		r.Run(context.Background())
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// success
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run did not exit within 2s after all channels closed — busy-loop on closed channel suspected")
+	}
+
+	if exec.summary != 1 {
+		t.Errorf("Summary called %d times, want 1 (post-natural-drain report)", exec.summary)
+	}
+}
+
+func TestRunner_Run_ContextCancel_DoesNotCallSummary(t *testing.T) {
+	// Engine-style termination: SIGTERM cancels ctx before channels drain.
+	// Run returns early from inside the select; Summary should NOT fire
+	// (a mid-run summary line would be misleading — the run is incomplete).
+	exec := &recordingExecutor{}
+	r, _ := newRunnerWithChannels(exec)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		r.Run(ctx)
+		close(done)
+	}()
+
+	cancel()
+
+	select {
+	case <-done:
+		// success
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run did not exit within 2s after ctx cancel")
+	}
+
+	if exec.summary != 0 {
+		t.Errorf("Summary called %d times after ctx cancel, want 0 (mid-run cancel must not emit summary)", exec.summary)
+	}
+}
+
+func TestRunner_Run_TickFlow_ReachesExecutor(t *testing.T) {
+	// A tick sent before channels close must reach executor.OnTick via the
+	// Run() select loop (this is a different code path than HandleTick — the
+	// case branch in Run does the same work but tests the dispatch).
+	exec := &recordingExecutor{}
+	r, chs := newRunnerWithChannels(exec)
+
+	chs.ticks <- models.Tick{
+		Symbol:    "BTCUSDT",
+		Price:     12345.67,
+		Volume:    1.0,
+		Timestamp: time.Now(),
+	}
+	close(chs.ticks)
+	close(chs.c4H)
+	close(chs.c30m)
+	close(chs.c5m)
+	close(chs.c1H)
+	close(chs.c2H)
+	close(chs.c1D)
+
+	done := make(chan struct{})
+	go func() {
+		r.Run(context.Background())
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run did not exit within 2s")
+	}
+
+	if len(exec.ticks) != 1 {
+		t.Fatalf("OnTick called %d times, want 1", len(exec.ticks))
+	}
+	if exec.ticks[0].Price != 12345.67 {
+		t.Errorf("OnTick received wrong price: %v, want 12345.67", exec.ticks[0].Price)
+	}
+}
+
+func TestRunner_Run_PartialChannelClose_ContinuesUntilAllClose(t *testing.T) {
+	// Closing one channel sets that channel to nil (loop ignores it from then
+	// on) but other channels remain active. The for-condition is OR-of-all,
+	// so the loop continues until ALL channels close. A bug that AND-ed the
+	// flags would exit on first close. This test pins the OR semantics.
+	exec := &recordingExecutor{}
+	r, chs := newRunnerWithChannels(exec)
+
+	// Close 6 of 7 channels first; one stays open with no sender.
+	close(chs.c4H)
+	close(chs.c30m)
+	close(chs.c5m)
+	close(chs.c1H)
+	close(chs.c2H)
+	close(chs.c1D)
+
+	done := make(chan struct{})
+	go func() {
+		r.Run(context.Background())
+		close(done)
+	}()
+
+	// With ticks still open and no sender, Run should still be running
+	// (blocked on select). Verify it has NOT exited prematurely.
+	select {
+	case <-done:
+		t.Fatal("Run exited with one channel still open (AND-vs-OR regression)")
+	case <-time.After(50 * time.Millisecond):
+		// expected — still running
+	}
+
+	// Now close the last channel; loop should exit and emit Summary.
+	close(chs.ticks)
+	select {
+	case <-done:
+		// success
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run did not exit within 2s after final channel close")
+	}
+	if exec.summary != 1 {
+		t.Errorf("Summary called %d times, want 1", exec.summary)
 	}
 }
