@@ -40,6 +40,7 @@ func main() {
 	emaSlowPeriod := flag.Int("ema-slow-period", 0, "slow EMA period for live strategy (default 21 when EMAMode is true)")
 	signalContextDir := flag.String("signal-context-dir", "", "directory for signal-context JSONL sidecars; written per-runner under <dir>/<label>/<symbol>-<month>.jsonl. Off by default; when unset and PAPER_LIVE_SIGNAL_CONTEXT_DIR env is set, that env value is used.")
 	executorMode := flag.String("executor", "stub", "executor mode: stub (paper-money default — current paper-live deploy) | binance_live_testnet (Layer 2 integration gate; orders go to testnet.binancefuture.com, prices stay on production fapi) | binance_live (real money, STAGE_1+ promotion). binance_live and binance_live_testnet both require BINANCE_API_KEY and BINANCE_API_SECRET env vars (testnet uses SEPARATE credentials from mainnet) and only govern the LIVE runner — shadow runners always use stub by design.")
+	layer3TestnetJournalDir := flag.String("layer3-binance-testnet-journal-dir", "", "Layer 3 shadow-parity gate (per real_money_executor_architecture_decision_rule_2026-05-08.md): when set, the LIVE runner is wrapped in a TeeExecutor that fans signals/ticks to BOTH the configured Stub primary AND a BinanceLiveTestnet shadow whose journals land in this directory. Both executors see identical ticks (single-engine, single-subscription) — exactly the 'same input ticks' the locked rule requires. Diff via cmd/journal_diff after ≥7d. Requires --executor=stub (real-money primary forbidden) and BINANCE_API_KEY/BINANCE_API_SECRET (testnet credentials).")
 	flag.Parse()
 
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
@@ -337,6 +338,67 @@ func main() {
 	default:
 		slog.Error("invalid --executor; must be 'stub', 'binance_live_testnet', or 'binance_live'", "got", *executorMode)
 		os.Exit(1)
+	}
+
+	// Layer 3 shadow-parity wrap. When --layer3-binance-testnet-journal-dir
+	// is set, fan the live runner's signals/ticks to BOTH the existing Stub
+	// primary AND a BinanceLiveTestnet shadow that journals separately.
+	// Both executors see identical ticks (this is the locked-rule "same
+	// input ticks" semantics — single engine, single subscription). After
+	// ≥7d, operator runs cmd/journal_diff against the two journals to
+	// validate the 0.5%-pnl tolerance. Constraint: live executor must be
+	// stub (real-money primary forbidden — wrapping that would silently
+	// double real-money exposure).
+	if *layer3TestnetJournalDir != "" {
+		if *executorMode != "stub" && *executorMode != "" {
+			slog.Error("--layer3-binance-testnet-journal-dir requires --executor=stub (cannot wrap a real-money primary)",
+				"executor", *executorMode)
+			os.Exit(1)
+		}
+		apiKey := os.Getenv("BINANCE_API_KEY")
+		apiSecret := os.Getenv("BINANCE_API_SECRET")
+		if apiKey == "" || apiSecret == "" {
+			slog.Error("--layer3-binance-testnet-journal-dir requires BINANCE_API_KEY and BINANCE_API_SECRET env vars (testnet credentials)",
+				"symbol", cfg.Symbol)
+			_ = notifier.SendStructured(ctx, notify.SeverityWarn,
+				fmt.Sprintf("STARTUP FAILED on %s — --layer3-binance-testnet-journal-dir without BINANCE_API_KEY/BINANCE_API_SECRET env vars",
+					cfg.Symbol))
+			os.Exit(1)
+		}
+		blShadow := execution.NewBinanceLiveTestnet(cfg.Symbol, cfg.Strategy.StakeUSDT, apiKey, apiSecret)
+		blShadow.JournalPath = *layer3TestnetJournalDir
+		blShadow.FeeBps = *feeBps
+		blShadow.StopSlippageBps = *stopSlippageBps
+		blShadow.MaxHoldHours = *maxHoldHours
+		blShadow.Notifier = notifier
+		blShadow.PositionReconciler.Notifier = notifier
+
+		// Same recovery + drift-block flow as the testnet executor mode.
+		if recovered, err := blShadow.RecoverFromJournal(ctx); err != nil {
+			if errors.Is(err, execution.ErrRecoveryDrift) {
+				slog.Error("STARTUP BLOCKED: layer3 shadow recovery drift — operator must reconcile + restart",
+					"symbol", cfg.Symbol, "err", err)
+				_ = notifier.SendStructured(ctx, notify.SeverityWarn,
+					fmt.Sprintf("STARTUP BLOCKED on %s (LAYER 3) — shadow recovery drift\n%v",
+						cfg.Symbol, err))
+				os.Exit(2)
+			}
+			slog.Error("layer3 shadow recovery failed (non-drift)", "err", err, "symbol", cfg.Symbol)
+			_ = notifier.SendStructured(ctx, notify.SeverityWarn,
+				fmt.Sprintf("STARTUP FAILED on %s (LAYER 3) — shadow recovery error\n%v", cfg.Symbol, err))
+			os.Exit(2)
+		} else if recovered {
+			slog.Info("layer3 shadow position recovered + verified clean", "symbol", cfg.Symbol)
+		}
+
+		exec = &execution.TeeExecutor{Primary: exec, Shadow: blShadow}
+		liveBinance = blShadow // ensures the PositionReconciler goroutine starts for the testnet shadow
+
+		slog.Warn("LAYER 3 SHADOW MODE ACTIVE — paper Stub primary + BinanceLive(testnet) shadow on same ticks",
+			"symbol", cfg.Symbol, "shadow_journal_dir", *layer3TestnetJournalDir, "api_base", execution.TestnetAPIBaseURL)
+		_ = notifier.SendStructured(ctx, notify.SeverityWarn,
+			fmt.Sprintf("LAYER 3 shadow mode started on %s\nstub primary + testnet shadow on identical ticks\nshadow_journal_dir: %s\nhost: %s",
+				cfg.Symbol, *layer3TestnetJournalDir, hostname))
 	}
 
 	// Parse shadow specs first so we know how many runners to fan-out to.
