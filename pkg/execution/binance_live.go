@@ -384,14 +384,81 @@ type KillSwitch struct {
 	Router *OrderRouter
 }
 
-// KillAll synchronously closes every open position via market orders.
-// Best-effort: if one symbol's close fails, the others still close;
-// the failure is reported in the result. Idempotent — re-running is
-// safe (closes already-closed = no-op).
+// ClosePosition describes a position that KillAll needs to close. Decoupled
+// from PositionReconciler's internal type so KillAll is testable without a
+// running reconciler — caller passes whatever positions it knows about.
+type ClosePosition struct {
+	Symbol   string
+	Side     models.Direction // current position direction (Long/Short)
+	Quantity float64          // contracts to close
+	AvgEntry float64          // avg entry price (informational; included in result)
+}
+
+// KillOutcome is the per-symbol result of a KillAll attempt.
+type KillOutcome struct {
+	Symbol    string
+	Status    string  // "CLOSED" | "PARTIAL" | "FAILED"
+	Requested float64 // intended close quantity
+	Filled    float64 // actual filled quantity
+	AvgPrice  float64 // exchange-reported avg fill price
+	Error     string  // populated when Status == "FAILED"
+}
+
+// KillResult aggregates per-symbol outcomes across the whole kill batch.
+type KillResult struct {
+	Reason   string
+	Outcomes []KillOutcome
+}
+
+// KillAll synchronously closes every position in the input list via market
+// orders. Best-effort: a single failed close does NOT stop iteration; the
+// remaining positions still attempt close. Returns the aggregated KillResult
+// always; the error return is non-nil when ANY position failed (caller can
+// inspect the result for per-symbol detail).
 //
-// Skeleton: errors immediately. Real implementation will iterate the
-// reconciler's positions map, send a market-close OrderIntent per
-// position, and return the aggregated result.
-func (k *KillSwitch) KillAll(_ context.Context, _ string) error {
-	return ErrStageNotPromoted
+// Idempotent — re-running with the same positions is safe (closing an
+// already-closed position returns 4xx from Binance which the result records
+// as FAILED with the exchange's reject code; caller can filter those out).
+//
+// Bypasses SafetyGates by design.
+func (k *KillSwitch) KillAll(ctx context.Context, positions []ClosePosition, reason string) (KillResult, error) {
+	result := KillResult{Reason: reason}
+	if k.Router == nil {
+		return result, fmt.Errorf("KillSwitch not configured: Router nil")
+	}
+
+	failureCount := 0
+	for _, pos := range positions {
+		intent := OrderIntent{
+			Symbol:     pos.Symbol,
+			Side:       pos.Side,
+			Quantity:   pos.Quantity,
+			Type:       "MARKET",
+			ReduceOnly: true, // CLOSE — mapToExchangeSide flips the direction
+		}
+		orderResult, err := k.Router.SendOrder(ctx, intent)
+		outcome := KillOutcome{
+			Symbol:    pos.Symbol,
+			Requested: pos.Quantity,
+			Filled:    orderResult.FilledQty,
+			AvgPrice:  orderResult.AvgPrice,
+		}
+		switch {
+		case err != nil:
+			outcome.Status = "FAILED"
+			outcome.Error = err.Error()
+			failureCount++
+		case orderResult.FilledQty < pos.Quantity:
+			outcome.Status = "PARTIAL"
+		default:
+			outcome.Status = "CLOSED"
+		}
+		result.Outcomes = append(result.Outcomes, outcome)
+	}
+
+	if failureCount > 0 {
+		return result, fmt.Errorf("KillAll: %d of %d positions failed (reason=%q)",
+			failureCount, len(positions), reason)
+	}
+	return result, nil
 }

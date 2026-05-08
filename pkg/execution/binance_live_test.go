@@ -388,11 +388,160 @@ func TestSafetyGates_Ordering_GateAFailsBeforeGateB(t *testing.T) {
 	}
 }
 
-func TestKillSwitch_KillAll_ErrorsOnSkeleton(t *testing.T) {
-	k := &KillSwitch{}
-	err := k.KillAll(context.Background(), "manual test")
-	if !errors.Is(err, ErrStageNotPromoted) {
-		t.Errorf("KillAll err = %v, want ErrStageNotPromoted", err)
+func TestKillSwitch_KillAll_NotConfigured(t *testing.T) {
+	k := &KillSwitch{} // Router nil
+	_, err := k.KillAll(context.Background(), nil, "test")
+	if err == nil || !strings.Contains(err.Error(), "not configured") {
+		t.Errorf("KillAll with nil Router: expected 'not configured' err, got %v", err)
+	}
+}
+
+func TestKillSwitch_KillAll_EmptyPositions_NoError(t *testing.T) {
+	// Idempotent: empty list is valid input, returns clean.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+		w.Write([]byte(`{"orderId":1,"status":"FILLED","executedQty":"0","avgPrice":"0"}`))
+	}))
+	defer srv.Close()
+	r := &OrderRouter{
+		APIBaseURL: srv.URL, APIKey: "k", APISecret: "s", HTTPClient: srv.Client(),
+	}
+	k := &KillSwitch{Router: r}
+	res, err := k.KillAll(context.Background(), nil, "no-op test")
+	if err != nil {
+		t.Errorf("empty positions: expected nil err, got %v", err)
+	}
+	if len(res.Outcomes) != 0 {
+		t.Errorf("empty positions: outcomes = %d, want 0", len(res.Outcomes))
+	}
+	if res.Reason != "no-op test" {
+		t.Errorf("Reason not preserved: %q", res.Reason)
+	}
+}
+
+func TestKillSwitch_KillAll_SingleSuccess(t *testing.T) {
+	// Track which side the close order used (verify Long-position close → SELL).
+	var capturedSide string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Side is in the URL query string.
+		if strings.Contains(r.URL.RawQuery, "side=SELL") {
+			capturedSide = "SELL"
+		} else if strings.Contains(r.URL.RawQuery, "side=BUY") {
+			capturedSide = "BUY"
+		}
+		w.WriteHeader(200)
+		w.Write([]byte(`{"orderId":42,"status":"FILLED","executedQty":"0.5","avgPrice":"50000.5"}`))
+	}))
+	defer srv.Close()
+	r := &OrderRouter{
+		APIBaseURL: srv.URL, APIKey: "k", APISecret: "s", HTTPClient: srv.Client(),
+	}
+	k := &KillSwitch{Router: r}
+
+	res, err := k.KillAll(context.Background(),
+		[]ClosePosition{
+			{Symbol: "BTCUSDT", Side: models.Long, Quantity: 0.5, AvgEntry: 49500},
+		},
+		"test kill")
+	if err != nil {
+		t.Fatalf("expected nil err on success, got %v", err)
+	}
+	if len(res.Outcomes) != 1 {
+		t.Fatalf("outcomes = %d, want 1", len(res.Outcomes))
+	}
+	if res.Outcomes[0].Status != "CLOSED" {
+		t.Errorf("Status = %q, want CLOSED", res.Outcomes[0].Status)
+	}
+	if res.Outcomes[0].Filled != 0.5 {
+		t.Errorf("Filled = %v, want 0.5", res.Outcomes[0].Filled)
+	}
+	// Long position close → SELL on the exchange (per mapToExchangeSide reduceOnly flip).
+	if capturedSide != "SELL" {
+		t.Errorf("close-Long side = %q, want SELL", capturedSide)
+	}
+}
+
+func TestKillSwitch_KillAll_ShortClose_MapsToBuy(t *testing.T) {
+	var capturedSide string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.RawQuery, "side=BUY") {
+			capturedSide = "BUY"
+		}
+		w.Write([]byte(`{"orderId":1,"status":"FILLED","executedQty":"0.5","avgPrice":"50000"}`))
+	}))
+	defer srv.Close()
+	r := &OrderRouter{APIBaseURL: srv.URL, APIKey: "k", APISecret: "s", HTTPClient: srv.Client()}
+	k := &KillSwitch{Router: r}
+
+	_, err := k.KillAll(context.Background(),
+		[]ClosePosition{{Symbol: "BTCUSDT", Side: models.Short, Quantity: 0.5}},
+		"test")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if capturedSide != "BUY" {
+		t.Errorf("close-Short side = %q, want BUY", capturedSide)
+	}
+}
+
+func TestKillSwitch_KillAll_FailureContinues_AggregatesErrors(t *testing.T) {
+	// One symbol returns 400 (REJECTED), one returns 200 (CLOSED). KillAll
+	// should attempt both, aggregate per-symbol outcomes, and return a
+	// non-nil error noting the partial failure.
+	callCount := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		if callCount == 1 {
+			w.WriteHeader(400)
+			w.Write([]byte(`{"code":-2010,"msg":"insufficient margin"}`))
+		} else {
+			w.WriteHeader(200)
+			w.Write([]byte(`{"orderId":2,"status":"FILLED","executedQty":"1.0","avgPrice":"3000"}`))
+		}
+	}))
+	defer srv.Close()
+	r := &OrderRouter{APIBaseURL: srv.URL, APIKey: "k", APISecret: "s", HTTPClient: srv.Client()}
+	k := &KillSwitch{Router: r}
+
+	res, err := k.KillAll(context.Background(),
+		[]ClosePosition{
+			{Symbol: "BTCUSDT", Side: models.Long, Quantity: 0.5}, // will fail
+			{Symbol: "ETHUSDT", Side: models.Long, Quantity: 1.0}, // will succeed
+		},
+		"partial test")
+	if err == nil {
+		t.Fatal("expected aggregated err when 1/2 failed")
+	}
+	if !strings.Contains(err.Error(), "1 of 2") {
+		t.Errorf("err missing aggregate count: %q", err.Error())
+	}
+	if len(res.Outcomes) != 2 {
+		t.Fatalf("outcomes = %d, want 2 (both attempted)", len(res.Outcomes))
+	}
+	if res.Outcomes[0].Status != "FAILED" {
+		t.Errorf("first outcome Status = %q, want FAILED", res.Outcomes[0].Status)
+	}
+	if res.Outcomes[1].Status != "CLOSED" {
+		t.Errorf("second outcome Status = %q, want CLOSED (failure didn't stop iteration)", res.Outcomes[1].Status)
+	}
+}
+
+func TestKillSwitch_KillAll_PartialFill_ReportedAsPARTIAL(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"orderId":1,"status":"PARTIALLY_FILLED","executedQty":"0.3","avgPrice":"50000"}`))
+	}))
+	defer srv.Close()
+	r := &OrderRouter{APIBaseURL: srv.URL, APIKey: "k", APISecret: "s", HTTPClient: srv.Client()}
+	k := &KillSwitch{Router: r}
+
+	res, _ := k.KillAll(context.Background(),
+		[]ClosePosition{{Symbol: "BTCUSDT", Side: models.Long, Quantity: 0.5}},
+		"partial-fill test")
+	if len(res.Outcomes) != 1 || res.Outcomes[0].Status != "PARTIAL" {
+		t.Errorf("partial fill: expected PARTIAL outcome, got %+v", res.Outcomes)
+	}
+	if res.Outcomes[0].Filled != 0.3 {
+		t.Errorf("PARTIAL Filled = %v, want 0.3", res.Outcomes[0].Filled)
 	}
 }
 
