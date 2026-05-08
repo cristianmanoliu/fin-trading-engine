@@ -338,28 +338,12 @@ else
     ok "largest engine log file is ${LARGEST_MB}M (within typical bounds)"
 fi
 
-# Telegram alert path. Mirrors the run_drift_check.sh design: closes the loop
-# when post_deploy_check is invoked unattended (cron / post-redeploy SSH
-# session that the operator doesn't watch). Reads the same env vars the
-# engine uses; missing → silent no-op (graceful degrade). Send all curl
-# output to /dev/null so the bot token cannot leak via stdout/stderr.
-notify_telegram() {
-    local severity="$1" body="$2"
-    local token="${TELEGRAM_BOT_TOKEN:-}"
-    local chat="${TELEGRAM_CHAT_ID:-}"
-    [[ -z "$token" || -z "$chat" ]] && return 0
-    local prefix
-    case "$severity" in
-        CRITICAL) prefix="🚨 [CRITICAL]" ;;
-        WARN)     prefix="⚠ [WARN]" ;;
-        *)        prefix="ℹ [INFO]" ;;
-    esac
-    curl -s --max-time 10 \
-        -X POST "https://api.telegram.org/bot${token}/sendMessage" \
-        --data-urlencode "chat_id=${chat}" \
-        --data-urlencode "text=${prefix} post_deploy_check on $(hostname)
-${body}" >/dev/null 2>&1 || true
-}
+# Telegram alert path uses the shared scripts/lib/notify.sh helper —
+# tier-aware retry (CRITICAL 3 / WARN 2 / INFO 1), graceful no-op when env
+# vars unset. Mirrors the Go engine's pkg/notify package semantics so a
+# transient network failure during alert won't silently drop the message.
+# shellcheck source=lib/notify.sh
+source "${ROOT}/scripts/lib/notify.sh"
 
 # ── Verdict ───────────────────────────────────────────────────────────────────
 echo ""
@@ -375,7 +359,8 @@ else
     # routine (see the 5min-uptime gates in §§4-6) and would desensitize the
     # operator. STRICT=1 is the operator-set "I want this to fail loud" signal.
     if [[ "$STRICT" == "1" ]]; then
-        notify_telegram WARN "$FAIL warning(s) on ${TARGET}
+        notify_telegram WARN "post_deploy_check on $(hostname)" \
+            "$FAIL warning(s) on ${TARGET}
 re-run scripts/post_deploy_check.sh for details, or check the original output"
         exit 1
     fi
