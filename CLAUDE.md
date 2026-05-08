@@ -55,6 +55,10 @@ Defensive moat (test fills for paths every claim transitively depends on):
 
 First empirical run of the extended status script surfaced that the LIVE cohort fired its first signal since the journal-replay deploy: XLMUSDT SHORT @ 0.15832 at 2026-05-08T08:00 UTC (currently +11.6% adverse).
 
+Pre-registration banked for next milestone:
+- `results/drift_wrapper_cron_decision_rule_2026-05-08.md` — phased cron deployment by STAGE
+- `results/strategy_backlog_milestone2_2026-05-08.md` — 8 mechanism ideas with locked verdict criteria, prioritization rubric, and recommended milestone-2 selection (A2 ATR-sizing + C1 funding-extremum + A1 vol-regime-filter + B2 BB-squeeze + D1 session-filter). Discipline contract at the top: do NOT execute before milestone 2 begins.
+
 ## Build & Run
 
 ```bash
