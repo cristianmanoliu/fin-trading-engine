@@ -6,13 +6,14 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"math"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"time"
@@ -21,21 +22,11 @@ import (
 	"github.com/cristianmanoliu/trading-engine/pkg/notify"
 )
 
-// ErrStageNotPromoted is returned by every BinanceLive method that would
-// otherwise interact with the exchange. The skeleton makes accidental
-// activation safe — a misconfigured engine that wires BinanceLive instead
-// of Stub will fail loudly on the first signal rather than send a real
-// order.
-//
-// Real implementation lands at STAGE_1 promotion per the locked design
-// in `results/real_money_executor_architecture_decision_rule_2026-05-08.md`.
-var ErrStageNotPromoted = errors.New("BinanceLive skeleton: real implementation not yet built; engine must run with Stub until STAGE_1 promotion (see results/real_money_executor_architecture_decision_rule_2026-05-08.md)")
-
 // BinanceLive is the real-money executor that replaces Stub at STAGE_1
-// promotion. SKELETON — every exchange-interacting method returns
-// ErrStageNotPromoted. The skeleton's purpose is to lock the package
-// structure + Executor interface satisfaction in compilable code so
-// future-self at STAGE_1 has an unambiguous extension point.
+// promotion. Implements pkg/strategy.Executor (OnSignal / OnTick / Summary)
+// with bit-for-bit journal-schema parity to Stub so downstream tooling
+// (forward_paper_status.sh, drift detector, MFE/MAE analysis) is identical
+// across paper and real-money runs.
 //
 // Five-component decomposition per the locked design:
 //   - BinanceLive itself: implements pkg/strategy.Executor
@@ -44,24 +35,57 @@ var ErrStageNotPromoted = errors.New("BinanceLive skeleton: real implementation 
 //   - SafetyGates:        pre-order checks (max-position, daily-loss, entry-price)
 //   - KillSwitch:         immediate market-close-all entry point
 //
-// All five components are constructed by NewBinanceLive but their methods
-// error until real implementation lands.
+// Concurrency model (locked): OnSignal MUST return quickly so the strategy
+// goroutine doesn't back up on HTTP latency. The order-send + journal-write
+// happens in a goroutine spawned per signal; same pattern for stop/target
+// exits. Wait() drains pending goroutines (used by Summary + tests).
 type BinanceLive struct {
 	Symbol    string
 	StakeUSD  float64
 	APIKey    string
 	APISecret string
 
-	// Notifier is opt-in. When set, BinanceLive emits SeverityCritical
-	// alerts on every accidental method call (helps catch misconfiguration
-	// on real-money systems where silent skeleton-mode would be dangerous).
+	// JournalPath: directory where per-symbol JSONL trade journals are written
+	// (one file per calendar month). Mirrors Stub.JournalPath exactly.
+	JournalPath string
+
+	// FeeBps: round-trip taker fee in basis points; fallback when the exchange
+	// does not report fee on the fill. Mirrors Stub.FeeBps semantics.
+	FeeBps float64
+
+	// StopSlippageBps: adverse stop slippage in bps (losers only) when the
+	// actual fill matches the modeled stop exactly (i.e., no measurable real
+	// slip). Mirrors Stub.StopSlippageBps semantics.
+	StopSlippageBps float64
+
+	// MaxHoldHours: when > 0, any open position older than this is force-closed
+	// at the current tick price. 0 disables. Mirrors Stub.MaxHoldHours.
+	MaxHoldHours float64
+
+	// Notifier is opt-in. When set, BinanceLive emits SeverityCritical alerts
+	// on hard failures (drift, order-rejection, kill-switch firing).
 	Notifier *notify.Notifier
 
-	// Components. Constructed but not functional in skeleton mode.
+	// Components. Constructed and ready by NewBinanceLive.
 	OrderRouter        *OrderRouter
 	PositionReconciler *PositionReconciler
 	SafetyGates        *SafetyGates
 	KillSwitch         *KillSwitch
+
+	// State (mutex-guarded — accessed from strategy goroutine via OnTick AND
+	// from spawned order-handling goroutines via handleSignalSync /
+	// handleExitSync).
+	mu           sync.Mutex
+	position     *OpenPosition
+	exitPending  bool
+	lastTick     models.Tick
+	results      []tradeResult
+	journalFile  *os.File
+	journalMonth string
+
+	// wg tracks in-flight order-handling goroutines so Summary + tests can
+	// drain them deterministically.
+	wg sync.WaitGroup
 }
 
 // NewBinanceLive constructs a BinanceLive with default-initialized components.
@@ -101,34 +125,499 @@ func NewBinanceLive(symbol string, stakeUSD float64, apiKey, apiSecret string) *
 	return bl
 }
 
-// OnSignal is called by the strategy runner when a new signal is generated.
-// Real implementation: pre-order check via SafetyGates, then SendOrder via
-// OrderRouter, then journal the open. Skeleton: log + alert + drop the signal.
+// OnSignal is the strategy runner's entry to send an order. Per the locked
+// concurrency model, OnSignal returns immediately — the actual SafetyGates
+// check + SendOrder + journal write run in a spawned goroutine so the
+// strategy tick loop never blocks on HTTP latency.
 func (b *BinanceLive) OnSignal(sig *models.Signal) {
-	slog.Error("BinanceLive.OnSignal on skeleton — signal dropped (engine must use Stub until STAGE_1)",
+	b.wg.Add(1)
+	go b.handleSignalSync(sig)
+}
+
+// handleSignalSync is the synchronous body of OnSignal — drift gate →
+// position-already-open guard → safety gates → SendOrder → journal open →
+// register local position with the reconciler. Exposed (lowercase) so unit
+// tests can drive the entry path deterministically without goroutine timing.
+func (b *BinanceLive) handleSignalSync(sig *models.Signal) {
+	defer b.wg.Done()
+
+	// Drift gate (locked: BLOCK new orders on a drifted symbol).
+	if b.PositionReconciler != nil {
+		if drifted, reason := b.PositionReconciler.IsDrifted(b.Symbol); drifted {
+			slog.Warn("signal dropped: position drift",
+				"symbol", b.Symbol, "reason", reason, "signal_reason", sig.Reason)
+			return
+		}
+	}
+
+	stopDist := math.Abs(sig.EntryPrice - sig.StopLoss)
+	if stopDist == 0 {
+		slog.Error("signal rejected: zero stop distance",
+			"symbol", b.Symbol, "entry", sig.EntryPrice, "stop", sig.StopLoss)
+		return
+	}
+	qty := b.StakeUSD / stopDist
+
+	// Phase 1 (under lock): check position-already-open + snapshot last tick
+	// for Gate C bid/ask substitute.
+	b.mu.Lock()
+	if b.position != nil {
+		b.mu.Unlock()
+		slog.Debug("signal rejected: position already open",
+			"existing_entry", b.position.Signal.EntryPrice,
+			"new_signal", sig.Reason)
+		return
+	}
+	bid, ask := b.lastTick.Price, b.lastTick.Price
+	b.mu.Unlock()
+
+	// Gate C needs a current bid/ask. Until a real bid/ask feed is wired (a
+	// later commit), we substitute the most recent tick price as both. This
+	// degenerates the gate to "is the signal price within K bps of the latest
+	// tick", which is the relevant staleness check anyway. If no tick has
+	// arrived (cold start), fall back to the signal's own entry — the gate is
+	// effectively a no-op in that boundary case.
+	if bid == 0 || ask == 0 {
+		bid, ask = sig.EntryPrice, sig.EntryPrice
+	}
+
+	// Phase 2 (no lock): safety gates + HTTP call.
+	intent := OrderIntent{
+		Symbol:   b.Symbol,
+		Side:     sig.Side,
+		Quantity: qty,
+		Type:     "MARKET",
+	}
+	gateCtx := GateContext{
+		Intent:                  intent,
+		SignalEntryPrice:        sig.EntryPrice,
+		CurrentBid:              bid,
+		CurrentAsk:              ask,
+		OpenPositionNotionalUSD: 0, // guarded by position-already-open above
+		StakeUSD:                b.StakeUSD,
+		Recent24hLossUSD:        b.recent24hLossUSD(),
+	}
+	if b.SafetyGates != nil {
+		if err := b.SafetyGates.CheckOrder(gateCtx); err != nil {
+			slog.Error("signal blocked by safety gate",
+				"symbol", b.Symbol, "err", err, "signal_reason", sig.Reason)
+			if b.Notifier != nil {
+				_ = b.Notifier.SendStructured(context.Background(), notify.SeverityWarn,
+					fmt.Sprintf("Safety gate blocked %s entry: %v", b.Symbol, err))
+			}
+			return
+		}
+	}
+
+	if b.OrderRouter == nil {
+		slog.Error("OrderRouter not configured", "symbol", b.Symbol)
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	result, err := b.OrderRouter.SendOrder(ctx, intent)
+	if err != nil {
+		slog.Error("entry order failed",
+			"symbol", b.Symbol, "err", err, "result_status", result.Status, "reject_code", result.RejectCode)
+		if b.Notifier != nil {
+			_ = b.Notifier.SendStructured(context.Background(), notify.SeverityCritical,
+				fmt.Sprintf("Entry order REJECTED on %s\nstatus: %s\ncode: %s\nerr: %v",
+					b.Symbol, result.Status, result.RejectCode, err))
+		}
+		return
+	}
+
+	// Use the actual exchange-reported fill price; fall back to the modeled
+	// signal price only if the exchange returned 0 (rare/error path).
+	actualEntry := result.AvgPrice
+	if actualEntry == 0 {
+		actualEntry = sig.EntryPrice
+	}
+
+	// Phase 3 (under lock): set position + journal open.
+	posSignal := *sig
+	posSignal.EntryPrice = actualEntry
+	now := time.Now().UTC()
+	openTS := sig.Timestamp
+	if openTS.IsZero() {
+		openTS = now
+	}
+
+	b.mu.Lock()
+	b.position = &OpenPosition{
+		Signal:           &posSignal,
+		MaxAdverse:       actualEntry,
+		LastPrice:        actualEntry,
+		LastTime:         openTS,
+		OriginalStopDist: stopDist,
+		RemainingFrac:    1.0,
+	}
+	b.mu.Unlock()
+
+	b.appendJournal(journalEntry{
+		Event:  "open",
+		Symbol: b.Symbol,
+		TS:     openTS.Format(time.RFC3339),
+		Side:   sig.Side.String(),
+		Entry:  actualEntry,
+		Stop:   sig.StopLoss,
+		Target: sig.TakeProfit,
+		Reason: sig.Reason,
+	})
+
+	if b.PositionReconciler != nil {
+		b.PositionReconciler.SetLocalPosition(b.Symbol, sig.Side, qty, actualEntry, openTS)
+	}
+
+	slog.Info("position opened",
 		"symbol", b.Symbol,
 		"side", sig.Side,
-		"entry", sig.EntryPrice,
+		"entry", actualEntry,
+		"stop", sig.StopLoss,
+		"target", sig.TakeProfit,
+		"qty", qty,
+		"order_id", result.OrderID,
 		"reason", sig.Reason)
-	if b.Notifier != nil {
-		_ = b.Notifier.SendStructured(context.Background(), notify.SeverityCritical,
-			fmt.Sprintf("BinanceLive skeleton called OnSignal — engine misconfigured\nsymbol: %s\nside: %v\nentry: %v\n%s",
-				b.Symbol, sig.Side, sig.EntryPrice, ErrStageNotPromoted))
+}
+
+// OnTick is called for every tick on the strategy goroutine. Per the locked
+// concurrency model, OnTick MUST return quickly — exit-order HTTP work is
+// shipped to a spawned goroutine when stop/target/MaxHoldHours fires. The
+// exitPending flag prevents double-fires while the close goroutine is in
+// flight.
+func (b *BinanceLive) OnTick(tick models.Tick) {
+	b.mu.Lock()
+	b.lastTick = tick
+
+	if b.position == nil || b.exitPending {
+		b.mu.Unlock()
+		return
 	}
+	pos := b.position
+	sig := pos.Signal
+
+	// Skip ticks predating the position's open timestamp. Mirrors Stub's
+	// recovery guard — backfill replay can deliver pre-open ticks that
+	// must not be evaluated against the current position.
+	if !sig.Timestamp.IsZero() && tick.Timestamp.Before(sig.Timestamp) {
+		b.mu.Unlock()
+		return
+	}
+
+	pos.LastPrice = tick.Price
+	pos.LastTime = tick.Timestamp
+
+	// MaxHoldHours: force-close at current tick price.
+	if b.MaxHoldHours > 0 && !sig.Timestamp.IsZero() {
+		ageHours := tick.Timestamp.Sub(sig.Timestamp).Hours()
+		if ageHours >= b.MaxHoldHours {
+			won := false
+			if sig.Side == models.Long {
+				won = tick.Price > sig.EntryPrice
+			} else {
+				won = tick.Price < sig.EntryPrice
+			}
+			b.exitPending = true
+			posCopy := *pos
+			b.mu.Unlock()
+			b.wg.Add(1)
+			go b.handleExitSync(posCopy, tick.Price, tick.Timestamp, "TIME", won)
+			return
+		}
+	}
+
+	// Track MaxAdverse and MaxFavorableR (mirrors Stub).
+	if sig.Side == models.Long && tick.Price < pos.MaxAdverse {
+		pos.MaxAdverse = tick.Price
+	} else if sig.Side == models.Short && tick.Price > pos.MaxAdverse {
+		pos.MaxAdverse = tick.Price
+	}
+	if pos.OriginalStopDist > 0 {
+		var favR float64
+		if sig.Side == models.Long {
+			favR = (tick.Price - sig.EntryPrice) / pos.OriginalStopDist
+		} else {
+			favR = (sig.EntryPrice - tick.Price) / pos.OriginalStopDist
+		}
+		if favR > pos.MaxFavorableR {
+			pos.MaxFavorableR = favR
+		}
+	}
+
+	stopHit := (sig.Side == models.Long && tick.Price <= sig.StopLoss) ||
+		(sig.Side == models.Short && tick.Price >= sig.StopLoss)
+	targetHit := (sig.Side == models.Long && tick.Price >= sig.TakeProfit) ||
+		(sig.Side == models.Short && tick.Price <= sig.TakeProfit)
+	if !stopHit && !targetHit {
+		b.mu.Unlock()
+		return
+	}
+
+	var modeledExit float64
+	var outcome string
+	var won bool
+	if stopHit {
+		modeledExit = sig.StopLoss
+		outcome = "STOP"
+		won = false
+	} else {
+		modeledExit = sig.TakeProfit
+		outcome = "TARGET"
+		won = true
+	}
+	b.exitPending = true
+	posCopy := *pos
+	b.mu.Unlock()
+
+	b.wg.Add(1)
+	go b.handleExitSync(posCopy, modeledExit, tick.Timestamp, outcome, won)
 }
 
-// OnTick is called for every tick. Real implementation: feed PositionReconciler
-// for periodic exchange-state sync. Skeleton: no-op (logging at tick rate would
-// be too noisy; the OnSignal alert covers misconfiguration).
-func (b *BinanceLive) OnTick(_ models.Tick) {
-	// No-op in skeleton.
+// handleExitSync issues the reduceOnly close order and records the result.
+// Mirrors Stub.closePosition's PnL math precisely so the journal close-event
+// schema is identical across paper and real-money runs. Differences vs Stub:
+//   - exit price is the EXCHANGE-REPORTED fill (result.AvgPrice), not the
+//     modeled stop/target.
+//   - fee_usd is exchange-reported when result.FeeUSD > 0; falls back to FeeBps
+//     × notional (× 2 for round-trip — exchange reports per-side).
+//   - slip_usd is computed as |actual − modeled| × units on losers; falls back
+//     to StopSlippageBps × notional when the exchange fill matches modeled
+//     exactly.
+//
+// On exit-order failure: log + alert, reset exitPending so the next tick can
+// retry. Position remains open locally; the reconciler will detect drift if
+// the exchange has actually closed the position behind us.
+func (b *BinanceLive) handleExitSync(pos OpenPosition, modeledExit float64, exitTS time.Time, outcome string, won bool) {
+	defer b.wg.Done()
+
+	sig := pos.Signal
+	stopDist := pos.OriginalStopDist
+	if stopDist == 0 {
+		stopDist = math.Abs(sig.EntryPrice - sig.StopLoss)
+	}
+	remainingFrac := pos.RemainingFrac
+	if remainingFrac == 0 {
+		remainingFrac = 1.0
+	}
+	qty := b.StakeUSD * remainingFrac / stopDist
+
+	intent := OrderIntent{
+		Symbol:     b.Symbol,
+		Side:       sig.Side,
+		Quantity:   qty,
+		Type:       "MARKET",
+		ReduceOnly: true,
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	result, err := b.OrderRouter.SendOrder(ctx, intent)
+	if err != nil {
+		slog.Error("exit order failed — position remains open locally; reconciler will detect drift if exchange diverged",
+			"symbol", b.Symbol, "outcome", outcome, "err", err, "reject_code", result.RejectCode)
+		if b.Notifier != nil {
+			_ = b.Notifier.SendStructured(context.Background(), notify.SeverityCritical,
+				fmt.Sprintf("Exit order FAILED on %s (%s)\nerr: %v\nposition remains open locally — verify exchange + reconcile",
+					b.Symbol, outcome, err))
+		}
+		b.mu.Lock()
+		b.exitPending = false
+		b.mu.Unlock()
+		return
+	}
+	actualExit := result.AvgPrice
+	if actualExit == 0 {
+		actualExit = modeledExit
+	}
+
+	// PnL math — mirrors Stub.closePosition.
+	var pnlPts float64
+	if sig.Side == models.Long {
+		pnlPts = actualExit - sig.EntryPrice
+	} else {
+		pnlPts = sig.EntryPrice - actualExit
+	}
+	holdSeconds := 0.0
+	if !exitTS.IsZero() && !sig.Timestamp.IsZero() {
+		holdSeconds = exitTS.Sub(sig.Timestamp).Seconds()
+		if holdSeconds < 0 {
+			holdSeconds = 0
+		}
+	}
+
+	var grossUSD, feeUSD, slipUSD, pnlUSD, notional float64
+	if b.StakeUSD > 0 && stopDist > 0 {
+		units := b.StakeUSD * remainingFrac / stopDist
+		grossUSD = units * pnlPts
+		notional = units * sig.EntryPrice
+		// Fee: exchange-reported (per-side) × 2 if available; otherwise FeeBps fallback.
+		switch {
+		case result.FeeUSD > 0:
+			feeUSD = result.FeeUSD * 2
+		case b.FeeBps > 0:
+			feeUSD = b.FeeBps / 10000.0 * notional
+		}
+		// Slip on losers only.
+		if !won {
+			slipPts := math.Abs(actualExit - modeledExit)
+			slipUSD = units * slipPts
+			if slipUSD == 0 && b.StopSlippageBps > 0 {
+				slipUSD = b.StopSlippageBps / 10000.0 * notional
+			}
+		}
+		pnlUSD = grossUSD - feeUSD - slipUSD
+	}
+
+	maeR := 0.0
+	maeStopDist := math.Abs(sig.EntryPrice - sig.StopLoss)
+	if maeStopDist > 0 {
+		maeR = math.Abs(sig.EntryPrice-pos.MaxAdverse) / maeStopDist
+	}
+	stopDistPct := 0.0
+	if sig.EntryPrice > 0 {
+		stopDistPct = math.Abs(sig.EntryPrice-sig.StopLoss) / sig.EntryPrice * 100
+	}
+
+	res := tradeResult{
+		signal:      sig,
+		exitPrice:   actualExit,
+		exitTime:    exitTS,
+		won:         won,
+		pnlPts:      pnlPts,
+		pnlUSDT:     pnlUSD,
+		grossUSDT:   grossUSD,
+		feeUSDT:     feeUSD,
+		slipUSDT:    slipUSD,
+		fundingUSDT: 0,
+		holdSeconds: holdSeconds,
+		stopDistPct: stopDistPct,
+	}
+	entry := journalEntry{
+		Event:    "close",
+		Symbol:   b.Symbol,
+		TS:       time.Now().UTC().Format(time.RFC3339),
+		Side:     sig.Side.String(),
+		Entry:    sig.EntryPrice,
+		Exit:     actualExit,
+		Stop:     sig.StopLoss,
+		Target:   sig.TakeProfit,
+		PnlPts:   math.Round(pnlPts*100) / 100,
+		PnlUSD:   math.Round(pnlUSD*100) / 100,
+		Outcome:  outcome,
+		Reason:   sig.Reason,
+		MFER:     math.Round(pos.MaxFavorableR*1000) / 1000,
+		MAER:     math.Round(maeR*1000) / 1000,
+		GrossUSD: math.Round(grossUSD*100) / 100,
+		FeeUSD:   math.Round(feeUSD*100) / 100,
+		SlipUSD:  math.Round(slipUSD*100) / 100,
+		Notional: math.Round(notional*100) / 100,
+	}
+
+	b.mu.Lock()
+	b.position = nil
+	b.exitPending = false
+	b.results = append(b.results, res)
+	b.mu.Unlock()
+
+	b.appendJournal(entry)
+	if b.PositionReconciler != nil {
+		b.PositionReconciler.ClearLocalPosition(b.Symbol)
+	}
+
+	slog.Info("position closed",
+		"symbol", b.Symbol,
+		"outcome", outcome,
+		"side", sig.Side,
+		"entry", sig.EntryPrice,
+		"exit", actualExit,
+		"pnl_usd", math.Round(pnlUSD*100)/100,
+		"reason", sig.Reason)
 }
 
-// Summary writes the end-of-run report. Real implementation: aggregate
-// realized fills from journal + reconciler reports. Skeleton: log only.
+// Wait drains all in-flight order-handling goroutines. Called by Summary
+// before aggregating; tests use it to ensure deterministic state after
+// OnSignal / OnTick.
+func (b *BinanceLive) Wait() { b.wg.Wait() }
+
+// Summary writes the end-of-run report. Drains any in-flight goroutines
+// first so all closed trades are accounted for.
 func (b *BinanceLive) Summary() {
-	slog.Info("BinanceLive.Summary on skeleton — no real-money trades to report",
-		"symbol", b.Symbol)
+	b.Wait()
+
+	b.mu.Lock()
+	total := len(b.results)
+	var wins int
+	var totalUSD float64
+	for _, r := range b.results {
+		totalUSD += r.pnlUSDT
+		if r.won {
+			wins++
+		}
+	}
+	hasOpen := b.position != nil
+	b.mu.Unlock()
+
+	if total == 0 {
+		slog.Info("BinanceLive summary: no real-money trades closed", "symbol", b.Symbol, "open_at_summary", hasOpen)
+		return
+	}
+	winRate := float64(wins) / float64(total) * 100
+	slog.Info("BinanceLive summary",
+		"symbol", b.Symbol,
+		"trades", total,
+		"wins", wins,
+		"win_rate_pct", math.Round(winRate*10)/10,
+		"net_pnl_usd", math.Round(totalUSD*100)/100,
+		"open_at_summary", hasOpen)
+}
+
+// recent24hLossUSD scans the in-memory results window for closes within the
+// last 24h and sums the negative pnl as positive loss. Used by SafetyGates
+// Gate B (daily-loss circuit breaker).
+func (b *BinanceLive) recent24hLossUSD() float64 {
+	cutoff := time.Now().Add(-24 * time.Hour)
+	var loss float64
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for _, r := range b.results {
+		if r.exitTime.After(cutoff) && r.pnlUSDT < 0 {
+			loss += -r.pnlUSDT
+		}
+	}
+	return loss
+}
+
+// appendJournal writes a single JSONL line to the per-symbol monthly journal.
+// Mirrors Stub.appendJournal exactly — same path scheme (<JournalPath>/<Symbol>-<YYYY-MM>.jsonl)
+// and same JSON schema. Duplicated here rather than shared because the locked
+// architecture rule treats journal-schema parity as a HARD invariant: any
+// schema change must be a deliberate, coordinated update across both writers.
+func (b *BinanceLive) appendJournal(entry journalEntry) {
+	if b.JournalPath == "" {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	month := time.Now().UTC().Format("2006-01")
+	if b.journalFile == nil || month != b.journalMonth {
+		if b.journalFile != nil {
+			_ = b.journalFile.Close()
+		}
+		if err := os.MkdirAll(b.JournalPath, 0755); err != nil {
+			slog.Warn("journal mkdir failed", "err", err)
+			return
+		}
+		name := filepath.Join(b.JournalPath, fmt.Sprintf("%s-%s.jsonl", b.Symbol, month))
+		f, err := os.OpenFile(name, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if err != nil {
+			slog.Warn("journal open failed", "err", err)
+			return
+		}
+		b.journalFile = f
+		b.journalMonth = month
+	}
+	line, _ := json.Marshal(entry)
+	line = append(line, '\n')
+	_, _ = b.journalFile.Write(line)
 }
 
 // ── Component skeletons ─────────────────────────────────────────────────────

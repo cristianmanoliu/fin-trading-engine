@@ -3,9 +3,12 @@ package execution
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -48,42 +51,567 @@ func TestBinanceLive_NewBinanceLive_ConstructsAllComponents(t *testing.T) {
 	}
 }
 
-func TestBinanceLive_OnSignal_DoesNotPanic_LogsError(t *testing.T) {
-	// Skeleton OnSignal must not panic — strategy will keep firing signals
-	// until the operator notices via the slog.Error or the CRITICAL alert
-	// (when Notifier wired). Failing loudly without crashing is the
-	// "fail safe, fail loud" pattern.
+// ── BinanceLive Executor full-path tests ─────────────────────────────────────
+//
+// Each test wires a httptest mock that satisfies whichever Binance endpoints
+// the test path traverses (entry order via /fapi/v1/order; exit order ditto;
+// positionRisk if Reconciler is invoked). Tests use bl.Wait() to drain the
+// goroutines OnSignal / OnTick spawn so assertions are deterministic.
+
+// newBinanceLiveWithMock returns a fully-wired BinanceLive whose OrderRouter
+// + Reconciler talk to the supplied test server. Preset for STAGE_1
+// thresholds, $100 stake, FeeBps=10, StopSlippageBps=5 (matches the modeled
+// costs the project's forward-paper criteria use).
+func newBinanceLiveWithMock(t *testing.T, srv *httptest.Server, journalDir string) *BinanceLive {
+	t.Helper()
 	bl := NewBinanceLive("BTCUSDT", 100, "k", "s")
-	defer func() {
-		if r := recover(); r != nil {
-			t.Errorf("OnSignal panicked: %v", r)
+	bl.OrderRouter.APIBaseURL = srv.URL
+	bl.OrderRouter.HTTPClient = srv.Client()
+	bl.PositionReconciler.APIBaseURL = srv.URL
+	bl.PositionReconciler.HTTPClient = srv.Client()
+	bl.JournalPath = journalDir
+	bl.FeeBps = 10
+	bl.StopSlippageBps = 5
+	// Gate A would block default $100 stake at default qty for high-priced
+	// instruments; raise the cap so STAGE_1 happy-path tests aren't fighting
+	// the gate by accident. Specific gate-blocking tests override this.
+	bl.SafetyGates.MaxPositionMultiple = 1e9
+	return bl
+}
+
+// orderHandler returns an http handler that responds to /fapi/v1/order with
+// FILLED + the supplied avg price/qty pairs in sequence (call N → response N).
+// Other paths (positionRisk) get a generic flat response.
+func orderHandler(t *testing.T, fills []orderFill) http.HandlerFunc {
+	t.Helper()
+	var calls int32
+	return func(w http.ResponseWriter, req *http.Request) {
+		switch {
+		case strings.Contains(req.URL.Path, "/fapi/v1/order"):
+			n := int(atomic.AddInt32(&calls, 1)) - 1
+			var f orderFill
+			if n < len(fills) {
+				f = fills[n]
+			} else {
+				f = fills[len(fills)-1]
+			}
+			if f.statusCode == 0 {
+				f.statusCode = 200
+			}
+			w.WriteHeader(f.statusCode)
+			if f.body != "" {
+				_, _ = w.Write([]byte(f.body))
+				return
+			}
+			fmt.Fprintf(w, `{"orderId":%d,"status":"FILLED","executedQty":"%v","avgPrice":"%v"}`,
+				1000+n, f.qty, f.price)
+		case strings.Contains(req.URL.Path, "/fapi/v2/positionRisk"):
+			_, _ = w.Write([]byte(`[{"symbol":"BTCUSDT","positionAmt":"0","entryPrice":"0","positionSide":"BOTH"}]`))
+		default:
+			_, _ = w.Write([]byte(`{}`))
 		}
-	}()
+	}
+}
+
+type orderFill struct {
+	qty        float64
+	price      float64
+	statusCode int    // 0 → 200
+	body       string // overrides templated FILLED body when non-empty
+}
+
+func TestBinanceLive_OnSignal_HappyPath(t *testing.T) {
+	dir := t.TempDir()
+	srv := httptest.NewServer(orderHandler(t, []orderFill{{qty: 0.001, price: 50000}}))
+	defer srv.Close()
+	bl := newBinanceLiveWithMock(t, srv, dir)
+
 	bl.OnSignal(&models.Signal{
 		Symbol:     "BTCUSDT",
 		Side:       models.Short,
 		EntryPrice: 50000,
+		StopLoss:   50100,
+		TakeProfit: 49500,
+		Timestamp:  time.Now().UTC(),
+		Reason:     "test",
 	})
+	bl.Wait()
+
+	if bl.position == nil {
+		t.Fatal("position not set after happy-path OnSignal")
+	}
+	if bl.position.Signal.EntryPrice != 50000 {
+		t.Errorf("position entry: got %v want 50000 (mock fill)", bl.position.Signal.EntryPrice)
+	}
+	// Reconciler must know about the new local position.
+	side, qty, _, ok := bl.PositionReconciler.LocalPosition("BTCUSDT")
+	if !ok {
+		t.Fatal("Reconciler: LocalPosition not set")
+	}
+	if side != models.Short {
+		t.Errorf("Reconciler side = %v, want SHORT", side)
+	}
+	// qty = stake / stop_dist = 100 / 100 = 1.0
+	if qty != 1.0 {
+		t.Errorf("Reconciler qty = %v, want 1.0 (=stake/stop_dist)", qty)
+	}
+	// Journal has one open line.
+	matches, _ := filepath.Glob(filepath.Join(dir, "BTCUSDT-*.jsonl"))
+	if len(matches) == 0 {
+		t.Fatal("journal file not created")
+	}
 }
 
-func TestBinanceLive_OnTick_NoOp(t *testing.T) {
-	bl := NewBinanceLive("BTCUSDT", 100, "k", "s")
-	defer func() {
-		if r := recover(); r != nil {
-			t.Errorf("OnTick panicked: %v", r)
-		}
-	}()
-	bl.OnTick(models.Tick{Symbol: "BTCUSDT", Price: 50000})
+func TestBinanceLive_OnSignal_DriftBlocks(t *testing.T) {
+	dir := t.TempDir()
+	srv := httptest.NewServer(orderHandler(t, []orderFill{{qty: 1, price: 50000}}))
+	defer srv.Close()
+	bl := newBinanceLiveWithMock(t, srv, dir)
+
+	// Force drift by setting a local position the exchange "doesn't" have.
+	bl.PositionReconciler.SetLocalPosition("BTCUSDT", models.Long, 0.5, 50000, time.Now())
+	if _, err := bl.PositionReconciler.ReconcileSymbol(context.Background(), "BTCUSDT"); err != nil {
+		t.Fatal(err)
+	}
+	if drifted, _ := bl.PositionReconciler.IsDrifted("BTCUSDT"); !drifted {
+		t.Fatal("setup: drift not flagged")
+	}
+
+	bl.OnSignal(&models.Signal{
+		Symbol: "BTCUSDT", Side: models.Short,
+		EntryPrice: 50000, StopLoss: 50100, TakeProfit: 49500,
+		Timestamp: time.Now().UTC(), Reason: "test",
+	})
+	bl.Wait()
+
+	if bl.position != nil {
+		t.Error("drift gate failed: signal opened a position despite drift")
+	}
+	if matches, _ := filepath.Glob(filepath.Join(dir, "BTCUSDT-*.jsonl")); len(matches) > 0 {
+		t.Error("drift gate failed: journal file was written")
+	}
 }
 
-func TestBinanceLive_Summary_NoOp(t *testing.T) {
-	bl := NewBinanceLive("BTCUSDT", 100, "k", "s")
-	defer func() {
-		if r := recover(); r != nil {
-			t.Errorf("Summary panicked: %v", r)
+func TestBinanceLive_OnSignal_SafetyGateBlocks(t *testing.T) {
+	dir := t.TempDir()
+	srv := httptest.NewServer(orderHandler(t, []orderFill{{qty: 1, price: 50000}}))
+	defer srv.Close()
+	bl := newBinanceLiveWithMock(t, srv, dir)
+	// Gate B: pre-load 24h losses past the cap.
+	bl.SafetyGates.DailyLossUSDCap = 100
+	bl.results = []tradeResult{{
+		signal:  &models.Signal{Symbol: "BTCUSDT", Side: models.Short},
+		exitTime: time.Now(), pnlUSDT: -500,
+	}}
+
+	bl.OnSignal(&models.Signal{
+		Symbol: "BTCUSDT", Side: models.Short,
+		EntryPrice: 50000, StopLoss: 50100, TakeProfit: 49500,
+		Timestamp: time.Now().UTC(), Reason: "test",
+	})
+	bl.Wait()
+
+	if bl.position != nil {
+		t.Error("safety gate failed: signal opened position despite Gate B trip")
+	}
+}
+
+func TestBinanceLive_OnSignal_OrderRejected(t *testing.T) {
+	dir := t.TempDir()
+	srv := httptest.NewServer(orderHandler(t, []orderFill{
+		{statusCode: 400, body: `{"code":-2010,"msg":"insufficient margin"}`},
+	}))
+	defer srv.Close()
+	bl := newBinanceLiveWithMock(t, srv, dir)
+
+	bl.OnSignal(&models.Signal{
+		Symbol: "BTCUSDT", Side: models.Short,
+		EntryPrice: 50000, StopLoss: 50100, TakeProfit: 49500,
+		Timestamp: time.Now().UTC(), Reason: "test",
+	})
+	bl.Wait()
+
+	if bl.position != nil {
+		t.Error("rejected order should NOT set local position")
+	}
+	// No journal open should be written when the order is rejected.
+	matches, _ := filepath.Glob(filepath.Join(dir, "BTCUSDT-*.jsonl"))
+	for _, m := range matches {
+		info, _ := os.Stat(m)
+		if info != nil && info.Size() > 0 {
+			t.Errorf("rejected order should not journal an open; file %s has size %d", m, info.Size())
 		}
-	}()
+	}
+}
+
+func TestBinanceLive_OnSignal_PositionAlreadyOpen_Rejected(t *testing.T) {
+	dir := t.TempDir()
+	srv := httptest.NewServer(orderHandler(t, []orderFill{{qty: 1, price: 50000}}))
+	defer srv.Close()
+	bl := newBinanceLiveWithMock(t, srv, dir)
+
+	sig := &models.Signal{
+		Symbol: "BTCUSDT", Side: models.Short,
+		EntryPrice: 50000, StopLoss: 50100, TakeProfit: 49500,
+		Timestamp: time.Now().UTC(), Reason: "first",
+	}
+	bl.OnSignal(sig)
+	bl.Wait()
+	if bl.position == nil {
+		t.Fatal("first signal should have opened a position")
+	}
+
+	// Second signal while first is open — must be ignored, no second order sent.
+	bl.OnSignal(&models.Signal{
+		Symbol: "BTCUSDT", Side: models.Short,
+		EntryPrice: 49000, StopLoss: 49100, TakeProfit: 48500,
+		Timestamp: time.Now().UTC(), Reason: "second",
+	})
+	bl.Wait()
+	// Position entry should still be from the first signal.
+	if bl.position.Signal.EntryPrice != 50000 {
+		t.Errorf("position got overwritten: entry=%v want 50000", bl.position.Signal.EntryPrice)
+	}
+}
+
+func TestBinanceLive_OnSignal_ZeroStopDist_Rejected(t *testing.T) {
+	dir := t.TempDir()
+	srv := httptest.NewServer(orderHandler(t, []orderFill{{qty: 1, price: 50000}}))
+	defer srv.Close()
+	bl := newBinanceLiveWithMock(t, srv, dir)
+
+	bl.OnSignal(&models.Signal{
+		Symbol: "BTCUSDT", Side: models.Short,
+		EntryPrice: 50000, StopLoss: 50000, // entry == stop → div-by-zero in sizing
+		TakeProfit: 49500, Timestamp: time.Now().UTC(),
+	})
+	bl.Wait()
+	if bl.position != nil {
+		t.Error("zero-stop-dist signal should be rejected before order")
+	}
+}
+
+func TestBinanceLive_OnTick_NoPosition_NoOp(t *testing.T) {
+	dir := t.TempDir()
+	srv := httptest.NewServer(orderHandler(t, []orderFill{{qty: 1, price: 50000}}))
+	defer srv.Close()
+	bl := newBinanceLiveWithMock(t, srv, dir)
+	// No OnSignal — just a tick. Should be safe.
+	bl.OnTick(models.Tick{Symbol: "BTCUSDT", Timestamp: time.Now(), Price: 50000})
+	bl.Wait()
+	if bl.position != nil {
+		t.Error("OnTick set a position out of nowhere")
+	}
+}
+
+func TestBinanceLive_OnTick_StopHit_Long_FullPath(t *testing.T) {
+	// Long, entry=50000, stop=49900 (stop_dist=100), target=50500.
+	// Exit fill at 49899 (1bp adverse beyond modeled stop).
+	dir := t.TempDir()
+	srv := httptest.NewServer(orderHandler(t, []orderFill{
+		{qty: 1, price: 50000},  // entry
+		{qty: 1, price: 49899},  // stop fill
+	}))
+	defer srv.Close()
+	bl := newBinanceLiveWithMock(t, srv, dir)
+	bl.StakeUSD = 1000 // bigger stake → easier-to-eyeball PnL numbers
+
+	openTime := time.Date(2026, 5, 8, 8, 0, 0, 0, time.UTC)
+	bl.OnSignal(&models.Signal{
+		Symbol: "BTCUSDT", Side: models.Long,
+		EntryPrice: 50000, StopLoss: 49900, TakeProfit: 50500,
+		Timestamp: openTime, Reason: "long-stop test",
+	})
+	bl.Wait()
+	if bl.position == nil {
+		t.Fatal("entry didn't open")
+	}
+
+	// Tick that hits stop.
+	bl.OnTick(models.Tick{
+		Symbol: "BTCUSDT", Timestamp: openTime.Add(time.Hour), Price: 49899,
+	})
+	bl.Wait()
+
+	if bl.position != nil {
+		t.Fatal("position not cleared after stop hit")
+	}
+	if len(bl.results) != 1 {
+		t.Fatalf("results = %d, want 1", len(bl.results))
+	}
+	r := bl.results[0]
+	if r.won {
+		t.Error("stop hit should classify as loss")
+	}
+	// units = 1000/100 = 10. notional = 10 * 50000 = 500000.
+	// gross = 10 * (49899 - 50000) = -1010.
+	// fee at 10bp on $500k = $500. Slip = |49899 - 49900| × 10 = $10 (actual diff).
+	if math.Abs(r.grossUSDT-(-1010)) > 0.01 {
+		t.Errorf("gross: got %v want -1010", r.grossUSDT)
+	}
+	if math.Abs(r.feeUSDT-500) > 0.01 {
+		t.Errorf("fee: got %v want 500", r.feeUSDT)
+	}
+	if math.Abs(r.slipUSDT-10) > 0.01 {
+		t.Errorf("slip from |actual-modeled|×units: got %v want 10", r.slipUSDT)
+	}
+}
+
+func TestBinanceLive_OnTick_TargetHit_Short_FullPath(t *testing.T) {
+	// Short, entry=50000, stop=50100, target=49500. Target fill at 49500.
+	dir := t.TempDir()
+	srv := httptest.NewServer(orderHandler(t, []orderFill{
+		{qty: 1, price: 50000}, // entry
+		{qty: 1, price: 49500}, // exit
+	}))
+	defer srv.Close()
+	bl := newBinanceLiveWithMock(t, srv, dir)
+	bl.StakeUSD = 1000
+
+	openTime := time.Date(2026, 5, 8, 8, 0, 0, 0, time.UTC)
+	bl.OnSignal(&models.Signal{
+		Symbol: "BTCUSDT", Side: models.Short,
+		EntryPrice: 50000, StopLoss: 50100, TakeProfit: 49500,
+		Timestamp: openTime, Reason: "short-target test",
+	})
+	bl.Wait()
+	bl.OnTick(models.Tick{
+		Symbol: "BTCUSDT", Timestamp: openTime.Add(time.Hour), Price: 49500,
+	})
+	bl.Wait()
+
+	if len(bl.results) != 1 {
+		t.Fatalf("results = %d, want 1", len(bl.results))
+	}
+	r := bl.results[0]
+	if !r.won {
+		t.Error("target hit should classify as win")
+	}
+	// units = 1000/100 = 10. notional = $500k. gross (short) = 10 × (50000-49500) = 5000.
+	if math.Abs(r.grossUSDT-5000) > 0.01 {
+		t.Errorf("gross: got %v want 5000", r.grossUSDT)
+	}
+	if math.Abs(r.feeUSDT-500) > 0.01 {
+		t.Errorf("fee: got %v want 500", r.feeUSDT)
+	}
+	if r.slipUSDT != 0 {
+		t.Errorf("slip should be 0 on winner, got %v", r.slipUSDT)
+	}
+}
+
+func TestBinanceLive_OnTick_DoubleClose_Prevented(t *testing.T) {
+	// Two consecutive past-stop ticks should fire only ONE close goroutine.
+	// Tracked by counting /fapi/v1/order calls — should be exactly 2 (entry + 1 exit).
+	dir := t.TempDir()
+	var orderCalls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if strings.Contains(req.URL.Path, "/fapi/v1/order") {
+			n := atomic.AddInt32(&orderCalls, 1)
+			if n == 1 {
+				w.Write([]byte(`{"orderId":1,"status":"FILLED","executedQty":"1","avgPrice":"50000"}`))
+			} else {
+				w.Write([]byte(`{"orderId":2,"status":"FILLED","executedQty":"1","avgPrice":"49899"}`))
+			}
+			return
+		}
+		w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+	bl := newBinanceLiveWithMock(t, srv, dir)
+	bl.StakeUSD = 1000
+
+	openTime := time.Date(2026, 5, 8, 8, 0, 0, 0, time.UTC)
+	bl.OnSignal(&models.Signal{
+		Symbol: "BTCUSDT", Side: models.Long,
+		EntryPrice: 50000, StopLoss: 49900, TakeProfit: 50500,
+		Timestamp: openTime, Reason: "test",
+	})
+	bl.Wait()
+
+	// First past-stop tick.
+	bl.OnTick(models.Tick{Symbol: "BTCUSDT", Timestamp: openTime.Add(time.Hour), Price: 49899})
+	// Second past-stop tick BEFORE the close goroutine drains — should be no-op.
+	bl.OnTick(models.Tick{Symbol: "BTCUSDT", Timestamp: openTime.Add(time.Hour + time.Second), Price: 49890})
+	bl.Wait()
+
+	if got := atomic.LoadInt32(&orderCalls); got != 2 {
+		t.Errorf("order API calls = %d, want 2 (1 entry + 1 exit; double-close prevention failed)", got)
+	}
+	if len(bl.results) != 1 {
+		t.Errorf("results = %d, want 1", len(bl.results))
+	}
+}
+
+func TestBinanceLive_OnTick_MaxHold_ForceClose(t *testing.T) {
+	dir := t.TempDir()
+	srv := httptest.NewServer(orderHandler(t, []orderFill{
+		{qty: 1, price: 50000}, // entry
+		{qty: 1, price: 50250}, // force-close fill (matches tick price)
+	}))
+	defer srv.Close()
+	bl := newBinanceLiveWithMock(t, srv, dir)
+	bl.StakeUSD = 1000
+	bl.MaxHoldHours = 1.0
+
+	openTime := time.Date(2026, 5, 8, 0, 0, 0, 0, time.UTC)
+	bl.OnSignal(&models.Signal{
+		Symbol: "BTCUSDT", Side: models.Long,
+		EntryPrice: 50000, StopLoss: 49900, TakeProfit: 50500,
+		Timestamp: openTime, Reason: "max-hold test",
+	})
+	bl.Wait()
+
+	// Tick at +2h, price between stop and target — would not normally close,
+	// but MaxHoldHours fires. classified won = (price > entry) for Long.
+	bl.OnTick(models.Tick{
+		Symbol: "BTCUSDT", Timestamp: openTime.Add(2 * time.Hour), Price: 50250,
+	})
+	bl.Wait()
+
+	if len(bl.results) != 1 {
+		t.Fatalf("results = %d, want 1 (max-hold force-close)", len(bl.results))
+	}
+	r := bl.results[0]
+	if !r.won {
+		t.Error("max-hold above entry should classify as won")
+	}
+	// Verify the close-event journal outcome is "TIME".
+	matches, _ := filepath.Glob(filepath.Join(dir, "BTCUSDT-*.jsonl"))
+	if len(matches) == 0 {
+		t.Fatal("journal not created")
+	}
+	data, _ := os.ReadFile(matches[0])
+	if !strings.Contains(string(data), `"outcome":"TIME"`) {
+		t.Errorf("journal close should record outcome=TIME for max-hold force-close, got: %s", data)
+	}
+}
+
+func TestBinanceLive_OnTick_PreOpenTick_Skipped(t *testing.T) {
+	// Mirrors Stub's recovery guard: a tick predating the position's open
+	// timestamp must not hit stop/target. Backfill replay is the relevant
+	// scenario — engine restart processes ~96h of historical ticks, many
+	// older than the recovered position's open ts.
+	dir := t.TempDir()
+	srv := httptest.NewServer(orderHandler(t, []orderFill{
+		{qty: 1, price: 50000},
+	}))
+	defer srv.Close()
+	bl := newBinanceLiveWithMock(t, srv, dir)
+	bl.StakeUSD = 1000
+
+	openTime := time.Date(2026, 5, 8, 8, 0, 0, 0, time.UTC)
+	bl.OnSignal(&models.Signal{
+		Symbol: "BTCUSDT", Side: models.Long,
+		EntryPrice: 50000, StopLoss: 49900, TakeProfit: 50500,
+		Timestamp: openTime, Reason: "test",
+	})
+	bl.Wait()
+
+	// Pre-open tick at price that would hit target — must be ignored.
+	bl.OnTick(models.Tick{
+		Symbol: "BTCUSDT", Timestamp: openTime.Add(-time.Hour), Price: 50500,
+	})
+	bl.Wait()
+	if bl.position == nil {
+		t.Error("pre-open tick at target price closed the position — guard failed")
+	}
+}
+
+func TestBinanceLive_PnL_FeeAndSlipDecomposition_Long_Loss(t *testing.T) {
+	// Verifies the locked journal close-event cost-decomposition schema:
+	//   stake=$1000, entry=50000, stop=49900 (stop_dist=100), target=50500.
+	//   units=10, notional=$500k.
+	//   FeeBps=10 → fee = 10/10000 × 500000 = $500.
+	//   StopSlippageBps=5 → fallback slip when actual fill matches modeled
+	//     exactly = 5/10000 × 500000 = $250.
+	//   gross = 10 × (49900 - 50000) = -1000. pnl = -1000 - 500 - 250 = -1750.
+	dir := t.TempDir()
+	srv := httptest.NewServer(orderHandler(t, []orderFill{
+		{qty: 10, price: 50000}, // entry
+		{qty: 10, price: 49900}, // exit at exactly modeled stop → slip falls back to bps
+	}))
+	defer srv.Close()
+	bl := newBinanceLiveWithMock(t, srv, dir)
+	bl.StakeUSD = 1000
+	// FeeBps=10, StopSlippageBps=5 already set by newBinanceLiveWithMock.
+
+	openTime := time.Date(2026, 5, 8, 0, 0, 0, 0, time.UTC)
+	bl.OnSignal(&models.Signal{
+		Symbol: "BTCUSDT", Side: models.Long,
+		EntryPrice: 50000, StopLoss: 49900, TakeProfit: 50500,
+		Timestamp: openTime, Reason: "fee/slip test",
+	})
+	bl.Wait()
+	bl.OnTick(models.Tick{Symbol: "BTCUSDT", Timestamp: openTime.Add(time.Hour), Price: 49900})
+	bl.Wait()
+
+	if len(bl.results) != 1 {
+		t.Fatalf("results = %d, want 1", len(bl.results))
+	}
+	r := bl.results[0]
+	if math.Abs(r.grossUSDT-(-1000)) > 0.01 {
+		t.Errorf("gross: got %v want -1000", r.grossUSDT)
+	}
+	if math.Abs(r.feeUSDT-500) > 0.01 {
+		t.Errorf("fee: got %v want 500 (10bp on $500k notional)", r.feeUSDT)
+	}
+	if math.Abs(r.slipUSDT-250) > 0.01 {
+		t.Errorf("slip fallback: got %v want 250 (5bp on $500k notional)", r.slipUSDT)
+	}
+	if math.Abs(r.pnlUSDT-(-1750)) > 0.01 {
+		t.Errorf("net pnl: got %v want -1750", r.pnlUSDT)
+	}
+
+	// Verify journal close event carries the cost-decomposition fields per
+	// the locked schema (forward_paper_status.sh reads these directly).
+	matches, _ := filepath.Glob(filepath.Join(dir, "BTCUSDT-*.jsonl"))
+	if len(matches) == 0 {
+		t.Fatal("journal file missing")
+	}
+	data, _ := os.ReadFile(matches[0])
+	for _, want := range []string{
+		`"event":"close"`,
+		`"outcome":"STOP"`,
+		`"gross_usd":-1000`,
+		`"fee_usd":500`,
+		`"slip_usd":250`,
+		`"notional_usd":500000`,
+	} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("journal close missing %q\nfull contents:\n%s", want, data)
+		}
+	}
+}
+
+func TestBinanceLive_Summary_DrainsGoroutines(t *testing.T) {
+	// Summary calls Wait() internally — invoking Summary right after OnSignal
+	// must not see "no trades closed" if there's an in-flight close goroutine.
+	dir := t.TempDir()
+	srv := httptest.NewServer(orderHandler(t, []orderFill{
+		{qty: 10, price: 50000},
+		{qty: 10, price: 50500},
+	}))
+	defer srv.Close()
+	bl := newBinanceLiveWithMock(t, srv, dir)
+	bl.StakeUSD = 1000
+
+	openTime := time.Date(2026, 5, 8, 0, 0, 0, 0, time.UTC)
+	bl.OnSignal(&models.Signal{
+		Symbol: "BTCUSDT", Side: models.Long,
+		EntryPrice: 50000, StopLoss: 49900, TakeProfit: 50500,
+		Timestamp: openTime, Reason: "test",
+	})
+	// Wait for the entry goroutine specifically — without this, the OnTick
+	// below would run on a not-yet-set position. (Tests Summary draining the
+	// EXIT goroutine, not the racing entry/tick interleave.)
+	bl.Wait()
+	bl.OnTick(models.Tick{Symbol: "BTCUSDT", Timestamp: openTime.Add(time.Second), Price: 50500})
+	// No explicit Wait here — Summary must drain the in-flight exit goroutine.
 	bl.Summary()
+
+	if len(bl.results) != 1 {
+		t.Errorf("Summary did not drain goroutines: results = %d, want 1", len(bl.results))
+	}
 }
 
 func TestOrderRouter_SendOrder_ErrorsWhenNotConfigured(t *testing.T) {
@@ -1000,24 +1528,3 @@ func TestKillSwitch_KillAll_PartialFill_ReportedAsPARTIAL(t *testing.T) {
 	}
 }
 
-func TestErrStageNotPromoted_MessageMentionsPreReg(t *testing.T) {
-	// Defensive: the error message points operators at the pre-reg doc
-	// so when this fires accidentally in production logs, the operator
-	// has a direct path to the design rationale.
-	msg := ErrStageNotPromoted.Error()
-	if !contains(msg, "real_money_executor_architecture") {
-		t.Errorf("ErrStageNotPromoted message missing pre-reg reference: %q", msg)
-	}
-	if !contains(msg, "STAGE_1") {
-		t.Errorf("ErrStageNotPromoted message missing stage reference: %q", msg)
-	}
-}
-
-func contains(s, sub string) bool {
-	for i := 0; i+len(sub) <= len(s); i++ {
-		if s[i:i+len(sub)] == sub {
-			return true
-		}
-	}
-	return false
-}
