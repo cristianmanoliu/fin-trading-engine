@@ -367,7 +367,7 @@ func (e *EntryDetector) Evaluate(levels []float64, vwap float64, bias *BiasTrack
 		if level == 0 {
 			continue
 		}
-		if sig := e.checkAbsorption(last, level, vwap, bias); sig != nil {
+		if sig := e.checkAbsorption(last, level, vwap); sig != nil {
 			return sig
 		}
 		if sig := e.checkBreakout(last, level, vwap, bias); sig != nil {
@@ -943,7 +943,7 @@ func (e *EntryDetector) checkEMACrossover(last models.Candle, bias *BiasTracker)
 //  1. Last candle close is within proximityPct of the level (price approaching but not breaking).
 //  2. The required number of consecutive candles have wick/body ≥ wickRatio on the level side.
 //  3. The last candle body closes away from the level (rejection confirmed).
-func (e *EntryDetector) checkAbsorption(last models.Candle, level, vwap float64, bias *BiasTracker) *models.Signal {
+func (e *EntryDetector) checkAbsorption(last models.Candle, level, vwap float64) *models.Signal {
 	prox := last.Close * e.cfg.ProximityPct
 
 	// Price must be near the level but NOT through it.
@@ -984,10 +984,6 @@ func (e *EntryDetector) checkAbsorption(last models.Candle, level, vwap float64,
 		if bodyClose <= level {
 			return nil
 		}
-	}
-
-	if !bias.Allows(side, false) {
-		return nil
 	}
 
 	// Target must be on the correct side of entry — no signal if VWAP is unreachable.

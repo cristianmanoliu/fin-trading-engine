@@ -63,17 +63,6 @@ func (d *DailyLevels) KeyLevels(zones []models.Zone) []float64 {
 	return levels
 }
 
-// LevelDirection returns the bounce direction when approaching a level:
-// Short if price is approaching from below (PDH), Long if from above (PDL).
-// Returns Neutral if the level is ambiguous.
-func (d *DailyLevels) LevelDirection(level, price float64) models.Direction {
-	mid := (d.PDH + d.PDL) / 2
-	if level >= mid {
-		return models.Short // resistance above — bounce down
-	}
-	return models.Long // support below — bounce up
-}
-
 // HasData reports whether at least one full day of data has been seen
 // (i.e., PDH/PDL are populated).
 func (d *DailyLevels) HasData() bool {

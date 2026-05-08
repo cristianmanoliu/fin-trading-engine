@@ -345,7 +345,3 @@ After the 2026-05-05 cost-survivor battery and 2026-05-06/07 follow-up work, the
 - ~~Engine restart orphans in-flight paper positions~~ → fixed 2026-05-07 (Bug 6, commit `9eaeb54`). Documented in Known Bugs / Fixed.
 - ~~Threshold-based kill criteria not validated against natural variance~~ → calibrated 2026-05-07; found mis-calibrated at 90d (statistical impossibility of meeting locked acceptance bands). Replaced as decision-grade by drift detector (DETECTOR_VIABLE, 100% TP across degradation scenarios). Threshold criteria remain advisory.
 
-## Dead Code
-
-- `DailyLevels.LevelDirection` (`pkg/indicators/levels.go`) — defined but never called.
-- `bias.Allows(side, false)` in `checkAbsorption` (`pkg/strategy/entry.go`) — always returns `true`; no-op. (Absorption path is not the live strategy but remains in code.)
