@@ -86,10 +86,17 @@ for sym in $SYMBOLS_LC; do
   age_ns=\$(echo \"\$last_hb\" | jq -r '.last_tick_age // 0' 2>/dev/null || echo 0)
   age_s=\$(( age_ns / 1000000000 ))
   last_event=\$(tail -1 /var/log/paper-live/\${sym}.log 2>/dev/null | jq -r '.msg' 2>/dev/null)
-  start_ts=\$(grep 'starting live engine' /var/log/paper-live/\${sym}.log 2>/dev/null | tail -1 | jq -r '.time' 2>/dev/null | sed 's/\..*//; s/T/ /; s/Z//')
-  if [[ -n \"\$start_ts\" ]]; then
-    start_epoch=\$(date -u -d \"\$start_ts\" +%s 2>/dev/null || echo 0)
-    uptime_min=\$(( (now - start_epoch) / 60 ))
+  # Uptime via systemd (source of truth; survives daily log rotation that
+  # would otherwise hide the 'starting live engine' line in .log.1).
+  start_epoch=\$(systemctl show paper-live@\${sym}.service -p ActiveEnterTimestampMonotonic --value 2>/dev/null)
+  if [[ -n \"\$start_epoch\" ]] && [[ \"\$start_epoch\" != \"0\" ]]; then
+    enter_real=\$(systemctl show paper-live@\${sym}.service -p ActiveEnterTimestamp --value 2>/dev/null | sed 's/[A-Z]\\{3\\} //; s/ UTC//')
+    if [[ -n \"\$enter_real\" ]]; then
+      enter_epoch=\$(date -u -d \"\$enter_real\" +%s 2>/dev/null || echo 0)
+      uptime_min=\$(( (now - enter_epoch) / 60 ))
+    else
+      uptime_min=0
+    fi
   else
     uptime_min=0
   fi
