@@ -262,11 +262,129 @@ func TestPositionReconciler_Run_ErrorsOnSkeleton(t *testing.T) {
 	}
 }
 
-func TestSafetyGates_CheckOrder_ErrorsOnSkeleton(t *testing.T) {
-	g := &SafetyGates{MaxPositionMultiple: 1, DailyLossUSDCap: 1000, MaxEntrySpreadBps: 50}
-	err := g.CheckOrder(OrderIntent{}, 0, 0, 0)
-	if !errors.Is(err, ErrStageNotPromoted) {
-		t.Errorf("CheckOrder err = %v, want ErrStageNotPromoted", err)
+// SafetyGates real-implementation tests. STAGE_1 thresholds:
+// MaxPositionMultiple=1, DailyLossUSDCap=$1000, MaxEntrySpreadBps=50.
+func stage1Gates() *SafetyGates {
+	return &SafetyGates{MaxPositionMultiple: 1, DailyLossUSDCap: 1000, MaxEntrySpreadBps: 50}
+}
+
+func goodGateCtx() GateContext {
+	// Healthy STAGE_1 context: $100 stake, signal entry at mid, no open
+	// position, no recent loss.
+	return GateContext{
+		Intent: OrderIntent{
+			Symbol: "BTCUSDT", Side: models.Short, Quantity: 0.002, Type: "MARKET",
+		},
+		SignalEntryPrice:        50000,
+		CurrentBid:              49998,
+		CurrentAsk:              50002,
+		OpenPositionNotionalUSD: 0,
+		StakeUSD:                100,
+		Recent24hLossUSD:        0,
+	}
+}
+
+func TestSafetyGates_AllPass_ReturnsNil(t *testing.T) {
+	g := stage1Gates()
+	if err := g.CheckOrder(goodGateCtx()); err != nil {
+		t.Errorf("expected nil for healthy context, got %v", err)
+	}
+}
+
+func TestSafetyGates_GateA_MaxPositionCap(t *testing.T) {
+	g := stage1Gates()
+	c := goodGateCtx()
+	// stake=$100, MaxPositionMultiple=1, so cap=$100. Quantity 0.002 × 50000 = $100 — exactly at cap.
+	c.Intent.Quantity = 0.002
+	if err := g.CheckOrder(c); err != nil {
+		t.Errorf("Gate A at exact cap should pass: %v", err)
+	}
+	// One penny over: should fail.
+	c.Intent.Quantity = 0.0021 // $105 notional → over $100 cap
+	err := g.CheckOrder(c)
+	if err == nil || !strings.Contains(err.Error(), "Gate A") {
+		t.Errorf("Gate A over cap: expected Gate A failure, got %v", err)
+	}
+}
+
+func TestSafetyGates_GateA_AccountsForOpenPosition(t *testing.T) {
+	g := stage1Gates()
+	c := goodGateCtx()
+	c.Intent.Quantity = 0.001 // $50 intent
+	c.OpenPositionNotionalUSD = 60 // $60 already open → total $110 > $100 cap
+	err := g.CheckOrder(c)
+	if err == nil || !strings.Contains(err.Error(), "Gate A") {
+		t.Errorf("expected Gate A failure with existing position, got %v", err)
+	}
+}
+
+func TestSafetyGates_GateB_DailyLossCircuit(t *testing.T) {
+	g := stage1Gates()
+	c := goodGateCtx()
+	// At cap: passes.
+	c.Recent24hLossUSD = 1000
+	if err := g.CheckOrder(c); err != nil {
+		t.Errorf("Gate B at exact cap should pass: %v", err)
+	}
+	// Over cap: fails.
+	c.Recent24hLossUSD = 1000.01
+	err := g.CheckOrder(c)
+	if err == nil || !strings.Contains(err.Error(), "Gate B") {
+		t.Errorf("Gate B over cap: expected Gate B failure, got %v", err)
+	}
+}
+
+func TestSafetyGates_GateC_EntryPriceSanity(t *testing.T) {
+	g := stage1Gates()
+	c := goodGateCtx()
+	// Signal entry at exact mid: passes.
+	c.SignalEntryPrice = 50000
+	if err := g.CheckOrder(c); err != nil {
+		t.Errorf("entry-at-mid should pass: %v", err)
+	}
+	// Signal entry 50 bps below mid (right at cap): mid=50000, 50 bps = $250
+	// → 49750 should be exactly at cap and pass.
+	c.SignalEntryPrice = 49750
+	if err := g.CheckOrder(c); err != nil {
+		t.Errorf("entry at 50bps from mid (exact cap) should pass: %v", err)
+	}
+	// 60 bps below: should fail.
+	c.SignalEntryPrice = 49700 // 60 bps below 50000
+	err := g.CheckOrder(c)
+	if err == nil || !strings.Contains(err.Error(), "Gate C") {
+		t.Errorf("entry at 60bps from mid: expected Gate C failure, got %v", err)
+	}
+}
+
+func TestSafetyGates_GateC_InvalidBidAsk(t *testing.T) {
+	g := stage1Gates()
+	c := goodGateCtx()
+	// Bid > ask is structurally invalid.
+	c.CurrentBid, c.CurrentAsk = 50100, 50000
+	err := g.CheckOrder(c)
+	if err == nil || !strings.Contains(err.Error(), "Gate C") {
+		t.Errorf("inverted bid/ask: expected Gate C failure, got %v", err)
+	}
+	// Zero bid/ask is invalid.
+	c.CurrentBid, c.CurrentAsk = 0, 0
+	err = g.CheckOrder(c)
+	if err == nil || !strings.Contains(err.Error(), "Gate C") {
+		t.Errorf("zero bid/ask: expected Gate C failure, got %v", err)
+	}
+}
+
+func TestSafetyGates_Ordering_GateAFailsBeforeGateB(t *testing.T) {
+	// When BOTH Gate A and Gate B would fail, A's error fires first.
+	// This pins the locked order (cheapest checks first; A and B are both
+	// pure arithmetic, so A's order is purely convention).
+	g := stage1Gates()
+	c := goodGateCtx()
+	c.Intent.Quantity = 1.0      // $50000 intent vs $100 cap → Gate A fails
+	c.Recent24hLossUSD = 5000    // $5000 vs $1000 cap → Gate B would also fail
+	c.SignalEntryPrice = 30000   // 4000 bps from mid → Gate C would also fail
+	err := g.CheckOrder(c)
+	if err == nil || !strings.Contains(err.Error(), "Gate A") {
+		t.Errorf("ordered failure: expected Gate A first, got %v", err)
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -312,10 +313,63 @@ type SafetyGates struct {
 	MaxEntrySpreadBps   float64 // Gate C: 50 bps default
 }
 
-// CheckOrder runs all three gates in order. Returns the first failing gate
-// or nil if all pass. Skeleton: errors with ErrStageNotPromoted.
-func (g *SafetyGates) CheckOrder(_ OrderIntent, _, _, _ float64) error {
-	return ErrStageNotPromoted
+// GateContext bundles every input the three gates need. Pulled into a struct
+// because Gate A needs the open-position notional + per-trade stake (not just
+// the order intent) and Gate C needs the strategy's intended entry price
+// separately from any limit price on the intent (MARKET orders have no price
+// field but still need entry-price-vs-bid/ask sanity).
+type GateContext struct {
+	Intent                  OrderIntent
+	SignalEntryPrice        float64 // strategy's intended entry (signal.EntryPrice)
+	CurrentBid              float64 // best-bid at order time
+	CurrentAsk              float64 // best-ask at order time
+	OpenPositionNotionalUSD float64 // existing open position $-notional on this symbol
+	StakeUSD                float64 // per-trade stake (used for Gate A cap)
+	Recent24hLossUSD        float64 // rolling 24h realized losses (used for Gate B)
+}
+
+// CheckOrder runs Gate A → Gate B → Gate C in order, short-circuiting on the
+// first failure. Returns nil only if all three pass. Order is locked: Gate A
+// and B are cheap pure-arithmetic checks; Gate C requires fresh bid/ask which
+// is the most expensive input.
+func (g *SafetyGates) CheckOrder(c GateContext) error {
+	// Gate A: total $-notional per symbol must be ≤ MaxPositionMultiple × stake.
+	// Adding the new intent's notional to the existing open notional must not
+	// exceed the cap.
+	intentNotional := c.Intent.Quantity * c.SignalEntryPrice
+	maxAllowed := g.MaxPositionMultiple * c.StakeUSD
+	if c.OpenPositionNotionalUSD+intentNotional > maxAllowed {
+		return fmt.Errorf("Gate A failed: max-position cap $%.2f exceeded (current_open=$%.2f + intent=$%.2f = $%.2f)",
+			maxAllowed, c.OpenPositionNotionalUSD, intentNotional,
+			c.OpenPositionNotionalUSD+intentNotional)
+	}
+
+	// Gate B: rolling 24h realized losses must be ≤ DailyLossUSDCap.
+	// Note: losses are POSITIVE numbers in this convention (loss=$1500 means
+	// $1500 was lost). At-cap is allowed; strictly > cap fails.
+	if c.Recent24hLossUSD > g.DailyLossUSDCap {
+		return fmt.Errorf("Gate B failed: daily-loss circuit breaker tripped (loss=$%.2f > cap=$%.2f)",
+			c.Recent24hLossUSD, g.DailyLossUSDCap)
+	}
+
+	// Gate C: signal entry price must be within MaxEntrySpreadBps of the
+	// current bid-ask mid. Catches stale signals (signal fired but engine
+	// took >5s to reach the order, mid has moved).
+	if c.CurrentBid <= 0 || c.CurrentAsk <= 0 || c.CurrentBid > c.CurrentAsk {
+		return fmt.Errorf("Gate C failed: invalid bid/ask (bid=%.4f ask=%.4f)",
+			c.CurrentBid, c.CurrentAsk)
+	}
+	mid := (c.CurrentBid + c.CurrentAsk) / 2
+	if mid <= 0 {
+		return fmt.Errorf("Gate C failed: non-positive mid (%.4f)", mid)
+	}
+	deviationBps := math.Abs(c.SignalEntryPrice-mid) / mid * 10000
+	if deviationBps > g.MaxEntrySpreadBps {
+		return fmt.Errorf("Gate C failed: signal price $%.4f differs from mid $%.4f by %.1f bps > cap %.1f bps",
+			c.SignalEntryPrice, mid, deviationBps, g.MaxEntrySpreadBps)
+	}
+
+	return nil
 }
 
 // KillSwitch is the immediate market-close-all entry point. Used by:
