@@ -243,27 +243,43 @@ echo ""
 echo "8. Executor mode per engine"
 EXEC_REPORT=$(ssh "${TARGET}" "real_count=0
 real_list=''
+testnet_count=0
+testnet_list=''
 for sym in $SYMBOLS_LC; do
     es=\$(systemctl show -p ExecStart --value paper-live@\${sym}.service 2>/dev/null || true)
-    if [[ \"\$es\" == *'--executor binance_live'* || \"\$es\" == *'--executor=binance_live'* ]]; then
+    # Match the binance_live token exactly — trailing space (common, more args
+    # follow) or end-of-string. Without the trailing-space anchor, the glob
+    # '*--executor binance_live*' would falsely match binance_live_testnet too.
+    if [[ \"\$es\" == *'--executor binance_live '* || \"\$es\" == *'--executor=binance_live '* \\
+       || \"\$es\" == *'--executor binance_live' || \"\$es\" == *'--executor=binance_live' ]]; then
         real_count=\$((real_count + 1))
         real_list=\"\$real_list \$sym\"
+    elif [[ \"\$es\" == *'--executor binance_live_testnet'* || \"\$es\" == *'--executor=binance_live_testnet'* ]]; then
+        testnet_count=\$((testnet_count + 1))
+        testnet_list=\"\$testnet_list \$sym\"
     fi
 done
-echo \"\$real_count|\$real_list\"")
-REAL_COUNT="${EXEC_REPORT%%|*}"
-REAL_LIST="${EXEC_REPORT#*|}"
+echo \"\$real_count|\$real_list|\$testnet_count|\$testnet_list\"")
+IFS='|' read -r REAL_COUNT REAL_LIST TESTNET_COUNT TESTNET_LIST <<<"$EXEC_REPORT"
 TOTAL=$(echo "$SYMBOLS_LC" | wc -w | tr -d ' ')
-if [[ "$REAL_COUNT" == "0" ]]; then
+if [[ "$REAL_COUNT" == "0" && "$TESTNET_COUNT" == "0" ]]; then
     ok "all $TOTAL engines on stub (paper-money) — pre-STAGE_1 expected state"
 else
-    # Real money is loud: emit an unmistakable banner. This is NOT a warning
-    # in the FAIL sense (real money on a promoted engine is the desired state
-    # post-STAGE_1), but it MUST be visible at every post_deploy_check.
-    echo "  🚨 REAL-MONEY ACTIVE on $REAL_COUNT / $TOTAL engines:$REAL_LIST"
-    echo "     Verify this matches your current STAGE_<N> promotion roster."
-    echo "     Per stage_promotion_runbook_decision_rule_2026-05-08.md, only"
-    echo "     ONE symbol promotes at a time and other symbols stay on stub."
+    if [[ "$REAL_COUNT" != "0" ]]; then
+        # Real money is loud: emit an unmistakable banner. This is NOT a warning
+        # in the FAIL sense (real money on a promoted engine is the desired state
+        # post-STAGE_1), but it MUST be visible at every post_deploy_check.
+        echo "  🚨 REAL-MONEY ACTIVE on $REAL_COUNT / $TOTAL engines:$REAL_LIST"
+        echo "     Verify this matches your current STAGE_<N> promotion roster."
+        echo "     Per stage_promotion_runbook_decision_rule_2026-05-08.md, only"
+        echo "     ONE symbol promotes at a time and other symbols stay on stub."
+    fi
+    if [[ "$TESTNET_COUNT" != "0" ]]; then
+        # Testnet is play-money but operationally distinct from stub — orders
+        # leave the host. Surface for visibility but don't escalate.
+        echo "  ⓘ  TESTNET executor active on $TESTNET_COUNT / $TOTAL engines:$TESTNET_LIST"
+        echo "     (Layer 2 integration gate — orders go to testnet.binancefuture.com)"
+    fi
 fi
 
 # ── 9. Funding CSV staleness ──────────────────────────────────────────────────

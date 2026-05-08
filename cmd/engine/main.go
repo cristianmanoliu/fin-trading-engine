@@ -39,7 +39,7 @@ func main() {
 	emaFastPeriod := flag.Int("ema-fast-period", 0, "fast EMA period for live strategy (default 9 when EMAMode is true)")
 	emaSlowPeriod := flag.Int("ema-slow-period", 0, "slow EMA period for live strategy (default 21 when EMAMode is true)")
 	signalContextDir := flag.String("signal-context-dir", "", "directory for signal-context JSONL sidecars; written per-runner under <dir>/<label>/<symbol>-<month>.jsonl. Off by default; when unset and PAPER_LIVE_SIGNAL_CONTEXT_DIR env is set, that env value is used.")
-	executorMode := flag.String("executor", "stub", "executor mode: stub (paper-money default — current paper-live deploy) | binance_live (real money, STAGE_1+ promotion). binance_live requires BINANCE_API_KEY and BINANCE_API_SECRET env vars and only governs the LIVE runner — shadow runners always use stub by design.")
+	executorMode := flag.String("executor", "stub", "executor mode: stub (paper-money default — current paper-live deploy) | binance_live_testnet (Layer 2 integration gate; orders go to testnet.binancefuture.com, prices stay on production fapi) | binance_live (real money, STAGE_1+ promotion). binance_live and binance_live_testnet both require BINANCE_API_KEY and BINANCE_API_SECRET env vars (testnet uses SEPARATE credentials from mainnet) and only govern the LIVE runner — shadow runners always use stub by design.")
 	flag.Parse()
 
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
@@ -278,8 +278,64 @@ func main() {
 			fmt.Sprintf("REAL-MONEY engine started on %s\nstake: $%.0f / trade\nhost: %s",
 				cfg.Symbol, cfg.Strategy.StakeUSDT, hostname))
 
+	case "binance_live_testnet":
+		// Layer 2 integration gate per real_money_executor_architecture_decision_rule_2026-05-08.md.
+		// Identical wiring to binance_live but orders go to testnet.binancefuture.com
+		// (SEPARATE credentials). Tick/price feeds stay on production fapi —
+		// Layer 2 contract is "real prices, fake fills". Severity-Warn instead
+		// of Critical because no real capital is at risk.
+		apiKey := os.Getenv("BINANCE_API_KEY")
+		apiSecret := os.Getenv("BINANCE_API_SECRET")
+		if apiKey == "" || apiSecret == "" {
+			slog.Error("--executor=binance_live_testnet requires BINANCE_API_KEY and BINANCE_API_SECRET env vars (testnet credentials)",
+				"symbol", cfg.Symbol)
+			_ = notifier.SendStructured(ctx, notify.SeverityWarn,
+				fmt.Sprintf("STARTUP FAILED on %s — --executor=binance_live_testnet without BINANCE_API_KEY/BINANCE_API_SECRET env vars",
+					cfg.Symbol))
+			os.Exit(1)
+		}
+		bl := execution.NewBinanceLiveTestnet(cfg.Symbol, cfg.Strategy.StakeUSDT, apiKey, apiSecret)
+		bl.JournalPath = journalDir
+		bl.FeeBps = *feeBps
+		bl.StopSlippageBps = *stopSlippageBps
+		bl.MaxHoldHours = *maxHoldHours
+		bl.Notifier = notifier
+		bl.PositionReconciler.Notifier = notifier
+
+		// Same recovery + drift-block flow as mainnet — exercising it on testnet
+		// is precisely what Layer 2 is for. Use exit code 2 on drift so the
+		// distinct-exit-code contract holds in both modes.
+		if recovered, err := bl.RecoverFromJournal(ctx); err != nil {
+			if errors.Is(err, execution.ErrRecoveryDrift) {
+				slog.Error("STARTUP BLOCKED: testnet recovery drift — operator must reconcile + restart",
+					"symbol", cfg.Symbol, "err", err)
+				_ = notifier.SendStructured(ctx, notify.SeverityWarn,
+					fmt.Sprintf("STARTUP BLOCKED on %s (TESTNET) — recovery drift\n%v\nOperator must investigate the divergence (close exchange position OR adjust journal) and restart the engine.",
+						cfg.Symbol, err))
+				os.Exit(2)
+			}
+			slog.Error("testnet recovery failed (non-drift)", "err", err, "symbol", cfg.Symbol)
+			_ = notifier.SendStructured(ctx, notify.SeverityWarn,
+				fmt.Sprintf("STARTUP FAILED on %s (TESTNET) — recovery error\n%v",
+					cfg.Symbol, err))
+			os.Exit(2)
+		} else if recovered {
+			slog.Info("testnet position recovered + verified clean", "symbol", cfg.Symbol)
+			_ = notifier.SendStructured(ctx, notify.SeverityInfo,
+				fmt.Sprintf("testnet position recovered + verified on %s", cfg.Symbol))
+		}
+
+		liveBinance = bl
+		exec = bl
+
+		slog.Warn("TESTNET EXECUTOR ACTIVE — orders will be sent to Binance TESTNET (no real capital)",
+			"symbol", cfg.Symbol, "stake_usd", cfg.Strategy.StakeUSDT, "api_base", execution.TestnetAPIBaseURL)
+		_ = notifier.SendStructured(ctx, notify.SeverityWarn,
+			fmt.Sprintf("TESTNET engine started on %s\nstake: $%.0f / trade (paper)\nhost: %s",
+				cfg.Symbol, cfg.Strategy.StakeUSDT, hostname))
+
 	default:
-		slog.Error("invalid --executor; must be 'stub' or 'binance_live'", "got", *executorMode)
+		slog.Error("invalid --executor; must be 'stub', 'binance_live_testnet', or 'binance_live'", "got", *executorMode)
 		os.Exit(1)
 	}
 

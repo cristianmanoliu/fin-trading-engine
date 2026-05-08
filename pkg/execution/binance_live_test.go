@@ -49,6 +49,42 @@ func TestBinanceLive_NewBinanceLive_ConstructsAllComponents(t *testing.T) {
 	if bl.SafetyGates.MaxEntrySpreadBps != 50 {
 		t.Errorf("Gate C default = %v, want 50 bps", bl.SafetyGates.MaxEntrySpreadBps)
 	}
+	// Mainnet endpoint is the default — production fapi.
+	if bl.OrderRouter.APIBaseURL != MainnetAPIBaseURL {
+		t.Errorf("OrderRouter.APIBaseURL = %q, want mainnet %q", bl.OrderRouter.APIBaseURL, MainnetAPIBaseURL)
+	}
+	if bl.PositionReconciler.APIBaseURL != MainnetAPIBaseURL {
+		t.Errorf("PositionReconciler.APIBaseURL = %q, want mainnet %q", bl.PositionReconciler.APIBaseURL, MainnetAPIBaseURL)
+	}
+}
+
+// NewBinanceLiveTestnet must produce a BinanceLive identical to NewBinanceLive
+// in every respect EXCEPT that both REST endpoints (OrderRouter,
+// PositionReconciler) are swapped to the testnet base. This is the Layer 2
+// integration-gate prerequisite: real prices, fake fills.
+func TestBinanceLive_NewBinanceLiveTestnet_SwapsBothEndpoints(t *testing.T) {
+	bl := NewBinanceLiveTestnet("BTCUSDT", 100, "k", "s")
+	if bl.OrderRouter.APIBaseURL != TestnetAPIBaseURL {
+		t.Errorf("OrderRouter.APIBaseURL = %q, want testnet %q", bl.OrderRouter.APIBaseURL, TestnetAPIBaseURL)
+	}
+	if bl.PositionReconciler.APIBaseURL != TestnetAPIBaseURL {
+		t.Errorf("PositionReconciler.APIBaseURL = %q, want testnet %q", bl.PositionReconciler.APIBaseURL, TestnetAPIBaseURL)
+	}
+	// All other components remain wired the same way as mainnet.
+	if bl.OrderRouter == nil || bl.PositionReconciler == nil || bl.SafetyGates == nil || bl.KillSwitch == nil {
+		t.Fatal("testnet variant must have all components constructed")
+	}
+	if bl.KillSwitch.Router != bl.OrderRouter {
+		t.Error("testnet variant KillSwitch.Router not wired to OrderRouter")
+	}
+	// Stake + symbol pass through unchanged.
+	if bl.Symbol != "BTCUSDT" || bl.StakeUSD != 100 || bl.APIKey != "k" || bl.APISecret != "s" {
+		t.Errorf("testnet variant did not pass through ctor args: %+v", bl)
+	}
+	// Sanity: testnet base must not equal mainnet base.
+	if TestnetAPIBaseURL == MainnetAPIBaseURL {
+		t.Fatal("TestnetAPIBaseURL == MainnetAPIBaseURL — constants collapsed")
+	}
 }
 
 // ── BinanceLive Executor full-path tests ─────────────────────────────────────

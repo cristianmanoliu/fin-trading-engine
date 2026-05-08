@@ -99,6 +99,17 @@ type BinanceLive struct {
 	wg sync.WaitGroup
 }
 
+// MainnetAPIBaseURL is the production Binance USDT-M Futures REST endpoint.
+// Used by NewBinanceLive (the default real-money executor).
+const MainnetAPIBaseURL = "https://fapi.binance.com"
+
+// TestnetAPIBaseURL is the Binance USDT-M Futures TESTNET REST endpoint —
+// faithful replica of mainnet with paper-money fills, separate API credentials.
+// Used by NewBinanceLiveTestnet to satisfy the Layer 2 integration gate from
+// real_money_executor_architecture_decision_rule_2026-05-08.md before any
+// engine is flipped to mainnet for STAGE_1.
+const TestnetAPIBaseURL = "https://testnet.binancefuture.com"
+
 // NewBinanceLive constructs a BinanceLive with default-initialized components.
 // Construction is safe — only method calls error.
 func NewBinanceLive(symbol string, stakeUSD float64, apiKey, apiSecret string) *BinanceLive {
@@ -108,7 +119,7 @@ func NewBinanceLive(symbol string, stakeUSD float64, apiKey, apiSecret string) *
 		APIKey:    apiKey,
 		APISecret: apiSecret,
 		OrderRouter: &OrderRouter{
-			APIBaseURL: "https://fapi.binance.com",
+			APIBaseURL: MainnetAPIBaseURL,
 			APIKey:     apiKey,
 			APISecret:  apiSecret,
 			HTTPClient: &http.Client{Timeout: 10 * time.Second},
@@ -133,6 +144,25 @@ func NewBinanceLive(symbol string, stakeUSD float64, apiKey, apiSecret string) *
 		KillSwitch: &KillSwitch{},
 	}
 	bl.KillSwitch.Router = bl.OrderRouter
+	return bl
+}
+
+// NewBinanceLiveTestnet constructs a BinanceLive pointed at the Binance USDT-M
+// Futures TESTNET. Identical to NewBinanceLive in every other respect — same
+// safety gates, same recovery semantics, same kill-switch wiring — but order
+// + position-reconciler REST calls go to testnet.binancefuture.com instead of
+// fapi.binance.com. Tick/price feeds are unaffected (those flow through the
+// marketdata package and continue to use production data, which is the
+// correct Layer 2 contract: real prices, fake fills).
+//
+// Required by the Layer 2 integration gate before any STAGE_1 mainnet flip
+// (real_money_executor_architecture_decision_rule_2026-05-08.md §"Layer 2 —
+// Integration against Binance TESTNET"). Testnet API credentials are SEPARATE
+// from production — generate them at testnet.binancefuture.com.
+func NewBinanceLiveTestnet(symbol string, stakeUSD float64, apiKey, apiSecret string) *BinanceLive {
+	bl := NewBinanceLive(symbol, stakeUSD, apiKey, apiSecret)
+	bl.OrderRouter.APIBaseURL = TestnetAPIBaseURL
+	bl.PositionReconciler.APIBaseURL = TestnetAPIBaseURL
 	return bl
 }
 

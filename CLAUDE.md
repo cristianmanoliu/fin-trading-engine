@@ -12,7 +12,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Validation status:** SUPPORTIVE walk-forward verdict (4H short EMA 9/21 mh504, 6 windows). Mean +$130k/yr with 95% CI [−$111k, +$372k] — **CI includes negative; uncertainty is irreducible from history alone.** Trade-level block bootstrap (5y × 16 sym × 2,210 trades, stationary bootstrap at L=√N=47) gives a much tighter CI [+$42k, +$220k]/yr, P(>$0)=99.9%, P(>$50k)=96.5% — but walk-forward CI is **2.8× wider**, confirming regime-variance (quarter-level) dominates trade-level autocorrelation (lag-1 ρ=+0.32). **Anchor expectations to walk-forward, not bootstrap** — bootstrap underestimates per-quarter regime swings. See `results/bootstrap_ci_verdict_2026-05-07.md`.
 
-**Real-money allocation:** ZERO. BinanceLive executor code complete; Go binary is promotion-ready. Gated on forward-paper validation (≥150 trades, ≥60 days net-positive, see `## Forward-paper go/no-go criteria`) PLUS Layer 2 testnet integration + Layer 3 7-day shadow parity per `results/real_money_executor_architecture_decision_rule_2026-05-08.md`.
+**Real-money allocation:** ZERO. BinanceLive executor code complete; Go binary is promotion-ready. Gated on forward-paper validation (≥150 trades, ≥60 days net-positive, see `## Forward-paper go/no-go criteria`) PLUS Layer 2 testnet integration + Layer 3 7-day shadow parity per `results/real_money_executor_architecture_decision_rule_2026-05-08.md`. Layer 2 plumbing landed 2026-05-08: `--executor binance_live_testnet` swaps OrderRouter + PositionReconciler to `testnet.binancefuture.com` (price feeds stay on production fapi — locked Layer 2 contract is "real prices, fake fills"). Operator action remaining: generate testnet credentials + run the integration test scenarios listed in the locked rule.
 
 ## Recent session logs
 
@@ -35,6 +35,12 @@ go run ./cmd/backtest --config configs/btcusdt.yaml --year 2024 --month 06
 
 # Run live engine (paper trading via Binance WebSocket — DEFAULT)
 go run ./cmd/engine --config configs/btcusdt.yaml
+
+# Run live engine pointed at Binance USDT-M Futures TESTNET (Layer 2 gate;
+# play-money fills, real production prices). Use SEPARATE testnet credentials
+# from mainnet — generate at testnet.binancefuture.com.
+BINANCE_API_KEY=... BINANCE_API_SECRET=... \
+  go run ./cmd/engine --config configs/btcusdt.yaml --executor binance_live_testnet
 
 # Run live engine in REAL-MONEY mode (STAGE_1+ promotion ONLY; default is stub).
 # Requires Layer 2 (testnet) + Layer 3 (7d shadow parity) gates passed first
