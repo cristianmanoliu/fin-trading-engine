@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  com.tradingengine.drift-check — weekly cadence drift detector.
+
+  Per the time-to-detection verdict (results/drift_detector_time_to_detection_verdict_2026-05-08.md):
+  daily sequential testing inflates FP to ~28%/year; weekly is the locked
+  operational cadence. A SINGLE firing is investigation-grade; two firings
+  ≥7 days apart escalate to AUTO-KILL CANDIDATE (wrapper exit 4).
+
+  Default --live-source=vps SSHes into 178.105.24.230 to read live journals,
+  so the macOS Keychain MUST hold the SSH key passphrase (the typical setup —
+  if `ssh root@178.105.24.230 echo ok` works without prompting in a fresh
+  Terminal, this job will work too). On first scheduled run, check
+  results/drift_runs/launchd.err.log if no new history entry appears.
+
+  Install:
+    cp deploy/drift-check.launchd.plist ~/Library/LaunchAgents/com.tradingengine.drift-check.plist
+    launchctl load ~/Library/LaunchAgents/com.tradingengine.drift-check.plist
+
+  Uninstall:
+    launchctl unload ~/Library/LaunchAgents/com.tradingengine.drift-check.plist
+    rm ~/Library/LaunchAgents/com.tradingengine.drift-check.plist
+
+  Manual fire (smoke test):
+    launchctl start com.tradingengine.drift-check
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.tradingengine.drift-check</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>-c</string>
+        <string>cd /Users/cristianmanoliu/Main/source.code/github/trading-engine &amp;&amp; ./scripts/run_drift_check.sh --quiet</string>
+    </array>
+
+    <!-- Weekly: Sunday (Weekday=0) 09:00 local time. Missed firings (laptop
+         asleep at the trigger) re-fire at next wake. -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Weekday</key>
+        <integer>0</integer>
+        <key>Hour</key>
+        <integer>9</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>/Users/cristianmanoliu/Main/source.code/github/trading-engine/results/drift_runs/launchd.out.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/cristianmanoliu/Main/source.code/github/trading-engine/results/drift_runs/launchd.err.log</string>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <key>HOME</key>
+        <string>/Users/cristianmanoliu</string>
+    </dict>
+</dict>
+</plist>
