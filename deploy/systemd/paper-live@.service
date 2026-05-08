@@ -20,6 +20,31 @@ Environment=PAPER_LIVE_JOURNAL_DIR=/var/log/paper-live/journal
 # at /var/log/paper-live/journal/shadow/<label>/. Compare live vs shadow PnL
 # after sufficient forward time accumulates.
 # Rollback: drop --shadow flag (live unaffected); change --max-hold-hours 504 → 336.
+#
+# Executor mode: stub (paper-money — DEFAULT). For STAGE_1+ promotion to
+# real-money, see real_money_executor_architecture_decision_rule_2026-05-08.md
+# + stage_promotion_runbook_decision_rule_2026-05-08.md. The locked workflow:
+#
+#   1. Pre-flight: Layer 2 testnet integration tests pass + Layer 3 7-day
+#      shadow-mode parity diff ≤0.5% pnl_usd per closed trade.
+#   2. Add to /etc/paper-live/env (loaded via EnvironmentFile above):
+#        BINANCE_API_KEY=<production_key>
+#        BINANCE_API_SECRET=<production_secret>
+#   3. Promote ONE symbol first (per stage_promotion_runbook). Override its
+#      unit via `systemctl edit paper-live@<sym>.service` and ADD to ExecStart:
+#        --executor binance_live
+#      The drop-in override doesn't touch this template — other symbols stay
+#      on stub. STAGE_1 stake is $100/trade — also adjust the per-symbol
+#      configs/<sym>.yaml stake_usdt: 100 before the override redeploy.
+#   4. systemctl daemon-reload && systemctl restart paper-live@<sym>.service
+#   5. RecoverFromJournal verifies recovered state against exchange; on
+#      divergence the engine refuses to start (os.Exit(2)) with CRITICAL
+#      Telegram alert — operator must reconcile per the locked rule.
+#   6. After 30d clean drift detector at STAGE_1 → STAGE_2 (per
+#      real_money_protocol_decision_rule_2026-05-08.md). Repeat per-stage.
+#
+# IMPORTANT: Shadow runners ALWAYS use stub regardless of --executor. Real
+# money goes to ONE strategy at a time per the locked rule.
 ExecStart=/opt/trading-engine/bin/engine --config /opt/trading-engine/configs/%i.yaml \
     --signal-tf 4H --target-rr 6.0 \
     --side-filter short \
