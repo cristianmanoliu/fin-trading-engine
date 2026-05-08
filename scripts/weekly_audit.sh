@@ -54,5 +54,34 @@ if [[ "$WITH_SNAPSHOT" -eq 1 ]]; then
     fi
 fi
 
+# --- 3. Journal self-consistency validation ---
+# Catches duplicate opens / out-of-order timestamps / mid-file malformed
+# JSON in the live journals. The drift detector + forward_paper_status
+# both READ these journals to produce decision-grade signals — silent
+# corruption would poison both. Excludes the frozen pre-Bug-6 archive
+# whose pre-fix issues are known and immutable. Runs on VPS via ssh
+# (binary is at /opt/trading-engine/bin/journal_validate post-sync).
+# shellcheck source=lib/notify.sh
+source "${REPO_ROOT}/scripts/lib/notify.sh"
+
+VALIDATE_OUTPUT=$(ssh root@178.105.24.230 \
+    '/opt/trading-engine/bin/journal_validate --dir /var/log/paper-live/journal --exclude archive 2>&1' || true)
+VALIDATE_EXIT=$?
+echo "validate: exit=$VALIDATE_EXIT"
+echo "$VALIDATE_OUTPUT" | tail -1
+if [[ "$VALIDATE_EXIT" -ge 2 ]]; then
+    # ERROR-level: corruption detected. Telegram CRITICAL — operator must
+    # investigate before next forward-paper analysis.
+    notify_telegram CRITICAL "weekly_audit on $(hostname)" \
+"journal_validate found errors in live journals
+exit=$VALIDATE_EXIT
+last line: $(echo "$VALIDATE_OUTPUT" | tail -1)
+Run: ssh root@178.105.24.230 /opt/trading-engine/bin/journal_validate --dir /var/log/paper-live/journal --exclude archive"
+elif [[ "$VALIDATE_EXIT" -eq 1 ]]; then
+    # WARN-only: usually trailing-malformed-line tolerance. Logged but
+    # not alerted (operator can review snapshot/run logs).
+    echo "validate: warnings present (non-blocking)"
+fi
+
 # --- exit with the drift wrapper's code so launchd surfaces the right thing ---
 exit "$DRIFT_EXIT"

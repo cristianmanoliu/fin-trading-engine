@@ -75,6 +75,7 @@ type issue struct {
 
 func main() {
 	dir := flag.String("dir", "", "journal directory (recursively walked for *.jsonl files)")
+	exclude := flag.String("exclude", "", "comma-separated path substrings to skip (e.g., 'archive,old_runs'); useful for frozen historical journals whose pre-fix issues are known and immutable")
 	strict := flag.Bool("strict", false, "treat warnings as errors (exit 2 instead of 1)")
 	verbose := flag.Bool("verbose", false, "print files with no issues too (default: only print files with issues)")
 	flag.Parse()
@@ -85,7 +86,16 @@ func main() {
 		os.Exit(3)
 	}
 
-	files, err := discoverJournals(*dir)
+	var excludes []string
+	if *exclude != "" {
+		for _, s := range strings.Split(*exclude, ",") {
+			if s = strings.TrimSpace(s); s != "" {
+				excludes = append(excludes, s)
+			}
+		}
+	}
+
+	files, err := discoverJournals(*dir, excludes)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "discover: %v\n", err)
 		os.Exit(3)
@@ -133,16 +143,24 @@ func main() {
 	}
 }
 
-// discoverJournals walks dir and returns sorted *.jsonl paths.
-func discoverJournals(dir string) ([]string, error) {
+// discoverJournals walks dir and returns sorted *.jsonl paths, skipping any
+// path whose contents include any of the given substring patterns. Empty
+// excludes = no filtering.
+func discoverJournals(dir string, excludes []string) ([]string, error) {
 	var out []string
 	err := filepath.Walk(dir, func(p string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
-		if !info.IsDir() && strings.HasSuffix(p, ".jsonl") {
-			out = append(out, p)
+		if info.IsDir() || !strings.HasSuffix(p, ".jsonl") {
+			return nil
 		}
+		for _, ex := range excludes {
+			if strings.Contains(p, ex) {
+				return nil
+			}
+		}
+		out = append(out, p)
 		return nil
 	})
 	sort.Strings(out)

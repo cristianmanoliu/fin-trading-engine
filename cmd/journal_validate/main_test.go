@@ -196,7 +196,7 @@ func TestDiscoverJournals_RecursesShadowSubdirs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	files, err := discoverJournals(dir)
+	files, err := discoverJournals(dir, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,6 +207,18 @@ func TestDiscoverJournals_RecursesShadowSubdirs(t *testing.T) {
 		if !strings.HasSuffix(f, ".jsonl") {
 			t.Errorf("non-jsonl file picked up: %s", f)
 		}
+	}
+
+	// With --exclude=shadow, only the root-level live journal should remain.
+	filtered, err := discoverJournals(dir, []string{"shadow"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(filtered) != 1 {
+		t.Errorf("--exclude=shadow expected 1 file, got %d: %v", len(filtered), filtered)
+	}
+	if len(filtered) > 0 && strings.Contains(filtered[0], "shadow") {
+		t.Errorf("--exclude=shadow leaked a shadow file: %s", filtered[0])
 	}
 }
 
