@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Strategy status (2026-05-07 EOS)
+## Strategy status (2026-05-09)
 
 **Live:** 16 paper-trading engines on Hetzner VPS, each running 1 live + 3 shadow strategies (alt5-15-336, alt5-15-504, bb20). Engines now have **journal-replay on startup** — restarts no longer orphan in-flight positions (commit `9eaeb54`, deployed 2026-05-07T20:24 UTC, 7 orphans recovered cleanly on first run).
 - **Live config:** `--signal-tf 4H --side-filter short --target-rr 6.0 --max-hold-hours 504 --funding-csv-dir data/funding --fee-bps 10 --stop-slippage-bps 5` (EMA 9/21 hardcoded). Selected via 6-window walk-forward validation 2026-05-06.
@@ -319,9 +319,9 @@ When forward-paper resolves: read the pre-reg file. The promotion or kill decisi
 
 ## Historical strategies (kept for context — do not use to decide)
 
-**Option C (EMA9×EMA21, 5m, target_rr=5.0)** — falsified 2026-05-05. Continuous 5y × 57 symbols at 8 bp fees + 5 bp slip = **NET −$143.76M, 0/57 profitable**. Required WR 22.9% vs observed 17.0%. Pre-fees the same sweep was +$6.77M (40/57 profitable) — a fee-illusion edge of 0.3pp above breakeven WR. Output: `results/option_c_57sym_realistic_2026-05-05.txt`. Live VPS engines are still paper-trading this strategy as of 2026-05-05 — see *Current state* table at top.
+**Option C (EMA9×EMA21, 5m, target_rr=5.0)** — falsified 2026-05-05. Continuous 5y × 57 symbols at 8 bp fees + 5 bp slip = **NET −$143.76M, 0/57 profitable**. Pre-fees same sweep was +$6.77M — a fee-illusion edge of 0.3pp above breakeven WR. Live VPS migrated off Option C 2026-05-07.
 
-**Absorption + breakout (PDH/PDL, min_rr=1.0)** — original strategy, superseded 2026-05-04. Code remains live and toggleable via `ema_mode: false` in any per-symbol YAML. README.md still describes this strategy in the "Strategy" / "Backtest Results" / "Cross-Instrument Summary" sections; those sections are stale and pending rewrite once a successor is forward-validated.
+**Absorption + breakout (PDH/PDL, min_rr=1.0)** — original strategy, superseded 2026-05-04. Code remains toggleable via `ema_mode: false` in any per-symbol YAML.
 
 ## Known unmodeled risks
 
@@ -331,5 +331,5 @@ After the 2026-05-05 cost-survivor battery and 2026-05-06/07 follow-up work, the
 - **Funding-CSV staleness drift.** Engines pick up refreshed CSVs only on restart. Between restarts, trades held past the CSV's last entry get $0 funding. Bounded by time-since-last-restart; weekly refresh + restart caps drift at ~7 days. **Mitigated 2026-05-08:** `cmd/engine` logs `slog.Warn` at startup if `funding.Historical.LastTS()` is >7d old, naming `symbol`, `last_funding_ts`, and `stale_days`. The previously-silent "operator forgot to refresh" failure mode now produces a loud signal in `/var/log/paper-live/<symbol>.log` (and surfaces via `post_deploy_check.sh` section 9). Net funding ≈ $0 in steady state per backtest, so divergence remains small in practice.
 - **No real-money execution test.** Forward-paper with realistic position sizing, exchange position limits, margin reuse, and concurrent-trade interaction is unmodeled. Honest backtest projection is $69-184k/yr depending on slip (see `## Train-only shortlist diagnostic`); the original $74-142k/yr framing was based on the deployed-32 list which carries +26-70% look-ahead inflation.
 
-**Resolved or downgraded since 2026-05-05:** max-hold winner-slippage (cosmetic, 5.8% time-stop rate, deferred); funding-CSV silent fallback (clean at deploy); `tradeResult.fundingUSDT` comment; symbol-selection look-ahead (quantified +26-70%, not eliminated); orphan-on-restart (Bug 6 fixed in `9eaeb54`); threshold kill criteria (mis-calibrated at 90d, replaced by drift detector as decision-grade).
+**Resolved since 2026-05-05:** Bug 1 max-hold winner-slip (fixed 2026-05-09 + generalized to trailing/B2 winner paths); funding-CSV silent fallback; symbol-selection look-ahead (quantified +26-70%, not eliminated); Bug 6 orphan-on-restart (commit `9eaeb54`); threshold kill criteria (mis-calibrated, drift detector is decision-grade).
 
