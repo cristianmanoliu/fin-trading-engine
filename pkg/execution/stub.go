@@ -533,6 +533,10 @@ func (s *Stub) OnTick(tick models.Tick) {
 				won = exitPrice < sig.EntryPrice
 			}
 		}
+		// Stop fills are market exits — slip applies regardless of pnl direction.
+		// Baseline (won=false) already applies slip via the !won gate; this also
+		// covers trailing-stop / B2-partial winner paths (Bug 1 generalization).
+		s.position.ForceSlipOnClose = true
 		s.closePosition(exitPrice, tick.Timestamp, won)
 		return
 	} else if targetHit {

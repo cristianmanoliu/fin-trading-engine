@@ -554,6 +554,48 @@ func TestTrailingStop_RatchetsToBE_AndExitsProfitably(t *testing.T) {
 	}
 }
 
+func TestTrailingStop_AppliesSlipOnWinner(t *testing.T) {
+	// Generalization of Bug 1 to the trailing-stop winner path.
+	// Same setup as TestTrailingStop_RatchetsToBE_AndExitsProfitably:
+	// trailing stop ratchets to BE+1R, exits profitably (won=true).
+	// Pre-fix: !won-gated slip skipped slippage on trailing winners
+	// despite the exit being a market stop. Post-fix: slip applies.
+	//
+	// Notional = stake/stop_dist × entry = 1000/1 × 100 = $100k.
+	// Fee 10bp = $100 round-trip. Slip 5bp = $50.
+	// Gross = (101-100) × 1000 = $1,000. Net = 1000 - 100 - 50 = $850.
+	stub := &Stub{
+		StakeUSDT:        1000,
+		ExactFills:       true,
+		TrailingStopMode: true,
+		TrailIntervalR:   1.0,
+		FeeBps:           10,
+		StopSlippageBps:  5,
+	}
+	openTime := time.Date(2026, 5, 7, 0, 0, 0, 0, time.UTC)
+	stub.OnSignal(&models.Signal{
+		Symbol: "X", Side: models.Long,
+		EntryPrice: 100, StopLoss: 99, TakeProfit: 110,
+		Timestamp: openTime,
+	})
+	stub.OnTick(models.Tick{Symbol: "X", Timestamp: openTime.Add(time.Hour), Price: 102})  // ratchets
+	stub.OnTick(models.Tick{Symbol: "X", Timestamp: openTime.Add(2 * time.Hour), Price: 100.9}) // exits at 101
+
+	r := stub.results[0]
+	if !r.won {
+		t.Fatal("setup: trailing stop above entry should classify as won")
+	}
+	if r.slipUSDT != 50 {
+		t.Errorf("slipUSDT: got %v want 50 (5bp on $100k notional, market exit on stop)", r.slipUSDT)
+	}
+	if r.feeUSDT != 100 {
+		t.Errorf("feeUSDT: got %v want 100 (10bp on $100k notional)", r.feeUSDT)
+	}
+	if r.pnlUSDT != 1000-100-50 {
+		t.Errorf("pnlUSDT: got %v want %v (gross-fee-slip)", r.pnlUSDT, 1000-100-50)
+	}
+}
+
 func TestTrailingStop_NoRatchetBeforeOneR(t *testing.T) {
 	// B1: until favorable move ≥ 1R, stop stays at original.
 	stub := &Stub{
