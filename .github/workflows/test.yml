@@ -1,0 +1,80 @@
+name: tests
+
+# Run on every push to main + every PR. Catches regressions BEFORE they
+# can land in a deploy. The project has 70+ test files (Go + Python) but
+# no CI before this — a regression slipping in between commit and deploy
+# was a real exposure (especially given the audit pass on 2026-05-09 that
+# found 5 fail-open bugs none of which had explicit regression tests at
+# the time).
+#
+# Workflow strategy:
+#   - Run Go test suite (./...) on every push
+#   - Run Python test suite (scripts/test_*.py) on every push
+#   - Both jobs in parallel (different runners) for speed
+#   - go.mod-pinned Go version + project's tested Python version
+#
+# Not in scope (explicitly):
+#   - Linting (gofmt, golangci-lint, ruff, mypy) — different feedback shape
+#     and the project hasn't standardized on any. Adding without an
+#     existing local hook would force operator decisions; not the goal.
+#   - Coverage reporting — tests-pass-or-fail is the contract; coverage
+#     gating would force decisions about thresholds.
+#   - Build artifacts — operator deploys via deploy/redeploy.sh which
+#     builds on the VPS itself. CI doesn't need to publish binaries.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  go-tests:
+    name: Go test ./...
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          # Read the version directly from go.mod's `go ...` directive.
+          # No pinned version to drift; bump go.mod and CI follows.
+          go-version-file: 'go.mod'
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Run go test
+        run: go test ./...
+
+  python-tests:
+    name: Python test_*.py
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          # 3.11+ for PEP 604 union types ('str | None') used by the
+          # decision-grade scripts. Project tests against 3.14 locally.
+          python-version: '3.11'
+
+      - name: Run unittest test files
+        run: |
+          # Each test_*.py is a self-contained unittest.main() entry.
+          # Loop instead of unittest discover so a single test-file
+          # failure doesn't mask others.
+          set -e
+          for f in scripts/test_*.py; do
+            echo "=== $f ==="
+            python3 "$f"
+          done
