@@ -218,7 +218,6 @@ Key levels (used by absorption/breakout only): PDH, PDL, and optional manual `zo
 
 ### Open
 
-- **Max-hold force-close skips slippage on winners** (`pkg/execution/stub.go:236`). Documented but **not fixed** — measurement on RUNEUSDT continuous 5y showed only 9 time_stops out of 154 trades (5.8%). Extrapolated impact across deployed-32: ~$3-17k over 5y depending on slip level (1-2% of Strategy A's NET). Cosmetic, not material. Fix would require ~75 min including baseline re-runs; deferred until forward-paper actually shows divergence.
 - `CSVReplay` double-close: stream goroutine defers `f.Close()` and `main.go` also calls `defer src.Close()`. Idempotent (second close returns harmless error). Skip.
 - `run_backtest.sh` runs the binary twice per month (display + accumulate). Use `full_analysis.sh` for multi-month runs. Performance only.
 
@@ -229,6 +228,7 @@ Key levels (used by absorption/breakout only): PDH, PDL, and optional manual `zo
 - ~~**Bug 4 — REST poll exceeded Binance weight cap**~~: 6s × 16 sym × 20 weight/call = 3200/min vs 2400 cap → ~50% backoff. Fix 2026-05-07: bumped to 10s (1920/min). See `docs/findings/2026-05-08.md`.
 - ~~**Bug 5 — Cold-start indicator blind period**~~: backfill silently truncated to 1500 klines; restart needed 22 closed 4H candles → 64h blind. Fix 2026-05-07: paginated backfill, BackfillHours 48→96, liveMode stale-candle gate. See `docs/findings/2026-05-08.md`.
 - ~~**Bug 6 — Engine restart orphans positions**~~: Stub.Position was RAM-only; restart left journal with open + no close. Fix 2026-05-07 (commit `9eaeb54`): `RecoverFromJournal()` + pre-open tick guard + 11 unit tests. 7 orphans recovered cleanly on deploy. See `docs/findings/2026-05-08.md`.
+- ~~**Bug 1 — Max-hold force-close skips slippage on winners**~~: time-stop is a market exit, slip should apply regardless of pnl direction. Fix 2026-05-09: new `OpenPosition.ForceSlipOnClose` flag set in the time-stop branch, read by `closePosition` slip calc. Two regression tests in `stub_test.go` (winner + loser preserved). Trailing-stop / B2-partial winners still skip slip — out-of-scope for current strategy (no trailing, no B2). Backtest reproducibility: prior locked sweeps are immutable; future re-runs charge ~5-15bp more per time-stop, ≈1-2% NET shift on 5.8% trade subset.
 
 
 ## Forward-paper go/no-go criteria
@@ -312,7 +312,7 @@ When forward-paper resolves: read the pre-reg file. The promotion or kill decisi
 ### Things to NOT do during forward-paper
 
 - Don't reshuffle the deployed-32 mid-flight. Look-ahead is in backtest test_NET, not forward data.
-- Don't promote to Strategy A (Strategy A's max-hold-force-close-slippage bug `stub.go:236` is documented cosmetic but doesn't help here).
+- Don't promote to Strategy A pre-emptively (Strategy A vs B is a forward-paper question; backtest difference was inside the noise floor).
 - Don't add symbols. Trade-count throughput is currently 1.8/day; adding symbols increases REST-poll load against the 2400 weight/min Binance Regular cap.
 - Don't tune target_rr, signal_tf, or side-filter. Every additional sweep cell consumes statistical degrees of freedom you've already spent.
 - Don't read into wins/losses inside the 60-day power floor. The natural shorts-only hit-rate is 20.6% — variance is enormous at low n.

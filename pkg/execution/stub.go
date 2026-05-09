@@ -39,6 +39,13 @@ type OpenPosition struct {
 	// After a B2 partial close, drops to 1 - MidFrac. closePosition uses this to
 	// scale units = StakeUSDT × RemainingFrac / OriginalStopDist.
 	RemainingFrac float64
+
+	// ForceSlipOnClose: when true, closePosition charges StopSlippageBps even
+	// if won=true. Set by paths where the exit is a market order regardless
+	// of pnl direction (currently: max-hold force-close). Without this,
+	// winner-classified market exits under-modeled the realized cost.
+	// See CLAUDE.md "Bug 1".
+	ForceSlipOnClose bool
 }
 
 // Stub is a paper-trading execution engine.
@@ -447,6 +454,8 @@ func (s *Stub) OnTick(tick models.Tick) {
 				won = tick.Price < sig.EntryPrice
 			}
 			s.timeStopCount++
+			// Time-stop is a market exit — slip applies in either direction.
+			s.position.ForceSlipOnClose = true
 			s.closePosition(tick.Price, tick.Timestamp, won)
 			return
 		}
@@ -706,7 +715,7 @@ func (s *Stub) closePosition(exitPrice float64, exitTime time.Time, won bool) {
 			if s.FeeBps > 0 {
 				feeUSDT = s.FeeBps / 10000.0 * notional
 			}
-			if !won && s.StopSlippageBps > 0 {
+			if (s.position.ForceSlipOnClose || !won) && s.StopSlippageBps > 0 {
 				slipUSDT = s.StopSlippageBps / 10000.0 * notional
 			}
 			if s.FundingProvider != nil && holdSeconds > 0 {

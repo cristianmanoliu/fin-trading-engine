@@ -424,6 +424,88 @@ func TestMaxHoldForceClose(t *testing.T) {
 	}
 }
 
+func TestMaxHoldForceClose_AppliesSlipOnWinner(t *testing.T) {
+	// Bug 1 (CLAUDE.md): max-hold force-close is a market exit, so slippage
+	// should be charged regardless of pnl direction. Pre-fix, winner
+	// time-stops (won=true) skipped slippage, under-modeling the realized
+	// cost of forced market exits.
+	//
+	// Setup: long, entry=100, stop=99, target=110, MaxHold=1h.
+	// Tick at 105 after 2h: time-stop fires, in profit (won=true).
+	// Notional at trade open: stake/stop_dist × entry = 1000/1 × 100 = $100k.
+	// Round-trip fee 10bp on 100k = $100. Slip 5bp on 100k = $50.
+	// Gross = 1000 × (105-100) = $5,000.
+	// Net (post-fix) = 5000 - 100 - 50 = $4,850.
+	stub := &Stub{
+		StakeUSDT:       1000,
+		ExactFills:      true,
+		MaxHoldHours:    1.0,
+		FeeBps:          10,
+		StopSlippageBps: 5,
+	}
+	openTime := time.Date(2026, 5, 6, 0, 0, 0, 0, time.UTC)
+	stub.OnSignal(&models.Signal{
+		Symbol: "X", Side: models.Long,
+		EntryPrice: 100, StopLoss: 99, TakeProfit: 110,
+		Timestamp: openTime,
+	})
+	stub.OnTick(models.Tick{
+		Symbol:    "X",
+		Timestamp: openTime.Add(2 * time.Hour),
+		Price:     105,
+	})
+
+	if len(stub.results) != 1 {
+		t.Fatalf("expected 1 trade, got %d", len(stub.results))
+	}
+	r := stub.results[0]
+	if !r.won {
+		t.Fatal("setup: should be classified as winner (105 > 100)")
+	}
+	if r.feeUSDT != 100 {
+		t.Errorf("feeUSDT: got %v want 100 (10bp on $100k notional)", r.feeUSDT)
+	}
+	if r.slipUSDT != 50 {
+		t.Errorf("slipUSDT: got %v want 50 (5bp on $100k notional, market exit)", r.slipUSDT)
+	}
+	if r.pnlUSDT != 5000-100-50 {
+		t.Errorf("pnlUSDT: got %v want %v (gross-fee-slip)", r.pnlUSDT, 5000-100-50)
+	}
+}
+
+func TestMaxHoldForceClose_AppliesSlipOnLoser(t *testing.T) {
+	// Loser time-stops already applied slip (won=false → slip path).
+	// Regression-guard so the fix doesn't accidentally drop slip when
+	// won=false.
+	stub := &Stub{
+		StakeUSDT:       1000,
+		ExactFills:      true,
+		MaxHoldHours:    1.0,
+		FeeBps:          10,
+		StopSlippageBps: 5,
+	}
+	openTime := time.Date(2026, 5, 6, 0, 0, 0, 0, time.UTC)
+	stub.OnSignal(&models.Signal{
+		Symbol: "X", Side: models.Long,
+		EntryPrice: 100, StopLoss: 99, TakeProfit: 110,
+		Timestamp: openTime,
+	})
+	// Tick at 99.5 after 2h: above stop, but past max-hold. Force-close at 99.5,
+	// in loss (won=false).
+	stub.OnTick(models.Tick{
+		Symbol:    "X",
+		Timestamp: openTime.Add(2 * time.Hour),
+		Price:     99.5,
+	})
+	r := stub.results[0]
+	if r.won {
+		t.Fatal("setup: should be classified as loser (99.5 < 100)")
+	}
+	if r.slipUSDT != 50 {
+		t.Errorf("slipUSDT: got %v want 50 (loser slip preserved)", r.slipUSDT)
+	}
+}
+
 func TestTrailingStop_RatchetsToBE_AndExitsProfitably(t *testing.T) {
 	// B1 trailing stop. Setup: long, entry=100, stop=99 (1R=$1), target=110 (10R), trail interval=1R.
 	// Tick 1 at 102 (2R favorable): stop should ratchet from 99 to entry+1R = 101.
