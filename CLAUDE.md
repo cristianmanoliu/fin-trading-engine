@@ -16,6 +16,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Recent session logs
 
+- 2026-05-09 PM: 5 commits today extended `stage_promotion_check.py` to mechanize ALL FOUR stage transitions (was STAGE_0→1 only; now covers 1→2, 2→3, 3→4 via `--from-stage` + `--stage-N-start` ISO args). Followed by two audit passes: 3 fail-opens in mechanical gate checks (`5b54e22`) + 6 fail-opens in safety-critical peer scripts (`c88bc0e` — incl. catastrophic empty-backtest-reference fail-open in the decision-grade kill mechanism). Added drift-cron heartbeat to `forward_paper_status.sh`. Topped with CI lint expansion (`d4bba05` — shellcheck strict on operational scripts + ruff pyflakes repo-wide) to prevent the bug class going forward. Total: 13 fail-opens closed across 3 sessions, all of the same "missing input → silent success" shape; pattern memorialized in `~/.claude/lessons/lessons.md` and `audit_pattern_2026-05-09.md`.
 - `docs/findings/2026-05-08.md` — combined 2026-05-07/08 session: milestone-1 backtest investigation closure (5-fold strategy validation, F1×F2 mechanism class rejected, drift detector deployed at α=0.001, journal-replay shipped), operational hardening pass (forward_paper_status.sh / run_drift_check.sh / 9 defensive test suites / 10 pre-regs), and BinanceLive executor implementation (5 commits, ~75 tests, promotion-ready pending Layer 2/3 operational gates).
 - `docs/findings/2026-05-06.md` — walk-forward framework, mechanism analysis, regime finding, funding-loader bug fix.
 
