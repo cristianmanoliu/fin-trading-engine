@@ -258,8 +258,8 @@ def main() -> None:
         wr = 100 * total_wins / total_trades if total_trades else 0
         print(f"    {w}: {total_trades:>5} trades  {total_wins:>4} wins  {wr:.2f}% WR")
     # Breakeven WR for cost-laden 6:1 RR
-    print(f"\n    Breakeven WR for fee=10bp, slip=15bp, RR=6: ~14.3%")
-    print(f"    Strategy needs WR > breakeven across all regimes to be robust.")
+    print("\n    Breakeven WR for fee=10bp, slip=15bp, RR=6: ~14.3%")
+    print("    Strategy needs WR > breakeven across all regimes to be robust.")
 
     # ─────────────────────────────────────────────────────────────────────────
     # Test 5: Avg hold-hours drift (regime indicator)
@@ -270,8 +270,8 @@ def main() -> None:
         holds = [d["avg_hold"] for d in data[w].values() if d["trades"] > 0]
         if holds:
             print(f"    {w}: avg hold {mean(holds):.1f}h  median {median(holds):.1f}h  range {min(holds):.0f}-{max(holds):.0f}h")
-    print(f"\n    Longer holds → trades trending toward max-hold force-close (336h cap)")
-    print(f"    Shorter holds → faster RR resolution (either target or stop)")
+    print("\n    Longer holds → trades trending toward max-hold force-close (336h cap)")
+    print("    Shorter holds → faster RR resolution (either target or stop)")
 
     # ─────────────────────────────────────────────────────────────────────────
     # Test 6: Volatility-bin conditioning (H1 test)
@@ -345,10 +345,10 @@ def main() -> None:
     print()
     if abs(z_robust) < 1.96:
         print(f"  → ROBUST count ({cat_counts['ROBUST']}) is statistically INDISTINGUISHABLE from chance ({expected_3of3:.1f})")
-        print(f"    at 95% CI. This is STRONG evidence that there is NO per-symbol edge —")
-        print(f"    the symbols that look 'robust' are likely lucky, not skilled.")
+        print("    at 95% CI. This is STRONG evidence that there is NO per-symbol edge —")
+        print("    the symbols that look 'robust' are likely lucky, not skilled.")
     else:
-        print(f"  → ROBUST count is significantly different from chance.")
+        print("  → ROBUST count is significantly different from chance.")
 
     # ─────────────────────────────────────────────────────────────────────────
     # Test 8: Long vs short asymmetry (universal vs regime)
@@ -384,11 +384,11 @@ def main() -> None:
         print(f"    3-window aggregate: shorts ${sum_short:+,}  longs ${sum_long:+,}  asymmetry ${sum_short-sum_long:+,}")
         print()
         if long_universal:
-            print(f"  → Longs are NEGATIVE in ALL 3 windows. The asymmetry is UNIVERSAL,")
-            print(f"    not regime-conditioned. This is a STRUCTURAL property of the strategy,")
-            print(f"    consistent with H4 (crypto has structural short-side skew).")
+            print("  → Longs are NEGATIVE in ALL 3 windows. The asymmetry is UNIVERSAL,")
+            print("    not regime-conditioned. This is a STRUCTURAL property of the strategy,")
+            print("    consistent with H4 (crypto has structural short-side skew).")
         else:
-            print(f"  → Long PnL varies by window — asymmetry is partially regime-conditioned.")
+            print("  → Long PnL varies by window — asymmetry is partially regime-conditioned.")
     else:
         missing_long = [w for w, d in longs_data.items() if not d]
         print(f"    Long-side data missing for: {missing_long}")
@@ -421,7 +421,7 @@ def main() -> None:
         low_net = sum(data[w].get(s, {}).get("net", 0) for w in ("W1","W2","W3") for s, _ in bins["low_vol"])
         high_net = sum(data[w].get(s, {}).get("net", 0) for w in ("W1","W2","W3") for s, _ in bins["high_vol"])
         if abs(low_net) > 1000:
-            h1_ratio = high_net / abs(low_net) if low_net else float('inf')
+            high_net / abs(low_net) if low_net else float('inf')
             h1_verdict = "supported" if high_net > 2 * abs(low_net) else "weakly supported" if high_net > low_net else "NOT supported"
         else:
             h1_verdict = "inconclusive (low_vol bin near zero)"

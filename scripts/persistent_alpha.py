@@ -21,7 +21,6 @@ For the PERSISTENT subset, sub-aggregates:
 from __future__ import annotations
 
 import re
-import sys
 from pathlib import Path
 
 SYM_OOS = re.compile(
@@ -90,7 +89,7 @@ def main() -> None:
 
     print()
     print(f"  PERSISTENT ALPHA  (positive in both backtest AND fresh OOS)  — n={len(persistent)}")
-    print(f"  These are the strongest candidates for a survivable subset deploy.")
+    print("  These are the strongest candidates for a survivable subset deploy.")
     print()
     print(f"  {'symbol':<15} {'5y NET':>10} {'5y ann':>10} {'fresh@15':>10} {'fresh@25':>10}  in_dep_16")
     print(f"  {'-'*15} {'-'*10} {'-'*10} {'-'*10} {'-'*10}  ---------")
@@ -123,7 +122,7 @@ def main() -> None:
     dep_fresh25 = sum(fresh25.get(s, 0) for s in deployed_16)
     dep_bt_ann = sum(backtest.get(s, 0)/5.33 for s in deployed_16)
     print()
-    print(f"  DEPLOYED-16 SUB-AGGREGATE  (for comparison)")
+    print("  DEPLOYED-16 SUB-AGGREGATE  (for comparison)")
     print(f"  {'-'*82}")
     print(f"    Backtest annualised:           ${dep_bt_ann:>+10,.0f}/yr")
     print(f"    Fresh 12mo NET @ slip=15bp:    ${dep_fresh15:>+10,}")
@@ -147,9 +146,9 @@ def main() -> None:
     rising.sort(key=lambda s: -fresh15.get(s, 0))
     print()
     print(f"  RISING — negative/zero backtest, positive fresh OOS  (n={len(rising)})")
-    print(f"  These are the 'structural blind spots' the train-only filter missed.")
-    print(f"  Inclusion in a future deploy would be honest only if a NEW selection")
-    print(f"  methodology supports it (not retrofitting from fresh OOS).")
+    print("  These are the 'structural blind spots' the train-only filter missed.")
+    print("  Inclusion in a future deploy would be honest only if a NEW selection")
+    print("  methodology supports it (not retrofitting from fresh OOS).")
     print(f"  {'-'*82}")
     rising_fresh = 0
     for sym in rising[:15]:
@@ -177,7 +176,7 @@ def main() -> None:
         print(f"    {sym}")
 
     print()
-    print(f"  CATEGORY SUMMARY")
+    print("  CATEGORY SUMMARY")
     print(f"    persistent      {len(persistent):>3}/57")
     print(f"    rising          {len(rising):>3}/57")
     print(f"    dead            {len(dead):>3}/57")

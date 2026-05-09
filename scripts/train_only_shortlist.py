@@ -120,7 +120,7 @@ def report(rows: dict[str, tuple[int, int]], slip: int = 5) -> str:
     lines.append(f"    Persistent winners (deployed-32):  {len(deployed)} symbols")
     lines.append(f"    Train-WIN, Test-LOSS (regime flip): {flippers}")
     lines.append(f"      Test contribution: ${sum(rows[s][1] for s in flippers):>+10,}")
-    lines.append(f"    Train-LOSS, Test-WIN (recoveries — INVISIBLE to honest filter):")
+    lines.append("    Train-LOSS, Test-WIN (recoveries — INVISIBLE to honest filter):")
     lines.append(f"      Symbols: {recoveries}")
     lines.append(f"      Test contribution: ${sum(rows[s][1] for s in recoveries):>+10,}")
     lines.append(f"    Persistent losers (drop): {persistent_loss}")

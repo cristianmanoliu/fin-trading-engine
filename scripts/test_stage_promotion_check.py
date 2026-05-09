@@ -13,7 +13,6 @@ breaks a single criterion doesn't get masked by the verdict aggregation.
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
 import tempfile

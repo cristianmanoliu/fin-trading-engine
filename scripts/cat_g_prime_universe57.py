@@ -140,12 +140,12 @@ def fmt_dollar(x: float) -> str:
 def main() -> int:
     print("CAT G' — F1 ∧ F2 COMPOSITE, UNIVERSE-57 DENOMINATOR (locked)")
     print("=" * 80)
-    print(f"Pre-reg:    cat_g_prime_universe57_decision_rule_2026-05-08.md")
+    print("Pre-reg:    cat_g_prime_universe57_decision_rule_2026-05-08.md")
     print(f"F1 thresh:  > {F1_THRESHOLD_BPS_PER_DAY} bp/day funding (locked)")
     print(f"F2 K:       ≥ {F2_K_THRESHOLD} other universe-57 same-side crosses (locked)")
     print(f"F2 tol:     ±{F2_TIME_TOLERANCE_S} s (locked)")
-    print(f"Trade pool: deployed-16 (locked)")
-    print(f"F2 univ:    universe-57 (NEW: only change vs Cat G)")
+    print("Trade pool: deployed-16 (locked)")
+    print("F2 univ:    universe-57 (NEW: only change vs Cat G)")
     print()
 
     print("Loading deployed-16 trades...")

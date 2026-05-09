@@ -20,7 +20,9 @@
 if [[ -n "${BASH_SOURCE[0]:-}" ]]; then
     _SYMBOLS_LIB_SELF="${BASH_SOURCE[0]}"
 elif [[ -n "${ZSH_VERSION:-}" ]]; then
-    # zsh — %x expands to the path of the file currently being sourced
+    # zsh — %x expands to the path of the file currently being sourced.
+    # ShellCheck flags ${(%):-%x} as invalid bash; intentional zsh-only branch.
+    # shellcheck disable=SC2296
     _SYMBOLS_LIB_SELF="${(%):-%x}"
 else
     _SYMBOLS_LIB_SELF="$0"

@@ -139,7 +139,7 @@ def fire_rate_at_day(fire_days: list[int], day: int) -> float:
 def main() -> int:
     print("DRIFT DETECTOR TIME-TO-DETECTION (locked)")
     print("=" * 80)
-    print(f"Pre-reg:    drift_detector_time_to_detection_decision_rule_2026-05-08.md")
+    print("Pre-reg:    drift_detector_time_to_detection_decision_rule_2026-05-08.md")
     print(f"α_family:   {ALPHA_FAMILY} (per-test α = {ALPHA_FAMILY/6:.5f})")
     print(f"N_MIN:      {N_MIN}")
     print(f"Trade rate: {TRADES_PER_DAY}/day (historical fleet)")

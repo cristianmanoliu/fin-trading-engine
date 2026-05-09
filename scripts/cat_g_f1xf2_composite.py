@@ -150,7 +150,7 @@ def fmt_dollar(x: float) -> str:
 def main() -> int:
     print("CAT G — F1 ∧ F2 COMPOSITE FILTER (composite design D, locked)")
     print("=" * 80)
-    print(f"Pre-reg:    cat_g_f1xf2_composite_decision_rule_2026-05-07.md")
+    print("Pre-reg:    cat_g_f1xf2_composite_decision_rule_2026-05-07.md")
     print(f"F1 thresh:  > {F1_THRESHOLD_BPS_PER_DAY} bp/day funding")
     print(f"F2 K:       ≥ {F2_K_THRESHOLD} other deployed-16 same-side crosses")
     print(f"F2 tol:     ±{F2_TIME_TOLERANCE_S} s")

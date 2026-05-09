@@ -146,8 +146,8 @@ def main() -> int:
     total = sum(pnls)
     annual_point = total / years
 
-    print(f"BLOCK BOOTSTRAP CI — deployed-16 candidate (4H short EMA9/21 mh504 RR6, fee10/slip5)")
-    print(f"=" * 80)
+    print("BLOCK BOOTSTRAP CI — deployed-16 candidate (4H short EMA9/21 mh504 RR6, fee10/slip5)")
+    print("=" * 80)
     print(f"journal dir: {journal_dir}")
     print(f"trades:      {N:,}")
     print(f"span:        {years:.2f} years ({first_ts.date()} → {last_ts.date()})")
@@ -180,17 +180,17 @@ def main() -> int:
     se_total = std * math.sqrt(N)  # SD of sum under IID
     iid_lo = (total - 1.96 * se_total) / years
     iid_hi = (total + 1.96 * se_total) / years
-    print(f"Parametric IID 95% CI (assumes trades are IID — autocorrelation IGNORED):")
+    print("Parametric IID 95% CI (assumes trades are IID — autocorrelation IGNORED):")
     print(f"  annual NET: [{fmt_dollar(iid_lo)}, {fmt_dollar(iid_hi)}]/yr")
     print(f"  point:      {fmt_dollar(annual_point)}/yr")
     print(f"  half-width: ${(iid_hi - iid_lo) / 2:,.0f}/yr")
     print()
 
     # ── Stationary block bootstrap at multiple block lengths ─────────────────
-    print(f"Stationary bootstrap 95% CI by mean block length L:")
-    print(f"  L is the expected # of consecutive trades resampled together.")
-    print(f"  L=1  → effectively IID bootstrap (compare to parametric above).")
-    print(f"  L=√N≈47 → standard rule-of-thumb. L=250 ≈ ~2 quarters of regime.")
+    print("Stationary bootstrap 95% CI by mean block length L:")
+    print("  L is the expected # of consecutive trades resampled together.")
+    print("  L=1  → effectively IID bootstrap (compare to parametric above).")
+    print("  L=√N≈47 → standard rule-of-thumb. L=250 ≈ ~2 quarters of regime.")
     print()
     print(f"  {'L':>4}  {'median':>14}  {'2.5%':>14}  {'97.5%':>14}  {'half-width':>11}  "
           f"{'P(>$0)':>7}  {'P(>$50k)':>9}  {'P(>$100k)':>10}  {'P(>$200k)':>10}")
@@ -225,7 +225,7 @@ def main() -> int:
     wf_lo = -111_000
     wf_hi = 372_000
     wf_half = (wf_hi - wf_lo) / 2
-    print(f"Comparison — walk-forward 6-window CI from CLAUDE.md:")
+    print("Comparison — walk-forward 6-window CI from CLAUDE.md:")
     print(f"  annual NET: [{fmt_dollar(wf_lo)}, {fmt_dollar(wf_hi)}]/yr (mean {fmt_dollar(wf_mean)})")
     print(f"  half-width: ${wf_half:,.0f}/yr  (N=6 quarter-blocks)")
     print()
@@ -239,24 +239,24 @@ def main() -> int:
                 print(f"At L=√N={L_target}, bootstrap half-width is ${half:,.0f} vs WF ${wf_half:,.0f}")
                 print(f"  walk-forward half-width is {ratio:.1f}× wider than trade-level bootstrap.")
                 if ratio > 2.0:
-                    print(f"  → Walk-forward CI captures regime variance the trade bootstrap misses.")
-                    print(f"     Anchor expectations to walk-forward, not bootstrap.")
+                    print("  → Walk-forward CI captures regime variance the trade bootstrap misses.")
+                    print("     Anchor expectations to walk-forward, not bootstrap.")
                 elif ratio < 1.5:
-                    print(f"  → Block bootstrap and walk-forward CIs agree within ~50%.")
-                    print(f"     Trade-level autocorrelation explains most of the regime variance.")
+                    print("  → Block bootstrap and walk-forward CIs agree within ~50%.")
+                    print("     Trade-level autocorrelation explains most of the regime variance.")
                 else:
-                    print(f"  → Modest regime-variance gap. Walk-forward is the more conservative estimate.")
+                    print("  → Modest regime-variance gap. Walk-forward is the more conservative estimate.")
                 break
 
     print()
     print("Interpretation guide:")
-    print(f"  - 'P(>$X)' is the bootstrap probability that the strategy's annualized NET")
-    print(f"    exceeds $X — a direct go/no-go probability framing.")
-    print(f"  - As L increases, CI widens (more autocorrelation captured) until it stabilizes.")
-    print(f"    The plateau is the honest CI; further L increase only adds estimation noise.")
-    print(f"  - Bootstrap median ≈ point estimate is a sanity check (no resampling bias).")
-    print(f"  - If walk-forward CI is significantly wider than bootstrap, the regime-variance")
-    print(f"    gap is real — trade-level data alone underestimates per-quarter swings.")
+    print("  - 'P(>$X)' is the bootstrap probability that the strategy's annualized NET")
+    print("    exceeds $X — a direct go/no-go probability framing.")
+    print("  - As L increases, CI widens (more autocorrelation captured) until it stabilizes.")
+    print("    The plateau is the honest CI; further L increase only adds estimation noise.")
+    print("  - Bootstrap median ≈ point estimate is a sanity check (no resampling bias).")
+    print("  - If walk-forward CI is significantly wider than bootstrap, the regime-variance")
+    print("    gap is real — trade-level data alone underestimates per-quarter swings.")
 
     return 0
 

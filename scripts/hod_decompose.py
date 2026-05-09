@@ -154,8 +154,8 @@ def main() -> int:
     print()
     print("interpretation:")
     print(f"  - WR 95%CI overlapping the overall WR ({overall_wr*100:.1f}%) means the bucket is statistically indistinguishable from the average.")
-    print(f"  - sigma_z is z-score of bucket WR vs overall WR; |z|>2 ≈ 5% one-bucket significance, |z|>2.64 ≈ Bonferroni-corrected 5% across 6 buckets.")
-    print(f"  - %total NET = bucket's contribution to total NET PnL. If one bucket carries >40% of NET on <20% of trades, that's regime concentration.")
+    print("  - sigma_z is z-score of bucket WR vs overall WR; |z|>2 ≈ 5% one-bucket significance, |z|>2.64 ≈ Bonferroni-corrected 5% across 6 buckets.")
+    print("  - %total NET = bucket's contribution to total NET PnL. If one bucket carries >40% of NET on <20% of trades, that's regime concentration.")
 
     # Concentration check.
     concentrated = [(h, share) for (h, n, w, wr, lo, hi, net, mean, share, z) in rows
@@ -247,9 +247,9 @@ def main() -> int:
         worst_h = min(hour_pnls, key=hour_pnls.get)
         best_count[best_h] += 1
         worst_count[worst_h] += 1
-    print(f"  best-hour-of-year tally: " + ", ".join(
+    print("  best-hour-of-year tally: " + ", ".join(
         f"{h:02d}h:{best_count[h]}" for h in sorted(by_hour.keys()) if best_count[h] > 0))
-    print(f"  worst-hour-of-year tally: " + ", ".join(
+    print("  worst-hour-of-year tally: " + ", ".join(
         f"{h:02d}h:{worst_count[h]}" for h in sorted(by_hour.keys()) if worst_count[h] > 0))
 
     return 0

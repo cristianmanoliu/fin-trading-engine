@@ -13,10 +13,14 @@ name: tests
 #   - Both jobs in parallel (different runners) for speed
 #   - go.mod-pinned Go version + project's tested Python version
 #
+# Lint: shellcheck + ruff added 2026-05-09 after the audit pass found 13
+# fail-open bugs of the same shape across 3 sessions. Both tools catch the
+# specific patterns most prevalent in those bugs (silent || true, unused
+# imports, swallowed exit codes, unquoted vars). Multiplicative payoff:
+# every future PR gets the check.
+#
 # Not in scope (explicitly):
-#   - Linting (gofmt, golangci-lint, ruff, mypy) — different feedback shape
-#     and the project hasn't standardized on any. Adding without an
-#     existing local hook would force operator decisions; not the goal.
+#   - golangci-lint, mypy — project hasn't standardized on these.
 #   - Coverage reporting — tests-pass-or-fail is the contract; coverage
 #     gating would force decisions about thresholds.
 #   - Build artifacts — operator deploys via deploy/redeploy.sh which
@@ -78,3 +82,54 @@ jobs:
             echo "=== $f ==="
             python3 "$f"
           done
+
+  lint:
+    name: shellcheck + ruff
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install lint tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y shellcheck
+          pip install --quiet ruff
+
+      # Two passes per tool, by audience:
+      #   - "Operational" scripts (forward_paper_status, post_deploy_check,
+      #     weekly_audit, run_drift_check, paper_live_*, lib/, deploy/) are
+      #     safety-critical. Strict at warning severity.
+      #   - All other shell scripts in the repo (historical sweep + analysis
+      #     artifacts) are frozen. Lint at error severity only — catches real
+      #     bugs without forcing a refactor of locked research scripts.
+      - name: shellcheck (operational, strict)
+        run: |
+          shellcheck -S warning \
+            scripts/forward_paper_status.sh \
+            scripts/post_deploy_check.sh \
+            scripts/weekly_audit.sh \
+            scripts/run_drift_check.sh \
+            scripts/paper_live_*.sh \
+            scripts/lib/*.sh \
+            deploy/*.sh
+
+      - name: shellcheck (whole repo, errors only)
+        run: |
+          # Globs may match no files in some checkouts; --shell=bash forces
+          # parser mode so non-bash files don't silently pass.
+          shellcheck -S error scripts/*.sh deploy/*.sh
+
+      # Ruff: --select F is the pyflakes ruleset — catches the bug-class
+      # equivalent of shellcheck warnings (unused imports/variables, undefined
+      # names, real-bug patterns). Style rules (E*, W*) are NOT enforced —
+      # the project hasn't standardized on a style and forcing one would be
+      # a separate decision. Run on all of scripts/ so the safety-critical
+      # scripts AND historical analysis scripts must stay clean of pyflakes
+      # findings going forward.
+      - name: ruff (pyflakes ruleset on scripts/)
+        run: ruff check --select F scripts/

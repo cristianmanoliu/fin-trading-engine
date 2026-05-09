@@ -32,7 +32,10 @@ if [[ -d "${ROOT}/data/funding" ]]; then
 fi
 
 echo "→ Building binaries on ${TARGET}..."
-# shellcheck disable=SC2029
+# shellcheck disable=SC2029,SC2087
+# SC2029: ${SSH_OPTS} expands client-side, intentional (let SSH parse flags).
+# SC2087: heredoc EOF unquoted on purpose — ${REMOTE_DIR} expands client-side
+# (used for the `cd` path) while \$PATH stays escaped for server-side eval.
 ssh ${SSH_OPTS} "${TARGET}" bash <<EOF
 set -euo pipefail
 export PATH="\$PATH:/usr/local/go/bin"

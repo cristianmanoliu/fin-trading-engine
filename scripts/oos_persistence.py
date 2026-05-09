@@ -70,7 +70,6 @@ def main() -> None:
 
     # WR check: how many train-top-16 became unprofitable in test?
     flipped = [s for s in train_top16 if test[s][2] <= 0]
-    persisted = sorted(train_top16 & test_top16, key=lambda s: -test[s][2])
 
     print()
     print("════════════════════════════════════════════════════════════════════")
@@ -133,8 +132,6 @@ def main() -> None:
             continue
         train_p = train[s][2] // 1000
         test_p  = test[s][2]  // 1000
-        sign_train = "+" if train_p > 0 else ("0" if train_p == 0 else "-")
-        sign_test  = "+" if test_p > 0 else ("0" if test_p == 0 else "-")
         flag = "✓ both +" if train_p > 0 and test_p > 0 else ("✗ flipped" if (train_p > 0) != (test_p > 0) else "× both -")
         print(f"  {s:<14} {train_p:>+10,}k {test_p:>+10,}k   {flag}")
 

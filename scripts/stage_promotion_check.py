@@ -424,7 +424,6 @@ def check_drift_clean(history_path: Path) -> Criterion:
             actual="(history missing)",
             status="PENDING",
         )
-    cutoff = datetime.now(timezone.utc) - timedelta(days=MIN_DRIFT_CLEAN_DAYS)
     most_recent: datetime | None = None
     most_recent_fired: datetime | None = None
     for line in history_path.read_text().splitlines():
@@ -643,7 +642,6 @@ def check_drift_clean_at_stage(history_path: Path, min_days: int, name: str) -> 
     Each stage requires a different drift-clean window (30/30/45/60d)."""
     if not history_path.exists():
         return Criterion(name, f"≥{min_days}d clean", "(history missing)", "PENDING")
-    cutoff = datetime.now(timezone.utc) - timedelta(days=min_days)
     most_recent: datetime | None = None
     most_recent_fired: datetime | None = None
     for line in history_path.read_text().splitlines():

@@ -36,7 +36,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-cd "$REPO_ROOT"
+cd "$REPO_ROOT" || { echo "weekly_audit: cd to $REPO_ROOT failed" >&2; exit 1; }
 
 # --- 1. Drift check (decision-grade signal) ---
 "${REPO_ROOT}/scripts/run_drift_check.sh" --quiet

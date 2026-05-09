@@ -11,10 +11,10 @@ from __future__ import annotations
 import math
 import sys
 from pathlib import Path
-from datetime import datetime, timezone
+from datetime import datetime
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from bootstrap_ci import fmt_dollar, load_chronological_pnl  # noqa: E402
+from bootstrap_ci import fmt_dollar  # noqa: E402
 from kill_bar_calibration import load_trades  # noqa: E402
 
 ALPHA = 0.05  # locked
@@ -238,7 +238,7 @@ def main() -> int:
     early_pnl = sum(p for _, _, _, p in rows[:half])
     late_pnl = sum(p for _, _, _, p in rows[half:])
     print()
-    print(f"Sanity context (no decision impact):")
+    print("Sanity context (no decision impact):")
     print(f"  early {half} quarters NET:  {fmt_dollar(early_pnl)}")
     print(f"  late {n_quarters - half} quarters NET:  {fmt_dollar(late_pnl)}")
     print(f"  recent-vs-early ratio: {late_pnl / early_pnl:.2f}x" if early_pnl > 0 else "")
@@ -248,7 +248,7 @@ def main() -> int:
         recent_4 = rows[-4:]
         recent_avg = sum(p for _, _, _, p in recent_4) / 4
         print()
-        print(f"Implied forward-paper anchor (if DECAYING):")
+        print("Implied forward-paper anchor (if DECAYING):")
         print(f"  recent 4-quarter avg: {fmt_dollar(recent_avg)}/q "
               f"= {fmt_dollar(recent_avg * 4)}/yr")
         print(f"  cumulative-anchor:    {fmt_dollar(sum(ys) * 4 / len(ys))}/yr")

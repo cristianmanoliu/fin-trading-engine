@@ -26,7 +26,6 @@ Criteria NOT evaluated (require fee/slip noise model, not in scope):
 from __future__ import annotations
 
 import json
-import math
 import random
 import sys
 from datetime import datetime, timedelta, timezone

@@ -16,7 +16,6 @@ import sys
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
-from statistics import mean
 
 
 def quarter_of(ts_ms: int) -> str:

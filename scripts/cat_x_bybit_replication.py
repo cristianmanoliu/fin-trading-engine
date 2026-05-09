@@ -16,7 +16,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -268,7 +268,7 @@ def aggregate_per_window(trades: list[dict]) -> dict:
 def main() -> int:
     print("CAT X — CROSS-EXCHANGE OOS REPLICATION ON BYBIT (locked)")
     print("=" * 80)
-    print(f"Pre-reg:  cat_x_bybit_replication_decision_rule_2026-05-08.md")
+    print("Pre-reg:  cat_x_bybit_replication_decision_rule_2026-05-08.md")
     print(f"Strategy: 4H short EMA{EMA_FAST}/{EMA_SLOW}, RR={RR}, mh={MAX_HOLD_HOURS}h, "
           f"fee={FEE_BPS}bp slip={SLIP_BPS}bp, no funding")
     print()
@@ -339,7 +339,6 @@ def main() -> int:
 
     robust = (bybit_total >= 0.5 * binance_total) and (sign_matches >= 3) and (bybit_total > 0)
     weak = (bybit_total > 0) and (sign_matches >= 2)
-    binance_specific = (bybit_total <= 0) or (sign_matches < 2)
 
     print(f"  ROBUST              Bybit ≥ 0.5× Binance: {ratio:.2f}× {'✓' if (bybit_total >= 0.5 * binance_total and binance_total > 0) else '✗'} | "
           f"≥3/4 sign-match: {sign_matches}/4 {'✓' if sign_matches >= 3 else '✗'} | "

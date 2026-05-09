@@ -167,8 +167,8 @@ def main() -> None:
     print(f"  Expected WR std-dev under pure noise: {wr_std_expected*100:.3f}pp")
     print(f"  Ratio (observed / chance):            {wr_std_observed / wr_std_expected:.2f}×")
     print(f"  Interpretation: {wr_std_observed / wr_std_expected:.1f}× more spread than chance")
-    print(f"  alone would produce → real structural alpha component, but most")
-    print(f"  of the per-symbol spread is still consistent with chance.")
+    print("  alone would produce → real structural alpha component, but most")
+    print("  of the per-symbol spread is still consistent with chance.")
     print()
 
     # --- 2. Correlations: which structural metrics predict PnL/WR? ---

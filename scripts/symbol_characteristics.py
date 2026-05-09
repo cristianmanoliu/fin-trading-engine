@@ -20,7 +20,6 @@ from __future__ import annotations
 import csv
 import math
 import sys
-from collections import defaultdict
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -133,7 +132,7 @@ def analyze_symbol(symbol: str) -> dict | None:
         return None
 
     closes = [d[4] for d in daily]
-    opens = [d[1] for d in daily]
+    [d[1] for d in daily]
     highs = [d[2] for d in daily]
     lows = [d[3] for d in daily]
 

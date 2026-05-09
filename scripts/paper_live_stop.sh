@@ -35,7 +35,7 @@ for pid_file in "${pid_files[@]}"; do
   kill -TERM "${pid}"
 
   # Wait up to 10s for graceful shutdown.
-  for i in $(seq 1 10); do
+  for _i in $(seq 1 10); do
     if ! kill -0 "${pid}" 2>/dev/null; then
       break
     fi

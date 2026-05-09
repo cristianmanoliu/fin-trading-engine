@@ -22,9 +22,8 @@ Imports loaders + BTC fetch from kill_bar_calibration.py.
 
 from __future__ import annotations
 
-import json
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 from pathlib import Path
 
 # Reuse data loaders.
@@ -307,7 +306,7 @@ def main() -> int:
 
     # Step 4: apply locked acceptance bands at 90d verification.
     print("=" * 80)
-    print(f"DECISION RULE EVALUATION (90d verification, locked bands):")
+    print("DECISION RULE EVALUATION (90d verification, locked bands):")
     print(f"  FP(null) ≤ {BAND_FP_NULL_PCT}%   TP(deg50) ≥ {BAND_TP_DEG50_PCT}%   TP(dead) ≥ {BAND_TP_DEAD_PCT}%")
     print()
     criteria = ["PNL", "WR", "SYM", "HODL_C", "HODL_W"]
@@ -365,7 +364,7 @@ def main() -> int:
             print(f"  KILL_HODL_W : trigger if 2 consecutive 30d windows each < {fmt_dollar(thresholds['HODL_W'])}")
     if discarded:
         print()
-        print(f"Discarded criteria do NOT contribute to the kill bar.")
+        print("Discarded criteria do NOT contribute to the kill bar.")
 
     return 0
 

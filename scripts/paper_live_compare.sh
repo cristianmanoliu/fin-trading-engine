@@ -97,7 +97,7 @@ printf "  %s\n" "${ROW:0:88}"
 # Iterate strategy lines
 total_strategies=0
 total_with_data=0
-echo "$DATA" | grep "^STRATEGY|" | while IFS='|' read -r _ label first_ts last_ts trades wins targets stops partials pnl avg; do
+echo "$DATA" | grep "^STRATEGY|" | while IFS='|' read -r _ label first_ts _last_ts trades wins targets stops partials pnl avg; do
     total_strategies=$((total_strategies + 1))
     if [[ "$first_ts" == "NODATA" ]]; then
         printf "  %-30s %7s %5s %5s %8s %8s %12s %10s\n" "$label" "—" "—" "—" "—" "—" "(no data)" "—"
@@ -131,7 +131,6 @@ fi
 
 # Diagnostic: trade counts per strategy (low-power warning)
 echo
-warn_low=0
 echo "$DATA" | grep "^STRATEGY|" | grep -v "NODATA" | while IFS='|' read -r _ label _ _ trades _ _ _ _ _ _; do
     if [[ "$trades" -lt 50 ]]; then
         echo "  ⚠  $label has only $trades trades — comparison is anecdotal until ≥50 closes per strategy"

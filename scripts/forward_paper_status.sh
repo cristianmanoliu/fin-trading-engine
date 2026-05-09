@@ -359,7 +359,7 @@ echo "$DATA" | grep "^STRATEGY|" | while IFS='|' read -r _ label first_ts last_t
     # BTC-HODL benchmark — cumulative deploy criterion + rolling-30d kill
     # criterion (two consecutive windows underperforming by >$KILL_HODL_WINDOW_USD).
     strategy_closes=$(echo "$DATA" | awk -F'|' -v lbl="$label" '$1=="CLOSE" && $2==lbl {OFS="\t"; print $3, $4, $5, $6}')
-    hodl_strategy_usd="0"; hodl_total_usd="0"; hodl_delta_usd="0"
+    _hodl_strategy_usd="0"; hodl_total_usd="0"; hodl_delta_usd="0"
     hodl_n_windows="0"; hodl_kill_pairs="0"; hodl_kill="0"; hodl_warning=""
     # Failure mode tracking for the helper invocation. Three classes:
     #   helper_failed=1 — non-zero exit OR empty stdout (crash/network/API)
@@ -381,7 +381,9 @@ echo "$DATA" | grep "^STRATEGY|" | while IFS='|' read -r _ label first_ts last_t
         if [[ "$hodl_exit" -ne 0 ]] || [[ -z "$hodl_out" ]]; then
             helper_failed=1
         else
-            IFS=$'\t' read -r hodl_strategy_usd hodl_total_usd hodl_delta_usd \
+            # _hodl_strategy_usd is read for completeness (helper output schema
+            # is fixed at 7 fields) but only delta/total/window are consumed.
+            IFS=$'\t' read -r _hodl_strategy_usd hodl_total_usd hodl_delta_usd \
                 hodl_n_windows hodl_kill_pairs hodl_kill hodl_warning <<<"$hodl_out"
             [[ -n "$hodl_warning" ]] && helper_warned=1
         fi
@@ -473,7 +475,7 @@ done
 # falls back to the expected fleet rate documented in CLAUDE.md (~1.18/day).
 LIVE_DATA=$(echo "$DATA" | awk -F'|' '$1=="STRATEGY" && $2=="live" {print}')
 if [[ -n "$LIVE_DATA" ]]; then
-    IFS='|' read -r _ _ live_first_ts live_last_ts live_trades _live_rest <<<"$LIVE_DATA"
+    IFS='|' read -r _ _ live_first_ts _live_last_ts live_trades _live_rest <<<"$LIVE_DATA"
     if [[ "$live_first_ts" != "NODATA" ]] && [[ -n "$live_first_ts" ]]; then
         live_first_epoch=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "${live_first_ts%%.*}Z" +%s 2>/dev/null || \
                            date -d "${live_first_ts}" +%s 2>/dev/null || echo "$NOW")

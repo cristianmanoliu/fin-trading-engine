@@ -164,7 +164,7 @@ def main() -> int:
           f"{len(cross_idx)} unique 4H boundaries")
 
     # Annotate each deployed trade with n_cocross.
-    print(f"computing n_cocross per deployed trade ...")
+    print("computing n_cocross per deployed trade ...")
     for t in deployed_trades:
         t.n_cocross = count_cocross(t, cross_idx)  # type: ignore[attr-defined]
 
@@ -247,21 +247,21 @@ def main() -> int:
     candidate_cond_a = wr_delta_agg >= 2.0
     candidate_cond_b = n_filtered_pos >= 3
 
-    print(f"  DEPLOY-CANDIDATE conditions:")
+    print("  DEPLOY-CANDIDATE conditions:")
     print(f"    (a) filtered NET ≥ unfiltered:           {'✓' if deploy_cond_a else '✗'}  "
           f"(${f['net']:+,.0f} vs ${u['net']:+,.0f})")
     print(f"    (b) ≥5/6 windows filtered ≥ unfiltered:  {'✓' if deploy_cond_b else '✗'}  "
           f"({n_filtered_beats}/6)")
     print(f"    (c) filtered NET/trade > unfiltered:     {'✓' if deploy_cond_c else '✗'}  "
           f"(${f['net_per_trade']:+,.0f} vs ${u['net_per_trade']:+,.0f})")
-    print(f"  SHADOW DEPLOY conditions:")
+    print("  SHADOW DEPLOY conditions:")
     print(f"    (a) filtered NET/trade ≥ 1.3× unfiltered:  {'✓' if shadow_cond_a else '✗'}  "
           f"(ratio = {f['net_per_trade']/u['net_per_trade']:.2f}×)" if u['net_per_trade'] != 0 else "    (a) N/A")
     print(f"    (b) filtered total ≥ 60% of unfiltered:    {'✓' if shadow_cond_b else '✗'}  "
           f"({f['net']/u['net']*100:.1f}%)" if u['net'] != 0 else "    (b) N/A")
     print(f"    (c) ≥4/6 windows filtered $/tr beats unf:  {'✓' if shadow_cond_c else '✗'}  "
           f"({n_filtered_per_trade_beats}/6)")
-    print(f"  WALK-FORWARD CANDIDATE conditions:")
+    print("  WALK-FORWARD CANDIDATE conditions:")
     print(f"    (a) WR delta ≥ +2pp aggregate:           {'✓' if candidate_cond_a else '✗'}  "
           f"({wr_delta_agg:+.2f}pp)")
     print(f"    (b) positive NET in ≥3/6 windows:        {'✓' if candidate_cond_b else '✗'}  "

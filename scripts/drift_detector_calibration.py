@@ -254,9 +254,9 @@ def main() -> int:
                 candidates.append((alpha, n_live, r["null"], r["deg50"], r["dead"]))
 
     print("=" * 80)
-    print(f"SELECTION RULE (locked):")
+    print("SELECTION RULE (locked):")
     print(f"  Maximize TP(dead) subject to FP(null) ≤ {BAND_FP_NULL_PCT}%")
-    print(f"  Tie-break: smaller N_LIVE.")
+    print("  Tie-break: smaller N_LIVE.")
     print()
 
     if not candidates:

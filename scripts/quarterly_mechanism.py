@@ -17,7 +17,6 @@ Output: report to stdout.
 from __future__ import annotations
 
 import csv
-import math
 import random
 import sys
 from collections import defaultdict
@@ -191,13 +190,13 @@ def main() -> None:
             t_slope = 0
         print(f"\n  Linear trend: NET = {slope:+,.0f} × q + {intercept:+,.0f}  (slope t={t_slope:+.2f})")
         if t_slope < -2:
-            print(f"  → NEGATIVE trend significant (p<0.05). Strategy edge is decaying over time.")
+            print("  → NEGATIVE trend significant (p<0.05). Strategy edge is decaying over time.")
         elif t_slope < -1:
-            print(f"  → Negative trend (not significant). Possible decay.")
+            print("  → Negative trend (not significant). Possible decay.")
         elif t_slope > 2:
-            print(f"  → POSITIVE trend significant. Strategy edge improving (unusual).")
+            print("  → POSITIVE trend significant. Strategy edge improving (unusual).")
         else:
-            print(f"  → No significant trend. Strategy edge is stable in expectation.")
+            print("  → No significant trend. Strategy edge is stable in expectation.")
 
     # ─────────────────────────────────────────────────────────────────────────
     # Test Q3: Drawdown — worst peak-to-trough on cumulative quarterly NET
@@ -268,7 +267,7 @@ def main() -> None:
     print(f"    Median: {median_pair:+.3f}")
     print(f"    {sum(1 for c in pairwise if c > 0.5)}/{len(pairwise)} pairs > +0.5")
     print(f"    {sum(1 for c in pairwise if c < -0.5)}/{len(pairwise)} pairs < -0.5")
-    print(f"    With N=25 the correlation estimates are much more reliable (σ ≈ 1/√25 = 0.20)")
+    print("    With N=25 the correlation estimates are much more reliable (σ ≈ 1/√25 = 0.20)")
 
     # ─────────────────────────────────────────────────────────────────────────
     # Test Q6: Above-baseline ROBUST count

@@ -45,7 +45,6 @@ import csv
 import math
 import statistics
 import sys
-from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -217,7 +216,7 @@ def main() -> int:
     else:
         candidates = sorted(root.glob("results/b3_symbol_net_*.csv"))
         if not candidates:
-            print(f"no b3_symbol_net_*.csv under results/ — run scripts/b3_symbol_run.sh first")
+            print("no b3_symbol_net_*.csv under results/ — run scripts/b3_symbol_run.sh first")
             return 1
         net_csv = candidates[-1]
 
@@ -331,10 +330,10 @@ def main() -> int:
         print(f"✓ {len(sig_features)} feature(s) survive Bonferroni at α=0.05:")
         for k in sig_features:
             print(f"    {k}")
-        print(f"  → These are candidate mechanism explanations for the deployed/rejected split.")
-        print(f"    Consider whether they could form a *symbol-selection rule based on mechanism*")
-        print(f"    rather than performance — that would survive multiple-comparisons in a way")
-        print(f"    pure performance-based selection cannot.")
+        print("  → These are candidate mechanism explanations for the deployed/rejected split.")
+        print("    Consider whether they could form a *symbol-selection rule based on mechanism*")
+        print("    rather than performance — that would survive multiple-comparisons in a way")
+        print("    pure performance-based selection cannot.")
 
     return 0
 

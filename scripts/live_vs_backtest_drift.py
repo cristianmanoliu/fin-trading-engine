@@ -211,8 +211,8 @@ def main() -> int:
         print(f"ERROR: backtest dir not found: {backtest_dir}", file=sys.stderr)
         return 3
 
-    print(f"Live-vs-backtest distribution drift detector")
-    print(f"=" * 80)
+    print("Live-vs-backtest distribution drift detector")
+    print("=" * 80)
     print(f"backtest:   {backtest_dir}")
     print(f"live:       {args.live_source} → {args.vps if args.live_source == 'vps' else ''}:{args.live_dir}")
     print()
@@ -249,11 +249,11 @@ def main() -> int:
     # Insufficient-data gate.
     if len(live) < args.n_min:
         print(f"⏸  INSUFFICIENT DATA — live n={len(live)} < n_min={args.n_min}.")
-        print(f"   Per the locked threshold, drift comparison is suppressed until")
-        print(f"   live trades accumulate. Re-run after each batch of new trades.")
+        print("   Per the locked threshold, drift comparison is suppressed until")
+        print("   live trades accumulate. Re-run after each batch of new trades.")
         print()
         if len(live) > 0:
-            print(f"   For monitoring purposes only (not decision-grade):")
+            print("   For monitoring purposes only (not decision-grade):")
             for name, fn, unit in CONTINUOUS_METRICS:
                 xs = fn(live)
                 if xs:

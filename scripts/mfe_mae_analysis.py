@@ -36,9 +36,8 @@ Usage:
 from __future__ import annotations
 
 import json
-import math
 import sys
-from collections import Counter, defaultdict
+from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -114,11 +113,11 @@ def main() -> int:
     for t in trades:
         by_outcome[t.outcome].append(t)
 
-    print(f"MFE/MAE DECOMPOSITION — exit-policy diagnostic for deployed-16 candidate")
-    print(f"=" * 80)
+    print("MFE/MAE DECOMPOSITION — exit-policy diagnostic for deployed-16 candidate")
+    print("=" * 80)
     print(f"journal dir: {journal_dir}")
     print(f"trades:      {n:,}")
-    print(f"outcomes:    " + ", ".join(f"{k}={len(v)}" for k, v in sorted(by_outcome.items())))
+    print("outcomes:    " + ", ".join(f"{k}={len(v)}" for k, v in sorted(by_outcome.items())))
     total_net = sum(t.pnl_usd for t in trades)
     n_win = sum(1 for t in trades if t.pnl_usd > 0)
     print(f"total NET:   ${total_net:+,.0f}  ({n_win}/{n} wins, WR={n_win/n*100:.1f}%)")
@@ -126,7 +125,7 @@ def main() -> int:
 
     # ── MFE / MAE percentile distributions per outcome ──────────────────────
     qs = [0.10, 0.25, 0.50, 0.75, 0.90, 0.95, 0.99]
-    print(f"PERCENTILES of MFE_R / MAE_R per outcome bucket:")
+    print("PERCENTILES of MFE_R / MAE_R per outcome bucket:")
     print(f"  {'outcome':<12}  {'n':>5}  {'metric':<6}  " + "  ".join(f"p{int(q*100):>02}" for q in qs))
     print(f"  {'-'*12}  {'-'*5}  {'-'*6}  " + "  ".join("-" * 4 for _ in qs))
     for outcome in sorted(by_outcome.keys()):
@@ -141,7 +140,7 @@ def main() -> int:
     # ── P(MFE_R ≥ T | STOP) — the smoking gun for rescuable losses ───────────
     stops = by_outcome.get("STOP", [])
     print(f"P(MFE_R ≥ T | STOP) — fraction of {len(stops)} losses that reached T·R favorable")
-    print(f"before reversing. Each such trade is a candidate for partial-TP rescue at T:")
+    print("before reversing. Each such trade is a candidate for partial-TP rescue at T:")
     print()
     print(f"  {'T (R)':>6}  {'count':>6}  {'fraction':>9}  {'best-case ΔNET per loss':>28}")
     print(f"  {'-'*6}  {'-'*6}  {'-'*9}  {'-'*28}")
@@ -158,8 +157,8 @@ def main() -> int:
     print()
 
     # ── Counterfactual: total-portfolio NET under partial-TP at T ────────────
-    print(f"COUNTERFACTUAL — partial 50% at +T·R, stop-to-BE on remainder:")
-    print(f"  Per-trade expected ΔR = -WR×(3 - T/2)  +  (1-WR)×P(MFE≥T|STOP)×(T/2 + 1)")
+    print("COUNTERFACTUAL — partial 50% at +T·R, stop-to-BE on remainder:")
+    print("  Per-trade expected ΔR = -WR×(3 - T/2)  +  (1-WR)×P(MFE≥T|STOP)×(T/2 + 1)")
     print(f"  WR = {n_win/n:.3f}  (deployed-16, 5y)")
     print()
 
@@ -168,7 +167,7 @@ def main() -> int:
     losses_usd = [-t.pnl_usd for t in trades if t.pnl_usd < 0]
     wins_usd = [t.pnl_usd for t in trades if t.pnl_usd > 0]
     mean_loss = sum(losses_usd) / len(losses_usd) if losses_usd else 0
-    mean_win = sum(wins_usd) / len(wins_usd) if wins_usd else 0
+    sum(wins_usd) / len(wins_usd) if wins_usd else 0
     # 1R in $ ≈ mean loss (after fees + slip)
     one_r_usd = mean_loss
     print(f"  1R ≈ ${one_r_usd:,.0f}  (mean abs loss after fees/slip)")
@@ -194,7 +193,7 @@ def main() -> int:
             marker = "  *"
         print(f"  {T:>3.1f}   {p:>13.1%}   ${delta_net:>+13,.0f}   ${new_net:>+16,.0f}   {lift_pct:>+6.1f}%{marker}")
     print()
-    print(f"  * = highest best-case lift")
+    print("  * = highest best-case lift")
     print()
 
     # ── MAE_R for TARGET — were winners almost killed before recovering? ────
@@ -203,7 +202,7 @@ def main() -> int:
         mae_above = [(T, sum(1 for t in targets if t.mae_r >= T) / len(targets))
                      for T in [0.3, 0.5, 0.7, 0.8, 0.9]]
         print(f"MAE_R distribution for TARGET wins ({len(targets)} trades) — how close")
-        print(f"did winners come to stopping out before turning around?")
+        print("did winners come to stopping out before turning around?")
         for T, frac in mae_above:
             print(f"  P(MAE_R ≥ {T:.1f} | TARGET) = {frac:>5.1%}")
         print(f"  → Tighter stop at K·R would kill {mae_above[-1][1]*100:.1f}% of these wins (at K=0.9).")
@@ -224,16 +223,16 @@ def main() -> int:
     p_2 = p_above_T[2.0]
     if p_2 >= 0.286:
         print(f"⚠ {p_2*100:.1f}% of STOP losses have MFE_R ≥ 2.0 — exceeds the 28.6%")
-        print(f"  best-case breakeven for partial-TP at 2R + stop-to-BE.")
-        print(f"  → A position-management redesign IS likely +EV. Pre-register the")
-        print(f"    counterfactual with path-level walk-forward validation across 6 windows.")
+        print("  best-case breakeven for partial-TP at 2R + stop-to-BE.")
+        print("  → A position-management redesign IS likely +EV. Pre-register the")
+        print("    counterfactual with path-level walk-forward validation across 6 windows.")
         print(f"    Best lift in the upper-bound table at T=${best_T} R.")
     else:
         print(f"✓ Only {p_2*100:.1f}% of STOP losses reach MFE_R ≥ 2.0 — below the 28.6%")
-        print(f"  best-case breakeven for partial-TP at 2R.")
-        print(f"  → 6:1 fixed-RR is empirically near-optimal for this strategy.")
-        print(f"  → Position-management is NOT the holy grail; explore HG2 (funding asymmetry)")
-        print(f"    or HG3 (winner-profile classifier) instead.")
+        print("  best-case breakeven for partial-TP at 2R.")
+        print("  → 6:1 fixed-RR is empirically near-optimal for this strategy.")
+        print("  → Position-management is NOT the holy grail; explore HG2 (funding asymmetry)")
+        print("    or HG3 (winner-profile classifier) instead.")
 
     return 0
 

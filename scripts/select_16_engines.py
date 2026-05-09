@@ -19,7 +19,6 @@ Output: ranked 16 + cohort diagnostic.
 from __future__ import annotations
 
 import json
-import os
 import re
 import sys
 import time
@@ -230,7 +229,7 @@ def main() -> None:
     print("=" * 100)
     print()
     print(f"  Universe: deployed-32  →  Robustness gate (train_NET>0 at slip=25bp): {len(robust)}/32 pass")
-    print(f"  Selection rule: rank robust set by train_NET at slip=15bp, take top 16")
+    print("  Selection rule: rank robust set by train_NET at slip=15bp, take top 16")
     print()
 
     print("  RECOMMENDED 16  (sorted by train_NET at slip=15bp)")
@@ -283,7 +282,6 @@ def main() -> None:
     print()
 
     period_yr_test = (2025 - 2023) + 4 / 12
-    period_yr_full = 5
     ann_test_15 = sel_te15 / period_yr_test
     print("  Forward-PnL expectation for selected 16")
     print(f"  {'-'*82}")

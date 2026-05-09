@@ -16,7 +16,6 @@ Usage:
 from __future__ import annotations
 
 import sys
-from collections import defaultdict
 from pathlib import Path
 
 
@@ -173,23 +172,23 @@ def main() -> None:
         print(f"  {label:<40} ${total:>+13,} ${total/period_years:>+11,.0f}")
     print()
 
-    print(f"  Rolling shortlist size per rebalance:")
+    print("  Rolling shortlist size per rebalance:")
     print(f"    min/median/max: {min(rolling_n_picks)} / "
           f"{sorted(rolling_n_picks)[len(rolling_n_picks)//2]} / {max(rolling_n_picks)}")
     print()
 
-    print(f"  Recoveries-cohort capture")
+    print("  Recoveries-cohort capture")
     print(f"  {'-'*82}")
     print(f"    Rolling shortlist captured ${rolling_recovery_capture:>+10,} "
           f"from recoveries (vs deployed-32: ${fixed_recovery_capture:>+10,})")
-    print(f"    Recoveries appearing in rolling pick per quarter:")
+    print("    Recoveries appearing in rolling pick per quarter:")
     for fq, n in zip(forward_quarters, n_recovery_picks_per_q):
         bar = "█" * n
         print(f"      {fq}: {n:>2}  {bar}")
     print()
 
     # Membership stability — fraction of shortlist that turns over each quarter
-    print(f"  Shortlist turnover (Jaccard distance) between consecutive rebalances")
+    print("  Shortlist turnover (Jaccard distance) between consecutive rebalances")
     print(f"  {'-'*82}")
     if len(rolling_membership_per_q) >= 2:
         for i in range(1, min(len(rolling_membership_per_q), 8)):
@@ -200,7 +199,7 @@ def main() -> None:
                   f"{len(a & b):>2}/{len(a | b):>2} stable  ({jaccard*100:.0f}% similarity)")
     print()
 
-    print(f"  VERDICT")
+    print("  VERDICT")
     print(f"  {'-'*82}")
     delta = rolling_total - deployed_total
     pct = 100.0 * delta / max(abs(deployed_total), 1)
@@ -213,8 +212,8 @@ def main() -> None:
     else:
         print(f"    Rolling shortlist UNDERPERFORMS deployed-32 by ${-delta:,} "
               f"({pct:+.1f}%) over {period_years:.2f}yr.")
-        print(f"    Conclusion: recoveries-cohort capture does not offset turnover noise / "
-              f"momentum-chasing losses.")
+        print("    Conclusion: recoveries-cohort capture does not offset turnover noise / "
+              "momentum-chasing losses.")
     print()
 
 

@@ -9,7 +9,6 @@ verdict-path tests covering all five exit codes.
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
 import tempfile
