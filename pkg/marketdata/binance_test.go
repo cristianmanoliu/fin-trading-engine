@@ -181,6 +181,169 @@ func TestBackfillStopsOnPartialPage(t *testing.T) {
 	}
 }
 
+// failingKlineHandler returns HTTP 500 on the configured page index (1-indexed)
+// and serves valid klines on all other pages. Used to simulate Binance REST
+// returning a transient 5xx mid-pagination — the production path is "log warn,
+// proceed with whatever ticks landed" but the failure surface had zero coverage.
+type failingKlineHandler struct {
+	mu        sync.Mutex
+	calls     []url.Values
+	failPage  int  // 1-indexed page number to return 500 on; 0 = never fail
+	bodyOnce  bool // when true, return invalid JSON instead of klines
+}
+
+func (h *failingKlineHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	h.mu.Lock()
+	h.calls = append(h.calls, r.URL.Query())
+	page := len(h.calls) // 1-indexed
+	h.mu.Unlock()
+
+	if h.failPage > 0 && page == h.failPage {
+		http.Error(w, "binance is having a moment", http.StatusInternalServerError)
+		return
+	}
+	if h.bodyOnce && page == 1 {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte("{ this is not a klines array"))
+		return
+	}
+
+	startTime, _ := strconv.ParseInt(r.URL.Query().Get("startTime"), 10, 64)
+	requested, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+
+	klines := make([]any, 0, requested)
+	for i := 0; i < requested; i++ {
+		openMs := startTime + int64(i)*60_000
+		klines = append(klines, mockKline(openMs, "100.0"))
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(klines)
+}
+
+// TestBackfillFailsOnFirstPage_500 verifies the failure path: when the very
+// first kline page returns HTTP 500, backfill returns an error and emits no
+// ticks. Subscribe (one level up) catches the error, logs a warn, and proceeds
+// — the engine starts blind but operational. Without this regression test,
+// a future refactor that swallows the 500 (e.g. retry-forever) could hang
+// Subscribe indefinitely.
+func TestBackfillFailsOnFirstPage_500(t *testing.T) {
+	h := &failingKlineHandler{failPage: 1}
+	server := httptest.NewServer(h)
+	defer server.Close()
+
+	b := NewBinanceFutures("ws://unused", server.URL, "TESTUSDT", 96)
+	ch := make(chan models.Tick, 96*60*4+2048)
+
+	err := b.backfill(context.Background(), ch)
+	if err == nil {
+		t.Fatal("expected error on first-page 500, got nil")
+	}
+	if len(ch) != 0 {
+		t.Errorf("expected 0 ticks emitted on first-page failure, got %d", len(ch))
+	}
+	if len(h.calls) != 1 {
+		t.Errorf("expected exactly 1 HTTP call (no retry), got %d", len(h.calls))
+	}
+}
+
+// TestBackfillFailsOnLaterPage_PreservesEarlierTicks verifies that when a
+// mid-pagination request fails, ticks already emitted from successful pages
+// remain in the channel. The engine then has partial-but-monotonic price
+// history — better than nothing, and the EMA/BB priming will catch up after
+// 22 closed 4H candles of live data. Without this guarantee, a 500 on page 3
+// of 4 could either (a) silently truncate without an error or (b) corrupt
+// the channel with an out-of-order retry.
+func TestBackfillFailsOnLaterPage_PreservesEarlierTicks(t *testing.T) {
+	h := &failingKlineHandler{failPage: 2}
+	server := httptest.NewServer(h)
+	defer server.Close()
+
+	b := NewBinanceFutures("ws://unused", server.URL, "TESTUSDT", 96)
+	ch := make(chan models.Tick, 96*60*4+2048)
+
+	err := b.backfill(context.Background(), ch)
+	if err == nil {
+		t.Fatal("expected error on second-page 500, got nil")
+	}
+	// Page 1 served 1500 klines × 4 ticks = 6000 ticks before the failure.
+	if got := len(ch); got != 1500*4 {
+		t.Errorf("expected %d ticks from successful page 1, got %d", 1500*4, got)
+	}
+	if len(h.calls) != 2 {
+		t.Errorf("expected 2 HTTP calls (page 1 succeeds, page 2 fails), got %d", len(h.calls))
+	}
+
+	// Drain channel and confirm chronological order is preserved across the
+	// partial backfill — load-bearing for the aggregator.
+	var lastTime time.Time
+	for len(ch) > 0 {
+		tick := <-ch
+		if !lastTime.IsZero() && tick.Timestamp.Before(lastTime) {
+			t.Fatalf("partial backfill produced out-of-order tick: %v < %v",
+				tick.Timestamp, lastTime)
+		}
+		lastTime = tick.Timestamp
+	}
+}
+
+// TestBackfillFailsOnInvalidJSON verifies that a malformed response body
+// (network truncation, content-type mismatch, exchange-side bug) yields an
+// error rather than a nil-deref or partial garbage tick. Engine still proceeds
+// per Subscribe's non-fatal error contract.
+func TestBackfillFailsOnInvalidJSON(t *testing.T) {
+	h := &failingKlineHandler{bodyOnce: true}
+	server := httptest.NewServer(h)
+	defer server.Close()
+
+	b := NewBinanceFutures("ws://unused", server.URL, "TESTUSDT", 96)
+	ch := make(chan models.Tick, 96*60*4+2048)
+
+	err := b.backfill(context.Background(), ch)
+	if err == nil {
+		t.Fatal("expected decode error on invalid JSON, got nil")
+	}
+	if len(ch) != 0 {
+		t.Errorf("expected 0 ticks on decode failure, got %d", len(ch))
+	}
+}
+
+// emptyKlineHandler always returns `[]` — the case for a brand-new symbol
+// with no historical data, or a query window before symbol listing.
+type emptyKlineHandler struct {
+	mu    sync.Mutex
+	calls int
+}
+
+func (h *emptyKlineHandler) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
+	h.mu.Lock()
+	h.calls++
+	h.mu.Unlock()
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write([]byte("[]"))
+}
+
+// TestBackfillEmptyResponse_GracefulBreak verifies that an empty kline page
+// terminates pagination without error. Engine starts cold but won't loop
+// forever asking for data the exchange will never serve.
+func TestBackfillEmptyResponse_GracefulBreak(t *testing.T) {
+	h := &emptyKlineHandler{}
+	server := httptest.NewServer(h)
+	defer server.Close()
+
+	b := NewBinanceFutures("ws://unused", server.URL, "TESTUSDT", 96)
+	ch := make(chan models.Tick, 96*60*4+2048)
+
+	if err := b.backfill(context.Background(), ch); err != nil {
+		t.Fatalf("empty response should not error, got %v", err)
+	}
+	if h.calls != 1 {
+		t.Errorf("expected exactly 1 HTTP call before break, got %d", h.calls)
+	}
+	if len(ch) != 0 {
+		t.Errorf("expected 0 ticks from empty response, got %d", len(ch))
+	}
+}
+
 // TestBackfillRespectsContext verifies that an already-cancelled context aborts
 // the loop without making HTTP calls (or stops mid-way without leaking the
 // running goroutine). Important because Subscribe is called from main(),
