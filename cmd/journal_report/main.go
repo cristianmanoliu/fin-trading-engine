@@ -98,8 +98,12 @@ func main() {
 	}
 
 	if len(stats) == 0 {
-		fmt.Println("No journal data found. Have you run paper_live_start.sh yet?")
-		return
+		fmt.Fprintln(os.Stderr, "No journal data found. Have you run paper_live_start.sh yet?")
+		// Exit non-zero so cron/CI consumers don't treat an empty journal
+		// as a successful reconciliation. Matches the no-data handling in
+		// cmd/journal_validate (exit 3) and cmd/journal_diff's missing-dir
+		// fail-fast.
+		os.Exit(3)
 	}
 
 	// Sort symbols for stable output.
