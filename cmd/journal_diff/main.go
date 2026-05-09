@@ -90,7 +90,19 @@ func (t trade) key() tradeKey {
 // PARTIAL closes do NOT terminate a trade — the same open can produce both
 // a PARTIAL close and a subsequent terminal close. Both close events go to
 // separate trade records.
+//
+// Validates dir existence up-front: a typo'd path would otherwise produce
+// zero trades on both sides → false-positive Layer 3 PASS, silently
+// failing the gate open. This is the only failure mode that could
+// propagate past the operator into a real-money promotion decision.
 func parseJournalDir(dir string) ([]trade, error) {
+	info, err := os.Stat(dir)
+	if err != nil {
+		return nil, fmt.Errorf("stat %s: %w", dir, err)
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("%s is not a directory", dir)
+	}
 	matches, err := filepath.Glob(filepath.Join(dir, "*.jsonl"))
 	if err != nil {
 		return nil, fmt.Errorf("glob %s: %w", dir, err)
