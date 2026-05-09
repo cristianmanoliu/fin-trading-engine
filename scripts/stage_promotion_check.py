@@ -119,6 +119,15 @@ BENCHMARK_NOTIONAL = 32000.0  # CLAUDE.md locked HODL benchmark size
 MODELED_FEE_BPS = 10.0
 MODELED_SLIP_BPS = 5.0
 
+# ── Drift-history freshness ────────────────────────────────────────────────
+# If the most recent drift run is older than this, we treat the history as
+# stale (likely dead cron) and refuse to grant any "drift clean" gate based
+# on it. Drift cadence is weekly (Sunday 09:00 via launchd); 14 days = two
+# missed cycles, well past "one missed Sunday" noise. This closes the
+# fail-open where a long-stopped cron + an old never-fired history would
+# return PASS forever.
+DRIFT_HISTORY_STALE_DAYS = 14
+
 # ── STAGE_1 → STAGE_2 ($100 → $300) ─────────────────────────────────────────
 S1_MIN_TRADES = 50
 S1_MIN_DAYS = 30
@@ -440,10 +449,20 @@ def check_drift_clean(history_path: Path) -> Criterion:
             actual="(no runs)",
             status="PENDING",
         )
+    # Freshness gate (closes the dead-cron fail-open). If the most recent
+    # drift run is older than DRIFT_HISTORY_STALE_DAYS, we have no current
+    # observation supporting the "clean" claim — refuse to grant PASS.
+    days_since_recent = (datetime.now(timezone.utc) - most_recent).days
+    if days_since_recent > DRIFT_HISTORY_STALE_DAYS:
+        return Criterion(
+            name=f"7. Drift detector clean ≥{MIN_DRIFT_CLEAN_DAYS}d",
+            threshold=f"≥{MIN_DRIFT_CLEAN_DAYS}d",
+            actual=f"stale history: last run {days_since_recent}d ago "
+                   f"(>{DRIFT_HISTORY_STALE_DAYS}d threshold)",
+            status="PENDING",
+        )
     if most_recent_fired is None:
-        # Never fired. If most_recent run is recent, we're clean for the
-        # full window-since-deploy.
-        days_clean = (datetime.now(timezone.utc) - cutoff).days  # window length
+        # Never fired AND fresh enough. Genuine clean window.
         return Criterion(
             name=f"7. Drift detector clean ≥{MIN_DRIFT_CLEAN_DAYS}d",
             threshold=f"≥{MIN_DRIFT_CLEAN_DAYS}d",
@@ -644,6 +663,20 @@ def check_drift_clean_at_stage(history_path: Path, min_days: int, name: str) -> 
             most_recent_fired = ts
     if most_recent is None:
         return Criterion(name, f"≥{min_days}d", "(no runs)", "PENDING")
+    # Freshness gate — same shape as STAGE_0's check_drift_clean. Stale
+    # history → PENDING, not PASS. Closes the dead-cron fail-open at every
+    # stage transition (STAGE_1 onwards has min_days 30/45/60 — the gap
+    # between min_days and DRIFT_HISTORY_STALE_DAYS=14 widens with stage,
+    # so the freshness floor matters more, not less, at later stages).
+    days_since_recent = (datetime.now(timezone.utc) - most_recent).days
+    if days_since_recent > DRIFT_HISTORY_STALE_DAYS:
+        return Criterion(
+            name=name,
+            threshold=f"≥{min_days}d",
+            actual=f"stale history: last run {days_since_recent}d ago "
+                   f"(>{DRIFT_HISTORY_STALE_DAYS}d threshold)",
+            status="PENDING",
+        )
     if most_recent_fired is None:
         return Criterion(name, f"≥{min_days}d",
                          f"never fired (last run: {most_recent.date()})", "PASS")
@@ -738,24 +771,31 @@ def check_recent_window_stability(trades: list[Trade], window_n: int,
     total_notional = sum(t.notional_usd for t in window) or 1.0
     fee_bps = sum(t.fee_usd for t in window) / total_notional * 10000.0
     losers = [t for t in window if t.outcome == "STOP"]
-    slip_bps: float | None = None
-    if losers:
-        loser_notional = sum(t.notional_usd for t in losers) or 1.0
-        slip_bps = sum(t.slip_usd for t in losers) / loser_notional * 10000.0
     fee_ceiling = modeled_fee_bps * (1 + tolerance)
     slip_ceiling = modeled_slip_bps * (1 + tolerance)
-    fee_pass = fee_bps <= fee_ceiling
-    slip_pass = slip_bps is None or slip_bps <= slip_ceiling
-    if slip_bps is None:
-        actual = f"fee {fee_bps:.2f}bp; slip n/a (no losers)"
-    else:
-        actual = f"fee {fee_bps:.2f}bp; slip {slip_bps:.2f}bp"
     threshold = (f"fee≤{fee_ceiling:.2f}bp + slip≤{slip_ceiling:.2f}bp "
                  f"(±{tolerance*100:.0f}%)")
+    # No losers in the window means slip is unmeasurable. The pre-reg
+    # gate is "fee/slip stable" (conjunction). Asserting stability of an
+    # unmeasured metric is a fail-open — if a future cohort hits a
+    # 30-trade winning streak, this branch would have granted PASS
+    # without any slip evidence. Force PENDING instead so the operator
+    # waits for losers before promoting at moderate-stake stages.
+    if not losers:
+        return Criterion(
+            name=name,
+            threshold=threshold,
+            actual=f"fee {fee_bps:.2f}bp; slip unmeasurable (0 losers in window)",
+            status="PENDING",
+        )
+    loser_notional = sum(t.notional_usd for t in losers) or 1.0
+    slip_bps = sum(t.slip_usd for t in losers) / loser_notional * 10000.0
+    fee_pass = fee_bps <= fee_ceiling
+    slip_pass = slip_bps <= slip_ceiling
     return Criterion(
         name=name,
         threshold=threshold,
-        actual=actual,
+        actual=f"fee {fee_bps:.2f}bp; slip {slip_bps:.2f}bp",
         status="PASS" if (fee_pass and slip_pass) else "FAIL",
     )
 

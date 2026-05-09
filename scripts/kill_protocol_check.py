@@ -78,6 +78,11 @@ STAGE_STAKE = {
     "STAGE_4": 1000.0,
 }
 
+# Drift-history freshness — see stage_promotion_check.DRIFT_HISTORY_STALE_DAYS.
+# Mirror constant kept independent (no cross-script import) to avoid coupling
+# the two tools through anything other than their shared file format.
+DRIFT_HISTORY_STALE_DAYS = 14
+
 
 @dataclass
 class Trade:
@@ -154,7 +159,15 @@ def fetch_remote(vps: str, remote_dir: str) -> list[Trade]:
 def check_drift_two_firings(history_path: Path) -> Criterion:
     """Kill criterion #1: two drift-detector firings ≥7 days apart in history.
     The single-firing-combined-with-status-KILL variant requires forward_paper_status
-    output parsing; v1 reports just the two-firings-≥7d form."""
+    output parsing; v1 reports just the two-firings-≥7d form.
+
+    Fail-open closed: previously, an empty/corrupt history file produced
+    "0 firings" → CONTINUE → green light despite no monitoring at all.
+    We now distinguish (a) zero parseable runs entirely (file empty or
+    corrupt — PENDING) from (b) parseable runs with zero firings (genuine
+    clean — CONTINUE). Also flags stale histories (most recent run >14d
+    old → PENDING) to catch silently-stopped drift cron.
+    """
     if not history_path.exists():
         return Criterion(
             "1. Drift detector confirmed fire (≥2 firings, ≥7d apart)",
@@ -163,6 +176,8 @@ def check_drift_two_firings(history_path: Path) -> Criterion:
             "PENDING",
         )
     firings: list[datetime] = []
+    most_recent_run: datetime | None = None
+    total_runs = 0
     for line in history_path.read_text().splitlines():
         if not line:
             continue
@@ -170,16 +185,39 @@ def check_drift_two_firings(history_path: Path) -> Criterion:
             ev = json.loads(line)
         except json.JSONDecodeError:
             continue
+        ts = parse_iso(ev.get("ts", ""))
+        if ts is None:
+            continue
+        total_runs += 1
+        if most_recent_run is None or ts > most_recent_run:
+            most_recent_run = ts
         if ev.get("verdict") == "DRIFT_FIRED":
-            ts = parse_iso(ev.get("ts", ""))
-            if ts:
-                firings.append(ts)
+            firings.append(ts)
     firings.sort()
+    if total_runs == 0:
+        return Criterion(
+            "1. Drift detector confirmed fire (≥2 firings, ≥7d apart)",
+            "0 firings",
+            "(history file exists but has no parseable runs)",
+            "PENDING",
+        )
+    # Stale-history gate: if the cron silently stopped, a long-ago "clean"
+    # history would forever return CONTINUE. Refuse to grant CONTINUE
+    # without recent monitoring evidence.
+    days_since_recent = (datetime.now(timezone.utc) - most_recent_run).days
+    if days_since_recent > DRIFT_HISTORY_STALE_DAYS:
+        return Criterion(
+            "1. Drift detector confirmed fire (≥2 firings, ≥7d apart)",
+            f"<2 firings, fresh ≤{DRIFT_HISTORY_STALE_DAYS}d",
+            f"stale: last run {days_since_recent}d ago "
+            f"({most_recent_run.date()}), drift cron may be inactive",
+            "PENDING",
+        )
     if not firings:
         return Criterion(
             "1. Drift detector confirmed fire (≥2 firings, ≥7d apart)",
             "0 firings",
-            "0 firings (clean history)",
+            f"0 firings ({total_runs} clean runs, last {most_recent_run.date()})",
             "CONTINUE",
         )
     # Find any pair ≥7 days apart.

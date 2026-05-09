@@ -109,6 +109,56 @@ class CriterionUnitTest(unittest.TestCase):
             c = kp.check_drift_two_firings(history)
             self.assertEqual(c.status, "CONTINUE")
 
+    def test_drift_empty_history_pending_not_continue(self):
+        """Closes the dead-cron fail-open. An empty/corrupt history file
+        used to return CONTINUE (interpreted as "no kill, all good") even
+        though it actually meant "no monitoring." Now PENDING."""
+        with tempfile.TemporaryDirectory() as tmp:
+            history = Path(tmp) / "empty.jsonl"
+            history.write_text("")
+            c = kp.check_drift_two_firings(history)
+            self.assertEqual(c.status, "PENDING")
+            self.assertIn("no parseable runs", c.actual)
+
+    def test_drift_corrupt_only_history_pending(self):
+        """File exists but only contains lines that fail JSON decode →
+        no parseable runs → PENDING (was: CONTINUE)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            history = Path(tmp) / "corrupt.jsonl"
+            history.write_text("not json\nalso not json\n{partial: ")
+            c = kp.check_drift_two_firings(history)
+            self.assertEqual(c.status, "PENDING")
+
+    def test_drift_stale_history_pending(self):
+        """Most recent run >14d old → drift cron likely dead → PENDING.
+        Closes a fail-open where a long-ago clean run with stopped cron
+        would forever return CONTINUE despite no active monitoring."""
+        with tempfile.TemporaryDirectory() as tmp:
+            history = Path(tmp) / "stale.jsonl"
+            now = datetime.now(timezone.utc)
+            write_drift_history(history, [
+                (iso(now - timedelta(days=30)), "CLEAN"),
+                (iso(now - timedelta(days=20)), "CLEAN"),
+            ])
+            c = kp.check_drift_two_firings(history)
+            self.assertEqual(c.status, "PENDING")
+            self.assertIn("stale", c.actual.lower())
+
+    def test_drift_clean_with_recent_runs_still_continues(self):
+        """Sanity: the freshness closure must not break the genuine
+        clean path. Recent runs + zero firings → CONTINUE (operationally
+        critical — we'd alert excessively if every weekly clean run
+        suddenly became PENDING)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            history = Path(tmp) / "fresh.jsonl"
+            now = datetime.now(timezone.utc)
+            write_drift_history(history, [
+                (iso(now - timedelta(days=10)), "CLEAN"),
+                (iso(now - timedelta(days=3)), "CLEAN"),
+            ])
+            c = kp.check_drift_two_firings(history)
+            self.assertEqual(c.status, "CONTINUE")
+
     def test_slip_under_30_trades_pending(self):
         # Need 30 losers; only have 5.
         trades = [make_trade(f"2026-05-{i:02d}T00:00:00Z", "BTC", "STOP", -1000,

@@ -169,16 +169,46 @@ class CriterionUnitTest(unittest.TestCase):
             self.assertEqual(c.status, "FAIL")
 
     def test_check_drift_old_fire_passes(self):
-        # Fire >30d ago + clean since = PASS (clean window of 30d satisfied).
+        # Fire >30d ago + recent CLEAN since = PASS (clean window of 30d
+        # satisfied AND most-recent within freshness threshold).
         with tempfile.TemporaryDirectory() as tmp:
             history = Path(tmp) / "h.jsonl"
             now = datetime.now(timezone.utc)
             write_drift_history(history, [
                 ((now - timedelta(days=60)).strftime("%Y-%m-%dT%H:%M:%SZ"), "DRIFT_FIRED"),
                 ((now - timedelta(days=20)).strftime("%Y-%m-%dT%H:%M:%SZ"), "CLEAN"),
+                ((now - timedelta(days=5)).strftime("%Y-%m-%dT%H:%M:%SZ"), "CLEAN"),
             ])
             c = sp.check_drift_clean(history)
             self.assertEqual(c.status, "PASS")
+
+    def test_check_drift_stale_history_pending(self):
+        # Most-recent run >14d ago → stale (cron may be dead) → PENDING,
+        # never PASS, even when the visible history is cleanly never-fired.
+        # Closes a fail-open: a long-ago "clean" history with stopped
+        # cron would otherwise return PASS forever.
+        with tempfile.TemporaryDirectory() as tmp:
+            history = Path(tmp) / "h.jsonl"
+            now = datetime.now(timezone.utc)
+            write_drift_history(history, [
+                ((now - timedelta(days=21)).strftime("%Y-%m-%dT%H:%M:%SZ"), "CLEAN"),
+                ((now - timedelta(days=20)).strftime("%Y-%m-%dT%H:%M:%SZ"), "CLEAN"),
+            ])
+            c = sp.check_drift_clean(history)
+            self.assertEqual(c.status, "PENDING")
+            self.assertIn("stale", c.actual.lower())
+
+    def test_check_drift_at_stage_stale_history_pending(self):
+        # Same fail-open closure for the parameterized at-stage variant.
+        with tempfile.TemporaryDirectory() as tmp:
+            history = Path(tmp) / "h.jsonl"
+            now = datetime.now(timezone.utc)
+            write_drift_history(history, [
+                ((now - timedelta(days=30)).strftime("%Y-%m-%dT%H:%M:%SZ"), "CLEAN"),
+            ])
+            c = sp.check_drift_clean_at_stage(history, 30, "test")
+            self.assertEqual(c.status, "PENDING")
+            self.assertIn("stale", c.actual.lower())
 
 
 def write_btc_stub(path: Path, fields: list[str]) -> None:
@@ -584,13 +614,15 @@ class Stage2To3UnitTest(unittest.TestCase):
             trades, 30, 10.0, 5.0, 0.10, "test")
         self.assertEqual(c.status, "PENDING")
 
-    def test_recent_window_stability_no_losers_skips_slip(self):
-        # 30 winners → slip n/a but fee should still apply.
+    def test_recent_window_stability_no_losers_pending(self):
+        # 30 winners → slip is unmeasurable → PENDING, NOT PASS. Fail-open
+        # closure: the pre-reg gate requires fee/slip stable (conjunction),
+        # so granting PASS based on fee alone would lie about slip stability.
         trades = [sp.Trade("2026-05-01T00:00:00Z", "BTC", "TARGET", 1, 100, 0, 100000)] * 30
         c = sp.check_recent_window_stability(
             trades, 30, 10.0, 5.0, 0.10, "test")
-        self.assertEqual(c.status, "PASS")
-        self.assertIn("n/a", c.actual)
+        self.assertEqual(c.status, "PENDING")
+        self.assertIn("unmeasurable", c.actual.lower())
 
     def test_recent_net_positive_pass(self):
         # 30 wins in last 5 days = +$30k → PASS.
