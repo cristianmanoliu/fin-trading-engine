@@ -83,6 +83,32 @@ func main() {
 		cfg.Backtest.CSVPath = fmt.Sprintf("./data/%s-1m-%s-%s.csv", cfg.Symbol, *year, *month)
 	}
 
+	// Validate enum-style flags BEFORE opening the CSV. With a bogus
+	// signal-tf or side-filter, the operator should see the explicit
+	// validation error immediately, not a downstream CSV-open error
+	// (which masks the real misconfig). Same ordering principle applied
+	// to cmd/engine (validateExecutorArgs runs before Subscribe).
+	tf := models.Timeframe(*signalTF)
+	switch tf {
+	case models.Timeframe5m, models.Timeframe30m, models.Timeframe1H, models.Timeframe2H, models.Timeframe4H, models.Timeframe1D:
+	default:
+		slog.Error("invalid --signal-tf; must be 5m | 30m | 1H | 2H | 4H | 1D", "got", *signalTF)
+		os.Exit(1)
+	}
+
+	var sideDir models.Direction
+	switch *sideFilter {
+	case "both", "":
+		sideDir = models.Neutral
+	case "long":
+		sideDir = models.Long
+	case "short":
+		sideDir = models.Short
+	default:
+		slog.Error("invalid --side-filter; must be both | long | short", "got", *sideFilter)
+		os.Exit(1)
+	}
+
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
@@ -104,27 +130,6 @@ func main() {
 	// This avoids the goroutine scheduling non-determinism that affects the live engine.
 	agg := aggregator.New(nil)
 	agg.IncludeBoundaryTick = *includeBoundary
-
-	tf := models.Timeframe(*signalTF)
-	switch tf {
-	case models.Timeframe5m, models.Timeframe30m, models.Timeframe1H, models.Timeframe2H, models.Timeframe4H, models.Timeframe1D:
-	default:
-		slog.Error("invalid --signal-tf; must be 5m | 30m | 1H | 2H | 4H | 1D", "got", *signalTF)
-		os.Exit(1)
-	}
-
-	var sideDir models.Direction
-	switch *sideFilter {
-	case "both", "":
-		sideDir = models.Neutral
-	case "long":
-		sideDir = models.Long
-	case "short":
-		sideDir = models.Short
-	default:
-		slog.Error("invalid --side-filter; must be both | long | short", "got", *sideFilter)
-		os.Exit(1)
-	}
 
 	entryCfg := strategy.EntryConfig{
 		ProximityPct:      cfg.Strategy.ProximityPct,
