@@ -50,3 +50,10 @@ go.work.sum
 *.tmp
 *.bak
 *.bak.*
+
+# Per-machine operator state from drift-check cron
+# - drift_runs/: ephemeral debug logs from each weekly drift_check run
+# - drift_check_history.jsonl: per-machine append-only verdict log; log_file
+#   field embeds absolute paths so it isn't portable. Regenerates from cron.
+results/drift_runs/
+results/drift_check_history.jsonl
