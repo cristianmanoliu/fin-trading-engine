@@ -64,8 +64,13 @@ fi
 # shellcheck source=lib/notify.sh
 source "${REPO_ROOT}/scripts/lib/notify.sh"
 
+# NOTE: do not append `|| true` to the command substitution. With `|| true`
+# inside $(...), the substitution's exit code is always 0, so $? after the
+# assignment reads 0 regardless of whether journal_validate found errors —
+# silently disarming the CRITICAL Telegram alert below. set -e is NOT active
+# in this script (only -uo pipefail), so a non-zero exit here does NOT abort.
 VALIDATE_OUTPUT=$(ssh root@178.105.24.230 \
-    '/opt/trading-engine/bin/journal_validate --dir /var/log/paper-live/journal --exclude archive 2>&1' || true)
+    '/opt/trading-engine/bin/journal_validate --dir /var/log/paper-live/journal --exclude archive 2>&1')
 VALIDATE_EXIT=$?
 echo "validate: exit=$VALIDATE_EXIT"
 echo "$VALIDATE_OUTPUT" | tail -1
