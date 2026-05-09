@@ -982,3 +982,67 @@ func TestJournalDisabledInBacktest(t *testing.T) {
 	// Should complete without panic and without creating any files.
 	// Nothing to assert beyond "no crash".
 }
+
+func TestSummary_NoTrades_NoCrash(t *testing.T) {
+	// Empty Stub — no signals, no ticks. Summary must not panic and must
+	// leave state untouched. Backtest configs that produce zero signals
+	// (rare strategies, sparse data) hit this path.
+	stub := &Stub{StakeUSDT: 1000}
+	stub.Summary()
+	if len(stub.results) != 0 {
+		t.Errorf("empty Summary should leave results empty, got %d", len(stub.results))
+	}
+	if stub.position != nil {
+		t.Errorf("empty Summary should leave position nil, got %+v", stub.position)
+	}
+}
+
+func TestSummary_ForceClosesOpenPositionAsLoss(t *testing.T) {
+	// Backtest data exhausts while a position is open. Summary force-closes
+	// at LastPrice with won=false (conservative — don't claim wins that
+	// didn't actually hit target). Slippage is applied because closePosition
+	// treats won=false as a stop event.
+	//
+	// Regression-guards two things:
+	//   (1) the force-close branch fires (s.position consumed → s.results grows)
+	//   (2) the trade is recorded as a loss regardless of price direction
+	stub := &Stub{
+		StakeUSDT:       1000,
+		ExactFills:      true,
+		FeeBps:          10,
+		StopSlippageBps: 5,
+	}
+	openTime := time.Date(2026, 5, 6, 0, 0, 0, 0, time.UTC)
+	stub.OnSignal(&models.Signal{
+		Symbol: "X", Side: models.Long,
+		EntryPrice: 100, StopLoss: 99, TakeProfit: 110,
+		Timestamp: openTime,
+	})
+	// Mid-trade tick at 105 — in profit, but neither stop nor target hit.
+	stub.OnTick(models.Tick{
+		Symbol: "X", Timestamp: openTime.Add(30 * time.Minute), Price: 105,
+	})
+	if stub.position == nil {
+		t.Fatal("position should still be open before Summary")
+	}
+
+	stub.Summary()
+
+	if stub.position != nil {
+		t.Errorf("Summary should clear position, got %+v", stub.position)
+	}
+	if len(stub.results) != 1 {
+		t.Fatalf("expected 1 result after Summary force-close, got %d", len(stub.results))
+	}
+	r := stub.results[0]
+	if r.won {
+		t.Error("force-closed-at-end-of-data should be recorded as loss (won=false)")
+	}
+	if r.exitPrice != 105 {
+		t.Errorf("exitPrice: got %v want 105 (LastPrice at force-close)", r.exitPrice)
+	}
+	// Slippage applied because won=false. Notional = 1000/1 × 100 = 100k. Slip 5bp = $50.
+	if r.slipUSDT != 50 {
+		t.Errorf("slipUSDT: got %v want 50 (5bp on $100k notional)", r.slipUSDT)
+	}
+}

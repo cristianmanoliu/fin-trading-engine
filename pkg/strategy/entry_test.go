@@ -191,6 +191,32 @@ func TestEMANoCross_FlatPrice_NoSignal(t *testing.T) {
 	}
 }
 
+func TestEMABullishCrossover_NeutralBias_NoSignal(t *testing.T) {
+	// Neutral bias should block both directions — EMA cross requires
+	// direction agreement (bias == Long for bull cross, == Short for bear).
+	d, bias := emaTestSetup(t, models.Neutral)
+
+	upCandle := models.Candle{Symbol: "BTCUSDT", Open: 100, High: 111, Low: 99.5, Close: 110}
+	d.AddCandle(upCandle)
+	sig := d.Evaluate(nil, 0, bias)
+
+	if sig != nil {
+		t.Errorf("expected no signal (bullish cross + Neutral bias), got %+v", sig)
+	}
+}
+
+func TestEMABearishCrossover_NeutralBias_NoSignal(t *testing.T) {
+	d, bias := emaTestSetup(t, models.Neutral)
+
+	downCandle := models.Candle{Symbol: "BTCUSDT", Open: 100, High: 100.5, Low: 89, Close: 90}
+	d.AddCandle(downCandle)
+	sig := d.Evaluate(nil, 0, bias)
+
+	if sig != nil {
+		t.Errorf("expected no signal (bearish cross + Neutral bias), got %+v", sig)
+	}
+}
+
 func TestEMASideFilter_BlocksMatchingCross(t *testing.T) {
 	// A bullish cross + Long bias would normally emit Long. With SideFilter=Short,
 	// it must be blocked.

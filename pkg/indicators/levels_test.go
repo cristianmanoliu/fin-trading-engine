@@ -114,3 +114,47 @@ func TestDailyLevelsIgnoresZeroPDH(t *testing.T) {
 		t.Errorf("zero PDH/PDL: expected nil KeyLevels, got %v", got)
 	}
 }
+
+func TestDailyLevelsRollsAcrossYearBoundary(t *testing.T) {
+	// julianDay encodes year×1000 + yearDay. Dec 31 = 2025365; Jan 1 = 2026001.
+	// 2026001 > 2025365 so the day-change branch fires. Regression-guards a
+	// future refactor that drops the year multiplier.
+	d := &DailyLevels{}
+	dec31 := time.Date(2025, 12, 31, 12, 0, 0, 0, time.UTC)
+	d.Update(models.Tick{Timestamp: dec31, Price: 100.0})
+	d.Update(models.Tick{Timestamp: dec31.Add(6 * time.Hour), Price: 200.0})
+	d.Update(models.Tick{Timestamp: dec31.Add(8 * time.Hour), Price: 80.0})
+
+	jan01 := time.Date(2026, 1, 1, 0, 30, 0, 0, time.UTC)
+	d.Update(models.Tick{Timestamp: jan01, Price: 150.0})
+
+	if d.PDH != 200.0 {
+		t.Errorf("PDH after year-boundary roll: got %v want 200.0", d.PDH)
+	}
+	if d.PDL != 80.0 {
+		t.Errorf("PDL after year-boundary roll: got %v want 80.0", d.PDL)
+	}
+}
+
+func TestDailyLevelsRollsAfterMultiDayGap(t *testing.T) {
+	// Tick at Day-1, no ticks for several days, then resume on Day-5.
+	// PDH/PDL should reflect Day-1's extremes (the immediately-previous *seen*
+	// day), not the new tick price. Regression-guards a future bug that
+	// uses tick.Price instead of currentHigh/currentLow on the roll branch.
+	d := &DailyLevels{}
+	day1 := time.Date(2026, 5, 6, 6, 0, 0, 0, time.UTC)
+	d.Update(models.Tick{Timestamp: day1, Price: 100.0})
+	d.Update(models.Tick{Timestamp: day1.Add(2 * time.Hour), Price: 175.0}) // day-1 high
+	d.Update(models.Tick{Timestamp: day1.Add(4 * time.Hour), Price: 60.0})  // day-1 low
+
+	// Skip Day-2 through Day-4 entirely — first tick on Day-5.
+	day5 := time.Date(2026, 5, 10, 9, 0, 0, 0, time.UTC)
+	d.Update(models.Tick{Timestamp: day5, Price: 999.0})
+
+	if d.PDH != 175.0 {
+		t.Errorf("PDH after multi-day gap: got %v want 175.0 (day-1 high)", d.PDH)
+	}
+	if d.PDL != 60.0 {
+		t.Errorf("PDL after multi-day gap: got %v want 60.0 (day-1 low)", d.PDL)
+	}
+}
