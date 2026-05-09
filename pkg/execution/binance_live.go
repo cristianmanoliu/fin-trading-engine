@@ -191,6 +191,18 @@ func (b *BinanceLive) handleSignalSync(sig *models.Signal) {
 		}
 	}
 
+	// Mirror the recovery-path StakeUSD guard. Without this check, qty would
+	// silently compute to 0; SendOrder would forward a 0-quantity order which
+	// most exchanges reject but some venues might accept as no-op. Either way,
+	// the local position state would NOT update (the entry path requires a
+	// successful order), so this is fail-CLOSED in practice — but explicit
+	// rejection here surfaces the misconfiguration loudly via slog.Error
+	// rather than getting buried under a cryptic exchange rejection.
+	if b.StakeUSD <= 0 {
+		slog.Error("signal rejected: BinanceLive.StakeUSD not configured (≤0)",
+			"symbol", b.Symbol, "stake_usd", b.StakeUSD)
+		return
+	}
 	stopDist := math.Abs(sig.EntryPrice - sig.StopLoss)
 	if stopDist == 0 {
 		slog.Error("signal rejected: zero stop distance",
@@ -863,13 +875,22 @@ func (b *BinanceLive) appendJournal(entry journalEntry) {
 			_ = b.journalFile.Close()
 		}
 		if err := os.MkdirAll(b.JournalPath, 0755); err != nil {
-			slog.Warn("journal mkdir failed", "err", err)
+			// Elevated from slog.Warn to slog.Error: BinanceLive is the real-money
+			// executor — a missed journal write means a position exists on the
+			// exchange with no local record. RecoverFromJournal would not find
+			// the orphan on next restart; the 60s reconciler poll would catch
+			// the divergence eventually but there's a real-money window where
+			// the local engine is blind. Surface loudly so post_deploy_check §5
+			// (ERROR-level events) catches it.
+			slog.Error("journal mkdir failed — REAL-MONEY POSITION MAY BE INVISIBLE TO LOCAL STATE",
+				"symbol", b.Symbol, "path", b.JournalPath, "event", entry.Event, "err", err)
 			return
 		}
 		name := filepath.Join(b.JournalPath, fmt.Sprintf("%s-%s.jsonl", b.Symbol, month))
 		f, err := os.OpenFile(name, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 		if err != nil {
-			slog.Warn("journal open failed", "err", err)
+			slog.Error("journal open failed — REAL-MONEY POSITION MAY BE INVISIBLE TO LOCAL STATE",
+				"symbol", b.Symbol, "path", name, "event", entry.Event, "err", err)
 			return
 		}
 		b.journalFile = f
@@ -877,7 +898,12 @@ func (b *BinanceLive) appendJournal(entry journalEntry) {
 	}
 	line, _ := json.Marshal(entry)
 	line = append(line, '\n')
-	_, _ = b.journalFile.Write(line)
+	if _, werr := b.journalFile.Write(line); werr != nil {
+		// Same severity as mkdir/open failure: a half-written journal line
+		// or no-line-at-all means the orphan is invisible to recovery.
+		slog.Error("journal write failed — REAL-MONEY POSITION MAY BE INVISIBLE TO LOCAL STATE",
+			"symbol", b.Symbol, "event", entry.Event, "err", werr)
+	}
 }
 
 // ── Component skeletons ─────────────────────────────────────────────────────
@@ -987,8 +1013,25 @@ func (r *OrderRouter) SendOrder(ctx context.Context, intent OrderIntent) (OrderR
 	if err := json.Unmarshal(body, &br); err != nil {
 		return OrderResult{Status: "ERROR", RejectCode: "PARSE"}, fmt.Errorf("parse: %w", err)
 	}
-	qty, _ := strconv.ParseFloat(br.ExecutedQty, 64)
-	avg, _ := strconv.ParseFloat(br.AvgPrice, 64)
+	// Capture parse errors on the numeric fields rather than the prior
+	// silent-zero pattern (`qty, _ := strconv.ParseFloat(...)`). A degenerate
+	// AvgPrice/ExecutedQty would default to 0, causing two downstream
+	// fail-opens: (1) qty=0 would falsely classify a FILLED order as PARTIAL;
+	// (2) avg=0 would trigger handleSignalSync's fallback to the modeled
+	// signal price, divorcing the local position from the actual fill — a
+	// divergence the reconciler would catch eventually but the immediate
+	// state would be wrong. Better to surface as ERROR and let the caller
+	// decide (current callers alert + skip).
+	qty, qerr := strconv.ParseFloat(br.ExecutedQty, 64)
+	if qerr != nil {
+		return OrderResult{Status: "ERROR", RejectCode: "PARSE"},
+			fmt.Errorf("parse executedQty %q: %w", br.ExecutedQty, qerr)
+	}
+	avg, aerr := strconv.ParseFloat(br.AvgPrice, 64)
+	if aerr != nil {
+		return OrderResult{Status: "ERROR", RejectCode: "PARSE"},
+			fmt.Errorf("parse avgPrice %q: %w", br.AvgPrice, aerr)
+	}
 	status := "FILLED"
 	if qty < intent.Quantity {
 		status = "PARTIAL"

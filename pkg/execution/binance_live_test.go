@@ -1870,3 +1870,69 @@ func TestKillSwitch_KillAll_PartialFill_ReportedAsPARTIAL(t *testing.T) {
 	}
 }
 
+
+// ── Audit-pass regression tests (2026-05-09 PM Go-side audit) ────────────────
+
+// Closes audit finding A1: handleSignalSync had no StakeUSD>0 guard. With
+// StakeUSD=0 the qty calculation silently produced 0; depending on exchange
+// behavior this could either be rejected or accepted as a no-op order. The
+// recovery path had this guard explicitly; the entry path now mirrors it.
+func TestBinanceLive_OnSignal_ZeroStakeUSD_Rejected(t *testing.T) {
+	dir := t.TempDir()
+	srv := httptest.NewServer(orderHandler(t, []orderFill{{qty: 1, price: 50000}}))
+	defer srv.Close()
+	bl := newBinanceLiveWithMock(t, srv, dir)
+	bl.StakeUSD = 0 // misconfiguration we now catch loudly
+
+	bl.OnSignal(&models.Signal{
+		Symbol: "BTCUSDT", Side: models.Short,
+		EntryPrice: 50000, StopLoss: 50100,
+		TakeProfit: 49500, Timestamp: time.Now().UTC(),
+	})
+	bl.Wait()
+	if bl.position != nil {
+		t.Error("zero-StakeUSD signal must be rejected before order; got open position")
+	}
+}
+
+// Closes audit finding A5a: malformed executedQty in the exchange response
+// previously parsed silently to 0, classifying a real fill as PARTIAL. Now
+// surfaces as ERROR so the caller can alert + skip rather than commit
+// divergent local state.
+func TestOrderRouter_SendOrder_MalformedExecutedQty_ReturnsError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Order endpoint returns a "successful" 200 but with non-numeric executedQty.
+		_, _ = w.Write([]byte(`{"orderId":1,"status":"FILLED","executedQty":"???","avgPrice":"50000"}`))
+	}))
+	defer srv.Close()
+	or := &OrderRouter{APIBaseURL: srv.URL, APIKey: "k", APISecret: "s", HTTPClient: srv.Client()}
+	res, err := or.SendOrder(context.Background(), OrderIntent{
+		Symbol: "BTCUSDT", Side: models.Long, Quantity: 1, Type: "MARKET",
+	})
+	if err == nil {
+		t.Fatalf("expected error on malformed executedQty, got nil")
+	}
+	if res.Status != "ERROR" || res.RejectCode != "PARSE" {
+		t.Errorf("Status/RejectCode = %q/%q, want ERROR/PARSE", res.Status, res.RejectCode)
+	}
+}
+
+// Closes audit finding A5b: same shape on AvgPrice. Previous silent-zero
+// would pass back AvgPrice=0 to handleSignalSync, which would fall back to
+// the modeled signal price — diverging local state from actual fill.
+func TestOrderRouter_SendOrder_MalformedAvgPrice_ReturnsError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"orderId":1,"status":"FILLED","executedQty":"1","avgPrice":"NaN-junk"}`))
+	}))
+	defer srv.Close()
+	or := &OrderRouter{APIBaseURL: srv.URL, APIKey: "k", APISecret: "s", HTTPClient: srv.Client()}
+	res, err := or.SendOrder(context.Background(), OrderIntent{
+		Symbol: "BTCUSDT", Side: models.Long, Quantity: 1, Type: "MARKET",
+	})
+	if err == nil {
+		t.Fatalf("expected error on malformed avgPrice, got nil")
+	}
+	if res.Status != "ERROR" || res.RejectCode != "PARSE" {
+		t.Errorf("Status/RejectCode = %q/%q, want ERROR/PARSE", res.Status, res.RejectCode)
+	}
+}

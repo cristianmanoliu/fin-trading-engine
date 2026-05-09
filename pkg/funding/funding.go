@@ -72,6 +72,16 @@ func NewHistorical(symbol, csvPath string) (*Historical, error) {
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 64*1024), 1024*1024)
 	first := true
+	// Track non-empty, non-header rows seen vs successfully parsed rows.
+	// The 2026-05-06 funding-loader bug had every row silently fail
+	// ParseFloat (Binance quoted the rate, our loader didn't strip quotes),
+	// returning an empty table and producing $0 funding for ALL trades.
+	// A future CSV-schema change (new column, different separator, etc.)
+	// could re-trip the same shape: every row skipped silently, empty
+	// table returned with no error. Distinguish "file had 0 data rows
+	// (legitimately empty)" from "file had N rows but every one failed
+	// to parse (something changed)".
+	dataRows := 0
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
 		if line == "" {
@@ -83,6 +93,7 @@ func NewHistorical(symbol, csvPath string) (*Historical, error) {
 				continue // header
 			}
 		}
+		dataRows++
 		parts := strings.SplitN(line, ",", 2)
 		if len(parts) != 2 {
 			continue
@@ -105,6 +116,14 @@ func NewHistorical(symbol, csvPath string) (*Historical, error) {
 	}
 	if err := sc.Err(); err != nil {
 		return nil, fmt.Errorf("read funding csv: %w", err)
+	}
+	if dataRows > 0 && len(h.times) == 0 {
+		// File had data rows but none parsed — schema change or corruption.
+		// Refuse rather than silently return an empty table. This is the
+		// load-time analog of the regression that hid the funding-loader
+		// bug for months.
+		return nil, fmt.Errorf("funding csv %s: %d data rows but 0 parsed — likely schema change",
+			csvPath, dataRows)
 	}
 	if !sort.SliceIsSorted(h.times, func(i, j int) bool { return h.times[i].Before(h.times[j]) }) {
 		// Ensure ascending order; Binance sometimes interleaves on pagination boundaries.

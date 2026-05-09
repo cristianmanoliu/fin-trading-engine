@@ -131,6 +131,45 @@ func quotedRateCSV(t *testing.T) string {
 	return path
 }
 
+// Closes audit finding F2 (Go-side audit 2026-05-09 PM): a CSV with non-zero
+// data rows but every row failing to parse used to silently return an empty
+// Historical{} with no error — the exact shape of the 2026-05-06 silent-zero
+// bug. Now we detect "rows present but 0 parsed" and return an error.
+func TestNewHistorical_AllRowsUnparseable_ReturnsError(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "TESTUSDT.csv")
+	// Imagine Binance changed schema: 3 columns instead of 2, and the new
+	// 2nd column is a tag string. Our SplitN(line, ",", 2) leaves
+	// `tag,0.0001` as parts[1]; ParseFloat fails on every row.
+	body := "funding_time_ms,funding_tag,funding_rate\n" +
+		`1577836800000,positive,"-0.00012359"` + "\n" +
+		`1577865600000,positive,"0.00010000"` + "\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	_, err := NewHistorical("TESTUSDT", path)
+	if err == nil {
+		t.Fatal("expected error on schema-change CSV (every row unparseable), got nil")
+	}
+}
+
+// Sanity: a CSV with header-only (legitimately empty) is NOT an error.
+func TestNewHistorical_HeaderOnly_NoError(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "TESTUSDT.csv")
+	body := "funding_time_ms,funding_rate\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	h, err := NewHistorical("TESTUSDT", path)
+	if err != nil {
+		t.Fatalf("header-only CSV should not error: %v", err)
+	}
+	if len(h.times) != 0 {
+		t.Errorf("expected empty table from header-only CSV, got %d entries", len(h.times))
+	}
+}
+
 func TestNewHistorical_ParsesQuotedRates(t *testing.T) {
 	h, err := NewHistorical("TESTUSDT", quotedRateCSV(t))
 	if err != nil {
