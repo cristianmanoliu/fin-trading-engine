@@ -181,6 +181,97 @@ class CriterionUnitTest(unittest.TestCase):
             self.assertEqual(c.status, "PASS")
 
 
+def write_btc_stub(path: Path, fields: list[str]) -> None:
+    """Write a tiny Python script that ignores stdin and emits the given
+    7 TSV fields. Used to stub btc_hodl_benchmark.py in tests so they
+    don't hit Binance. fields: [cum_strat, cum_hodl, cum_delta, n_w,
+    n_underperf, kill_t, warning]."""
+    script = (
+        "#!/usr/bin/env python3\n"
+        "import sys\n"
+        f"sys.stdin.read()\n"
+        f"print('\\t'.join({fields!r}))\n"
+    )
+    path.write_text(script)
+    path.chmod(0o755)
+
+
+class BTCHODLCriterionTest(unittest.TestCase):
+    """Tests for the v2 mechanical BTC-HODL check. Each test stubs
+    btc_hodl_benchmark.py via sp.BTC_HELPER override so no Binance
+    network calls happen in CI."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.tmpdir = Path(self.tmp.name)
+        self.stub = self.tmpdir / "btc_stub.py"
+        self.original_helper = sp.BTC_HELPER
+
+    def tearDown(self):
+        sp.BTC_HELPER = self.original_helper
+        self.tmp.cleanup()
+
+    def _stub(self, fields: list[str]) -> None:
+        write_btc_stub(self.stub, fields)
+        sp.BTC_HELPER = self.stub
+
+    def test_no_trades_pending(self):
+        c = sp.check_btc_hodl([])
+        self.assertEqual(c.status, "PENDING")
+
+    def test_strategy_beats_hodl_below_n_floor_pending(self):
+        # delta>0 but n<MIN_TRADES → PENDING (mirror the n-floor pattern
+        # used elsewhere; pre-promotion we don't grant a PASS at low n).
+        self._stub(["1000", "500", "500", "5", "0", "False", ""])
+        trades = [sp.Trade("2026-05-01T00:00:00Z", "BTC", "TARGET",
+                          1000, 100, 0, 100000)] * 10
+        c = sp.check_btc_hodl(trades)
+        self.assertEqual(c.status, "PENDING")
+        self.assertIn("Δ $+500", c.actual)
+
+    def test_strategy_beats_hodl_at_n_floor_passes(self):
+        self._stub(["50000", "10000", "40000", "30", "0", "False", ""])
+        trades = [sp.Trade("2026-05-01T00:00:00Z", "BTC", "TARGET",
+                          333, 100, 0, 100000)] * 150
+        c = sp.check_btc_hodl(trades)
+        self.assertEqual(c.status, "PASS")
+
+    def test_strategy_underperforms_hodl_at_n_floor_fails(self):
+        self._stub(["1000", "5000", "-4000", "30", "1", "False", ""])
+        trades = [sp.Trade("2026-05-01T00:00:00Z", "BTC", "STOP",
+                          7, 100, 50, 100000)] * 150
+        c = sp.check_btc_hodl(trades)
+        self.assertEqual(c.status, "FAIL")
+        self.assertIn("Δ $-4,000", c.actual)
+
+    def test_helper_warning_yields_deferred(self):
+        # Helper sets warning="no-btc-price" when Binance API is down.
+        # Should not produce a spurious FAIL — defer to operator.
+        self._stub(["0", "0", "0", "0", "0", "False", "no-btc-price"])
+        trades = [sp.Trade("2026-05-01T00:00:00Z", "BTC", "STOP",
+                          -1000, 100, 50, 100000)] * 150
+        c = sp.check_btc_hodl(trades)
+        self.assertEqual(c.status, "DEFERRED")
+        self.assertIn("no-btc-price", c.actual)
+
+    def test_helper_missing_yields_deferred(self):
+        sp.BTC_HELPER = self.tmpdir / "nonexistent_helper.py"
+        trades = [sp.Trade("2026-05-01T00:00:00Z", "BTC", "STOP",
+                          -1000, 100, 50, 100000)] * 150
+        c = sp.check_btc_hodl(trades)
+        self.assertEqual(c.status, "DEFERRED")
+        self.assertIn("not found", c.actual)
+
+    def test_helper_returns_unexpected_output_yields_deferred(self):
+        # Stub emits only 3 fields instead of 7.
+        self._stub(["100", "50", "50"])
+        trades = [sp.Trade("2026-05-01T00:00:00Z", "BTC", "STOP",
+                          -1000, 100, 50, 100000)] * 150
+        c = sp.check_btc_hodl(trades)
+        self.assertEqual(c.status, "DEFERRED")
+        self.assertIn("unexpected", c.actual)
+
+
 class VerdictIntegrationTest(unittest.TestCase):
     """End-to-end exit-code tests against synthetic journal directories."""
 
@@ -188,6 +279,8 @@ class VerdictIntegrationTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             jdir = Path(tmp) / "journal"
             history = Path(tmp) / "history.jsonl"
+            stub = Path(tmp) / "btc_stub.py"
+            write_btc_stub(stub, ["50000", "10000", "40000", "5", "0", "False", ""])
             write_trades(jdir, n=160, start_days_ago=65,
                          win_rate=0.21, win_pnl=2500, loss_pnl=-300,
                          fee_usd=100, slip_usd=50, notional_usd=100000)
@@ -197,13 +290,27 @@ class VerdictIntegrationTest(unittest.TestCase):
                 ((now - timedelta(days=14)).strftime("%Y-%m-%dT%H:%M:%SZ"), "CLEAN"),
                 ((now - timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ"), "CLEAN"),
             ])
-            code, out = run_cli([
-                "--live-source", "local",
-                "--live-dir", str(jdir),
-                "--drift-history", str(history),
-            ])
-            # exit 0: all evaluable gates pass + DEFERRED #5 is the
-            # only non-PASS state (BTC-HODL manual verify).
+            # Pass btc-hodl-helper override via sp.BTC_HELPER monkey-patch
+            # in a child shell. Cleanest: env-var override on the script.
+            # Use a wrapper that injects sys.path then monkey-patches.
+            wrapper = Path(tmp) / "wrapper.py"
+            wrapper.write_text(
+                f"import sys\n"
+                f"sys.path.insert(0, {str(REPO / 'scripts')!r})\n"
+                f"import stage_promotion_check as sp\n"
+                f"sp.BTC_HELPER = {str(stub)!r}\n"
+                f"sys.argv = ['stage_promotion_check.py',\n"
+                f"            '--live-source', 'local',\n"
+                f"            '--live-dir', {str(jdir)!r},\n"
+                f"            '--drift-history', {str(history)!r}]\n"
+                f"sys.exit(sp.main())\n"
+            )
+            result = subprocess.run(
+                ["python3", str(wrapper)],
+                capture_output=True, text=True, cwd=str(REPO),
+            )
+            code = result.returncode
+            out = result.stdout + result.stderr
             self.assertEqual(code, 0,
                 f"expected PROMOTE (exit 0), got {code}\n{out}")
             self.assertIn("PROMOTE", out)

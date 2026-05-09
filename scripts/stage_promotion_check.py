@@ -17,16 +17,17 @@ Criteria (per real_money_protocol_decision_rule_2026-05-08.md §STAGE_0→1):
   2. ≥60 calendar days since first trade
   3. Net-positive cumulative PnL in dollars
   4. Live PnL ≥ 60% of pro-rated honest-annual ($69k/yr × elapsed × 0.60)
-  5. Live PnL beats BTC-HODL benchmark over the same window      [v2 TODO]
+  5. Live PnL beats BTC-HODL benchmark over the same window     [MECHANIZED]
   6. No single symbol >40% of cumulative live PnL
   7. Drift detector clean for ≥30 consecutive days at α=0.001
   8. Realized round-trip taker fees ≤ 12 bp
   9. Realized stop-side slippage ≤ 20 bp on losing-trade subsample
 
-NOTE: Criterion #5 (BTC-HODL beat) requires an external price source.
-The existing btc_hodl_benchmark.py helper handles this; v1 of this
-script delegates with a clear flag and reports DEFERRED. Operator must
-manually verify before promotion in v1; v2 should integrate.
+Criterion #5 (BTC-HODL beat) integrates btc_hodl_benchmark.py — pipes
+trades as TSV, parses cumulative strategy-vs-HODL delta. Falls back
+to DEFERRED on helper error (Binance API down, timeout, decode
+failure) so a transient network blip doesn't trigger a spurious FAIL
+on a decision-grade gate.
 
 Exit codes:
   0  PROMOTE — all evaluable gates pass + #5 manual-verify reminder
@@ -61,6 +62,11 @@ MAX_SLIP_BPS = 20.0
 MAX_SINGLE_SYM_PCT = 40.0
 HONEST_ANNUAL_USD = 69000.0
 HONEST_FRACTION = 0.60
+BENCHMARK_NOTIONAL = 32000.0  # CLAUDE.md locked HODL benchmark size
+
+# Path to the BTC-HODL helper. Module-level so tests can monkey-patch
+# to a stub script that emits canned TSV without hitting Binance.
+BTC_HELPER = Path(__file__).resolve().parent / "btc_hodl_benchmark.py"
 
 
 @dataclass
@@ -191,15 +197,94 @@ def check_pro_rated_annual(trades: list[Trade]) -> Criterion:
     )
 
 
-def check_btc_hodl_deferred() -> Criterion:
-    """v1: defer the BTC-HODL benchmark check to the operator + the
-    existing btc_hodl_benchmark.py helper. v2 should integrate."""
-    return Criterion(
-        name="5. PnL beats BTC-HODL ($32k notional)",
-        threshold="manual: scripts/btc_hodl_benchmark.py",
-        actual="(deferred)",
-        status="DEFERRED",
-    )
+def check_btc_hodl(trades: list[Trade]) -> Criterion:
+    """v2: integrate btc_hodl_benchmark.py — pipe trades as TSV, parse
+    cumulative strategy vs HODL delta. Pass when delta > 0 (strategy
+    NET beats buy-and-hold over the same window).
+
+    Falls back to DEFERRED on any helper failure (Binance API down,
+    timeout, decode error) — better to surface a deferral than emit a
+    spurious FAIL when the benchmark itself couldn't be computed.
+
+    HODL helper emits TSV: cum_strategy cum_hodl cum_delta n_windows
+    n_underperf_pairs kill_triggered warning."""
+    name = "5. PnL beats BTC-HODL ($32k notional)"
+    if not trades:
+        return Criterion(name, ">$0 vs HODL", "no trades", "PENDING")
+
+    # Explicit path check — subprocess.run("python3", missing_script) doesn't
+    # raise FileNotFoundError (python3 itself exists; it just errors at the
+    # script-open stage). Catch this case up-front so the test/operator gets
+    # a clean DEFERRED with a useful actual message.
+    helper_path = Path(str(BTC_HELPER))
+    if not helper_path.is_file():
+        return Criterion(name, ">$0 vs HODL",
+                         f"helper not found at {helper_path}",
+                         "DEFERRED")
+
+    tsv_lines = [
+        f"{t.ts}\t{t.symbol}\t{t.pnl_usd}\t{t.outcome}"
+        for t in trades
+    ]
+    tsv_input = "\n".join(tsv_lines) + "\n"
+
+    try:
+        result = subprocess.run(
+            ["python3", str(helper_path),
+             "--benchmark-notional", str(BENCHMARK_NOTIONAL)],
+            input=tsv_input,
+            capture_output=True, text=True,
+            timeout=30,
+        )
+    except subprocess.TimeoutExpired:
+        return Criterion(name, ">$0 vs HODL",
+                         "btc_hodl_benchmark timed out (>30s)",
+                         "DEFERRED")
+    except FileNotFoundError:
+        return Criterion(name, ">$0 vs HODL",
+                         "python3 not found in PATH",
+                         "DEFERRED")
+
+    if result.returncode != 0:
+        err = result.stderr.strip()[:60] or "non-zero exit"
+        return Criterion(name, ">$0 vs HODL", f"helper error: {err}", "DEFERRED")
+
+    # rstrip("\n") only — the helper's emit() outputs 7 tab-separated fields
+    # but the 7th (warning) is empty when the benchmark succeeds, so a plain
+    # .strip() would clip the trailing tab and produce 6 fields. Keep the
+    # empty-string warning field intact by stripping only the newline.
+    parts = result.stdout.rstrip("\n").split("\t")
+    if len(parts) < 7:
+        return Criterion(name, ">$0 vs HODL",
+                         f"unexpected output ({len(parts)} fields)", "DEFERRED")
+
+    cum_strat_s, cum_hodl_s, cum_delta_s, _nw, _nu, _kt, warning = parts[:7]
+    if warning:
+        return Criterion(name, ">$0 vs HODL",
+                         f"benchmark warning: {warning}", "DEFERRED")
+
+    try:
+        cum_strategy = float(cum_strat_s)
+        cum_hodl = float(cum_hodl_s)
+        cum_delta = float(cum_delta_s)
+    except ValueError:
+        return Criterion(name, ">$0 vs HODL",
+                         f"non-numeric output: {result.stdout.strip()[:60]}",
+                         "DEFERRED")
+
+    actual = (f"strategy ${cum_strategy:+,.0f} vs HODL ${cum_hodl:+,.0f} "
+              f"(Δ ${cum_delta:+,.0f})")
+    # PASS only when n ≥ MIN_TRADES — a positive delta at low n could be
+    # lucky 10 trades, not a real outperformance signal. Gate symmetric to
+    # FAIL: both grant the verdict only above n-floor. Below n-floor the
+    # answer is "we don't know yet."
+    if len(trades) < MIN_TRADES:
+        status = "PENDING"
+    elif cum_delta > 0:
+        status = "PASS"
+    else:
+        status = "FAIL"
+    return Criterion(name, ">$0 vs HODL", actual, status)
 
 
 def check_single_symbol_concentration(trades: list[Trade]) -> Criterion:
@@ -374,7 +459,7 @@ def main() -> int:
         check_days(trades),
         check_net_positive(trades),
         check_pro_rated_annual(trades),
-        check_btc_hodl_deferred(),
+        check_btc_hodl(trades),
         check_single_symbol_concentration(trades),
         check_drift_clean(args.drift_history),
         check_fee_bps(trades),
