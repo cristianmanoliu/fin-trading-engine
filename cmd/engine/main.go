@@ -99,6 +99,26 @@ func main() {
 	defer cancel()
 
 	hostname, _ := os.Hostname()
+
+	// Early validation of executor + Layer 3 args. Fails fast BEFORE
+	// marketdata.Subscribe (which spends ~30s on the 96h backfill) and
+	// BEFORE the "engine started" INFO Telegram alert. Without this, an
+	// operator misconfig (e.g., binance_live without API creds) wastes
+	// 30s of backfill, fires a misleading "engine started" alert, and
+	// only then fails — followed immediately by a CRITICAL STARTUP FAILED
+	// from the executor switch. Now: one CRITICAL on misconfig, no INFO,
+	// no wasted backfill. The downstream executor switch keeps its own
+	// validation as defense-in-depth (resists refactoring drift).
+	if err := validateExecutorArgs(*executorMode, *layer3TestnetJournalDir); err != nil {
+		slog.Error(err.Error(),
+			"executor", *executorMode,
+			"layer3_dir", *layer3TestnetJournalDir,
+			"symbol", cfg.Symbol)
+		_ = notifier.SendStructured(ctx, notify.SeverityCritical,
+			fmt.Sprintf("STARTUP FAILED on %s — %v", cfg.Symbol, err))
+		os.Exit(1)
+	}
+
 	_ = notifier.SendStructured(ctx, notify.SeverityInfo,
 		fmt.Sprintf("engine started\nsymbol: %s\nhost: %s", cfg.Symbol, hostname))
 
@@ -627,4 +647,33 @@ func main() {
 	slog.Info("engine stopped")
 	_ = notifier.SendStructured(context.Background(), notify.SeverityInfo,
 		fmt.Sprintf("engine stopped (clean)\nsymbol: %s", cfg.Symbol))
+}
+
+// validateExecutorArgs is the early-fail validator for --executor and
+// --layer3-binance-testnet-journal-dir. Returns nil if the combo is
+// valid, error otherwise. Caller is expected to slog.Error + Telegram-
+// alert + os.Exit(1) on non-nil. Pure function so the cmd/engine CLI
+// tests can exercise the flag-validation surface without wiring up
+// marketdata, notifier, or config.
+func validateExecutorArgs(executorMode, layer3JournalDir string) error {
+	switch executorMode {
+	case "stub", "":
+		// no creds required for paper-money default
+	case "binance_live", "binance_live_testnet":
+		if os.Getenv("BINANCE_API_KEY") == "" || os.Getenv("BINANCE_API_SECRET") == "" {
+			return fmt.Errorf("--executor=%s requires BINANCE_API_KEY and BINANCE_API_SECRET env vars (testnet mode uses SEPARATE credentials from mainnet)", executorMode)
+		}
+	default:
+		return fmt.Errorf("invalid --executor=%q; must be 'stub', 'binance_live_testnet', or 'binance_live'", executorMode)
+	}
+
+	if layer3JournalDir != "" {
+		if executorMode != "stub" && executorMode != "" {
+			return fmt.Errorf("--layer3-binance-testnet-journal-dir requires --executor=stub (cannot wrap a real-money primary in TeeExecutor)")
+		}
+		if os.Getenv("BINANCE_API_KEY") == "" || os.Getenv("BINANCE_API_SECRET") == "" {
+			return fmt.Errorf("--layer3-binance-testnet-journal-dir requires BINANCE_API_KEY and BINANCE_API_SECRET env vars (testnet credentials)")
+		}
+	}
+	return nil
 }
