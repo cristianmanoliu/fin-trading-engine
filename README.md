@@ -117,9 +117,22 @@ For the paper-live deploy:
 
 # Journal self-consistency check
 ./bin/journal_validate --dir /var/log/paper-live/journal --exclude archive
+
+# Mechanical PASS/FAIL of the locked promotion gates for any of the 4 stage transitions.
+# Default is STAGE_0→STAGE_1 (the forward-paper resolution gate); promote
+# to later stages via --from-stage STAGE_1|STAGE_2|STAGE_3 with the
+# corresponding --stage-N-start ISO timestamps.
+python3 scripts/stage_promotion_check.py
+python3 scripts/stage_promotion_check.py --from-stage STAGE_1 --stage-1-start <iso>
+
+# Mechanical KILL/CONTINUE of the locked kill criteria. Symmetric counterpart
+# to stage_promotion_check; runs on the same journal data.
+python3 scripts/kill_protocol_check.py
 ```
 
 `post_deploy_check.sh` runs 13 audit sections (engines active / watchdog armed / code in sync / tick freshness / errors / rate-limit / recovery events / executor mode / funding staleness / disk space / drift cron freshness / restart-loop / live-config compliance) and surfaces Telegram WARN on STRICT-mode failures.
+
+`forward_paper_status.sh` includes a drift-detector heartbeat section so a silently-stopped weekly cron surfaces at every status check (operator's most frequent natural touchpoint), not just at deploy time.
 
 ## Testing
 
@@ -130,10 +143,20 @@ go test ./pkg/strategy/...                   # entry detection, bias, fan-out
 go test ./pkg/indicators/...                 # EMA/ATR/MACD/Bollinger/VWAP/DailyLevels
 go test ./cmd/journal_validate/...           # journal invariant checks
 
+# Python tooling test suite (mechanical evaluators + drift detector + helpers)
+for f in scripts/test_*.py; do python3 "$f"; done
+
 # Layer 2 testnet integration tests (skip cleanly without credentials)
 BINANCE_TESTNET_API_KEY=... BINANCE_TESTNET_API_SECRET=... \
   go test ./pkg/execution -run Testnet_ReadOnly -v
 ```
+
+**CI** (`.github/workflows/test.yml`) runs Go test, Python test, plus
+shellcheck (operational scripts strict at warning severity; whole repo
+at error severity) and ruff `--select F` (pyflakes ruleset) on every
+push/PR. Multiplicative payoff — the same patterns that catch about
+half of the historical fail-open bug class are now blocking on every
+future change.
 
 ## Known unmodeled risks
 
