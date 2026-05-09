@@ -146,24 +146,38 @@ PROMOTE_EXIT=$?
 echo "promotion_check: exit=$PROMOTE_EXIT"
 case "$PROMOTE_EXIT" in
     0)
-        # PROMOTE-CANDIDATE: rare event. CRITICAL because operator should
-        # not miss the moment forward-paper crosses promotion line. The
-        # weekly cadence means worst-case 7d delay between data crossing
-        # and operator knowing — acceptable for a "first time ready"
-        # signal that took 4+ months to accumulate.
+        # PROMOTE: all locked gates mechanically pass. Rare event;
+        # CRITICAL tier so the operator does not miss the moment
+        # forward-paper crosses the promotion line. Weekly cadence means
+        # worst-case 7d delay between data-crosses and operator-knowing —
+        # acceptable for a "first time ready" signal that took 4+ months.
         notify_telegram CRITICAL "weekly_audit PROMOTION READY on $(hostname)" \
 "stage_promotion_check returned exit 0 — all evaluable gates pass. Forward-paper
 has reached STAGE_0 → STAGE_1 readiness.
 
 Pre-promotion checklist:
-  1. Manually verify the DEFERRED criterion: scripts/btc_hodl_benchmark.py
-  2. Confirm Layer 2 testnet smoke completed cleanly (--executor=binance_live_testnet)
-  3. Confirm Layer 3 7-day shadow parity completed (cmd/journal_diff)
-  4. Generate fresh BINANCE_API_KEY/SECRET (separate from testnet creds)
-  5. Flip the engine: --executor=binance_live, stake=\$100 per pre-reg §STAGE_1
+  1. Confirm Layer 2 testnet smoke completed cleanly (--executor=binance_live_testnet)
+  2. Confirm Layer 3 7-day shadow parity completed (cmd/journal_diff)
+  3. Generate fresh BINANCE_API_KEY/SECRET (separate from testnet creds)
+  4. Flip the engine: --executor=binance_live, stake=\$100 per pre-reg §STAGE_1
 
 Run: python3 scripts/stage_promotion_check.py
 Snapshot: results/decision_snapshots/$(date -u +%Y-%m-%d)-promote.txt"
+        ;;
+    4)
+        # PROMOTE-CANDIDATE: all mechanizable gates pass but ≥1 deferred
+        # (e.g. transient Binance API failure in the BTC-HODL helper).
+        # WARN tier because the operator should know but should NOT be
+        # paged at CRITICAL — the deferred gate may simply be a network
+        # blip that resolves itself before next week's run.
+        notify_telegram WARN "weekly_audit promotion: candidate (deferred gates)" \
+"stage_promotion_check returned exit 4 — all mechanizable gates pass but ≥1
+DEFERRED gate (typically the BTC-HODL helper hit a transient Binance API
+issue). NOT yet a deploy signal — operator must manually verify the deferred
+gate(s) before treating this as PROMOTE-READY.
+
+Run: python3 scripts/stage_promotion_check.py
+$(echo "$PROMOTE_OUTPUT" | grep -E '\[DEFERRED\]' | head -3)"
         ;;
     1)
         # BLOCKED: a gate fails outright after sufficient data. Could

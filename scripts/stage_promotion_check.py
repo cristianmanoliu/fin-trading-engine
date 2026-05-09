@@ -63,10 +63,14 @@ failure) so a transient network blip doesn't trigger a spurious FAIL
 on a decision-grade gate.
 
 Exit codes:
-  0  PROMOTE — all evaluable gates pass
+  0  PROMOTE — all locked gates pass; safe to flip the next-stage executor
   1  BLOCKED — at least one gate fails outright (do not promote)
   2  WAITING — insufficient data; some gates not yet evaluable
   3  ERROR — input/env failure (incl. missing required --stage-N-start arg)
+  4  PROMOTE-CANDIDATE — all mechanizable gates pass but ≥1 DEFERRED
+     (e.g. BTC-HODL helper unavailable). Operator must verify the deferred
+     gate(s) before flipping the executor. Distinct from exit 0 so the
+     weekly cron can WARN rather than CRITICAL on transient helper failures.
 
 Usage:
   # STAGE_0 → STAGE_1 (default, paper → first real money)
@@ -988,10 +992,16 @@ def verdict_of(criteria: list[Criterion]) -> tuple[str, int]:
     if any(c.status == "PENDING" for c in criteria):
         return "WAITING — insufficient data on ≥1 gate. Continue forward-paper accumulation.", 2
     # All PASS or DEFERRED.
+    # Exit 4 (not 0) on DEFERRED-but-otherwise-PASS so weekly_audit.sh can
+    # distinguish "operator must verify deferred gate" (WARN tier) from
+    # "all gates mechanically passed, deploy now" (CRITICAL tier). Pre-fix,
+    # a transient Binance API blip during the BTC-HODL helper call would
+    # have triggered a CRITICAL "PROMOTION READY" Telegram on every weekly
+    # run until the helper succeeded again.
     deferred = [c for c in criteria if c.status == "DEFERRED"]
     if deferred:
         return (f"PROMOTE-CANDIDATE — {len(deferred)} gate(s) require manual verification "
-                f"(see DEFERRED rows). Operator must verify before flipping the next-stage executor."), 0
+                f"(see DEFERRED rows). Operator must verify before flipping the next-stage executor."), 4
     return "PROMOTE — all locked gates pass. Operator may flip to the next stage.", 0
 
 
@@ -1055,6 +1065,25 @@ def main() -> int:
             stage_starts[req] = parse_stage_start_arg(value, flag_name)
         except ValueError as e:
             print(f"error: {e}", file=sys.stderr)
+            return 3
+
+    # Chronological-order validation. Without this, an operator typo
+    # (swapped --stage-1-start and --stage-2-start) silently produces
+    # nonsense filtered windows: filter_trades_after(s2_start) returns a
+    # SUPERSET of filter_trades_after(s1_start) when s2_start < s1_start,
+    # so pre-stage_1 paper trades count toward STAGE_2 cumulative
+    # metrics. Reject the inversion loudly at exit 3.
+    chrono_order = ["stage_1_start", "stage_2_start", "stage_3_start"]
+    present = [k for k in chrono_order if k in stage_starts]
+    for earlier, later in zip(present, present[1:]):
+        if stage_starts[earlier] >= stage_starts[later]:
+            print(
+                f"error: stage-start timestamps must be strictly chronological. "
+                f"--{earlier.replace('_', '-')} ({stage_starts[earlier].date()}) "
+                f"must be before --{later.replace('_', '-')} "
+                f"({stage_starts[later].date()})",
+                file=sys.stderr,
+            )
             return 3
 
     if args.live_source == "vps":

@@ -217,6 +217,62 @@ class CriterionUnitTest(unittest.TestCase):
         c = kp.check_consecutive_daily_loss(trades, "STAGE_0")
         self.assertEqual(c.status, "OPERATOR-VERIFY")
 
+    def test_consecutive_loss_robust_to_corrupt_ts(self):
+        """Regression: a single trade with empty/garbage ts must not crash.
+
+        Pre-fix path: t.ts="" → d="" → datetime.strptime("", "%Y-%m-%d")
+        raises ValueError → uncaught → script exits 1 (Python default) →
+        weekly_audit.sh case 1) fires CRITICAL Telegram "STOP THE PROTOCOL".
+        Operator gets paged because one journal line had a bad timestamp.
+
+        The crash only fires when the bad-ts day's loss EXCEEDS the
+        threshold (the >=threshold branch short-circuits before strptime),
+        so the regression must use a loss >5× stake. Both empty and
+        garbage-string forms must be filtered — they're the two corrupt
+        shapes seen in real journals (truncated mid-write + non-ISO
+        operator edits).
+        """
+        trades = [
+            # bad-ts trade with loss > $500 threshold @ STAGE_1
+            make_trade("", "BTC", "STOP", -600),
+            # garbage non-iso ts, also above threshold
+            make_trade("garbage-not-a-date", "BTC", "STOP", -700),
+            # one valid trade so the function has something to work with
+            make_trade("2026-05-01T00:00:00Z", "BTC", "STOP", -100),
+        ]
+        c = kp.check_consecutive_daily_loss(trades, "STAGE_1")
+        # Two valid days under threshold → no kill run; should be CONTINUE.
+        # Crucially: must NOT raise.
+        self.assertEqual(c.status, "CONTINUE")
+
+    def test_consecutive_loss_all_corrupt_pending(self):
+        """All trades have unparseable ts → can't time-grade any of them →
+        PENDING (not CONTINUE). Otherwise a fully-broken journal would
+        return a falsely-clean 'no kill' verdict."""
+        trades = [
+            make_trade("", "BTC", "STOP", -600),
+            make_trade("garbage", "BTC", "STOP", -700),
+            make_trade("Tuesday", "BTC", "STOP", -800),
+        ]
+        c = kp.check_consecutive_daily_loss(trades, "STAGE_1")
+        self.assertEqual(c.status, "PENDING")
+        self.assertIn("unparseable", c.actual.lower())
+
+    def test_consecutive_loss_corrupt_ts_does_not_mask_real_kill(self):
+        """Regression sister test: filtering corrupt ts must NOT suppress
+        a real kill on the well-formed subset of trades. Three valid
+        consecutive bad days → KILL stays KILL even with garbage trades
+        sprinkled in."""
+        trades = [
+            make_trade("", "BTC", "STOP", -999),  # ignored (bad ts)
+            make_trade("2026-05-01T00:00:00Z", "BTC", "STOP", -600),
+            make_trade("2026-05-02T00:00:00Z", "BTC", "STOP", -600),
+            make_trade("2026-05-03T00:00:00Z", "BTC", "STOP", -600),
+            make_trade("not-a-date", "BTC", "STOP", -999),  # ignored
+        ]
+        c = kp.check_consecutive_daily_loss(trades, "STAGE_1")
+        self.assertEqual(c.status, "KILL")
+
     def test_single_symbol_under_50_continues(self):
         # 30+ trades (n_floor) evenly across 3 symbols → ~33% each.
         trades = []

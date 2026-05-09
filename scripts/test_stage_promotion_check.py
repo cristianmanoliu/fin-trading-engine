@@ -301,6 +301,55 @@ class BTCHODLCriterionTest(unittest.TestCase):
         self.assertIn("unexpected", c.actual)
 
 
+class VerdictAggregationTest(unittest.TestCase):
+    """Direct tests of verdict_of() — exit-code contract is critical
+    because weekly_audit.sh maps each code to a Telegram tier."""
+
+    def _crit(self, status: str) -> sp.Criterion:
+        return sp.Criterion("test", "≥0", "n/a", status)
+
+    def test_deferred_only_returns_exit_4_not_0(self):
+        """Regression: DEFERRED + all-other-PASS used to return exit 0,
+        which weekly_audit.sh case 0) interprets as "PROMOTION READY"
+        and fires a CRITICAL Telegram alert. A transient Binance API
+        failure during BTC-HODL helper would have falsely paged the
+        operator with "ready to deploy real money."
+
+        Post-fix: DEFERRED → exit 4 (PROMOTE-CANDIDATE), which the
+        weekly cron handles with WARN tier (not CRITICAL).
+        """
+        crits = [self._crit("PASS"), self._crit("PASS"), self._crit("DEFERRED")]
+        text, code = sp.verdict_of(crits)
+        self.assertEqual(code, 4,
+            f"DEFERRED + all-PASS must return exit 4 (PROMOTE-CANDIDATE), "
+            f"not 0 (PROMOTE which fires CRITICAL Telegram). Got {code}.")
+        self.assertIn("PROMOTE-CANDIDATE", text)
+
+    def test_all_pass_still_returns_exit_0(self):
+        """Sanity: the genuine all-pass path must remain exit 0.
+        Otherwise the operator would never be alerted on real promotion
+        readiness."""
+        crits = [self._crit("PASS")] * 9
+        _, code = sp.verdict_of(crits)
+        self.assertEqual(code, 0)
+
+    def test_fail_takes_precedence_over_deferred(self):
+        """A FAIL gate must produce exit 1 BLOCKED regardless of any
+        DEFERRED gates — failing-gate signal cannot be muted by a
+        coexisting deferred state."""
+        crits = [self._crit("PASS"), self._crit("FAIL"), self._crit("DEFERRED")]
+        _, code = sp.verdict_of(crits)
+        self.assertEqual(code, 1)
+
+    def test_pending_takes_precedence_over_deferred(self):
+        """PENDING + DEFERRED → WAITING (2). Because PENDING means the
+        evaluable answer isn't determined yet, we shouldn't grant the
+        promotion-candidate verdict on insufficient data."""
+        crits = [self._crit("PASS"), self._crit("PENDING"), self._crit("DEFERRED")]
+        _, code = sp.verdict_of(crits)
+        self.assertEqual(code, 2)
+
+
 class VerdictIntegrationTest(unittest.TestCase):
     """End-to-end exit-code tests against synthetic journal directories."""
 
@@ -707,6 +756,48 @@ class MultiStageVerdictIntegrationTest(unittest.TestCase):
         ])
         self.assertEqual(code, 3, f"expected ERROR, got {code}\n{out}")
         self.assertIn("--stage-3-start is required", out)
+
+    def test_stage_2_inverted_starts_errors(self):
+        """Operator typo: --stage-1-start AFTER --stage-2-start (e.g. flags
+        accidentally swapped). Pre-fix: filter_trades_after silently
+        produced nonsense windows where pre-stage_1 trades counted toward
+        STAGE_2 cumulative metrics. Now rejected at arg-parse time."""
+        code, out = run_cli([
+            "--from-stage", "STAGE_2",
+            "--stage-1-start", "2026-08-01T00:00:00Z",
+            "--stage-2-start", "2026-05-01T00:00:00Z",  # before stage-1
+            "--live-source", "local",
+            "--live-dir", "/tmp",
+        ])
+        self.assertEqual(code, 3, f"expected ERROR on inversion, got {code}\n{out}")
+        self.assertIn("chronological", out.lower())
+
+    def test_stage_3_inverted_starts_errors(self):
+        """Same defense across all three stage-start flags."""
+        code, out = run_cli([
+            "--from-stage", "STAGE_3",
+            "--stage-1-start", "2026-01-01T00:00:00Z",
+            "--stage-2-start", "2026-06-01T00:00:00Z",
+            "--stage-3-start", "2026-03-01T00:00:00Z",  # before stage-2
+            "--live-source", "local",
+            "--live-dir", "/tmp",
+        ])
+        self.assertEqual(code, 3, f"expected ERROR on inversion, got {code}\n{out}")
+        self.assertIn("chronological", out.lower())
+
+    def test_stage_2_equal_starts_errors(self):
+        """Stage starts must be STRICTLY chronological — equal timestamps
+        are a degenerate case (zero-day STAGE_1 window) that the operator
+        almost certainly didn't intend."""
+        code, out = run_cli([
+            "--from-stage", "STAGE_2",
+            "--stage-1-start", "2026-05-01T00:00:00Z",
+            "--stage-2-start", "2026-05-01T00:00:00Z",
+            "--live-source", "local",
+            "--live-dir", "/tmp",
+        ])
+        self.assertEqual(code, 3, f"expected ERROR on equal stamps, got {code}\n{out}")
+        self.assertIn("chronological", out.lower())
 
     def test_stage_1_malformed_start_errors(self):
         code, out = run_cli([

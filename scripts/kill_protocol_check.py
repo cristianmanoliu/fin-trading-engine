@@ -280,10 +280,30 @@ def check_consecutive_daily_loss(trades: list[Trade], stage: str) -> Criterion:
             "no trades",
             "PENDING",
         )
+    # Filter trades through parse_iso so corrupt/empty ts entries are
+    # dropped here rather than crashing the strptime call below. Pre-fix
+    # path: a single trade with t.ts="" raised ValueError → uncaught →
+    # script exited 1 → weekly_audit interpreted exit 1 as KILL → fired a
+    # false CRITICAL Telegram "STOP THE PROTOCOL". The fix isolates ts
+    # parsing to one well-defined boundary (parse_iso) which already
+    # returns None on malformed input.
     by_day: dict[str, float] = {}
     for t in trades:
-        d = t.ts[:10]
+        parsed = parse_iso(t.ts)
+        if parsed is None:
+            continue
+        d = parsed.date().isoformat()
         by_day[d] = by_day.get(d, 0.0) + t.pnl_usd
+    if not by_day:
+        # Every trade had a corrupt ts — we have data but can't time-grade
+        # it. PENDING (not CONTINUE) so the operator notices the journal
+        # is broken instead of receiving a falsely-clean kill verdict.
+        return Criterion(
+            f"3. 3 consecutive days each loss >{DAILY_LOSS_MULT}× stake (${stake:.0f}, {stage})",
+            f"<{DAILY_LOSS_CONSECUTIVE} consecutive days < ${threshold:.0f}",
+            f"all {len(trades)} trade timestamps unparseable",
+            "PENDING",
+        )
     days_sorted = sorted(by_day.keys())
     consecutive = 0
     bad_runs: list[list[str]] = []
