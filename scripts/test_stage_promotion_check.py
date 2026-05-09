@@ -358,5 +358,485 @@ class VerdictIntegrationTest(unittest.TestCase):
             f"expected ERROR (exit 3) on missing dir, got {code}\n{out}")
 
 
+# ───────────────────────────────────────────────────────────────────────────
+# Multi-stage extension tests (STAGE_1 → 2, 2 → 3, 3 → 4)
+# ───────────────────────────────────────────────────────────────────────────
+
+
+def iso(dt: datetime) -> str:
+    return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def write_trades_window(jdir: Path, start: datetime, n: int,
+                        win_rate: float = 0.21, win_pnl: float = 6000.0,
+                        loss_pnl: float = -1000.0, fee_usd: float = 100.0,
+                        slip_usd: float = 50.0, notional_usd: float = 100000.0,
+                        single_sym: str | None = None,
+                        end: datetime | None = None) -> None:
+    """Generate n closes spread evenly between start and end (default: now).
+
+    Distinct from `write_trades` (which keys off start_days_ago) — this
+    variant takes an explicit window so multi-stage tests can position
+    trades inside any specific stage. The two helpers don't share code
+    because their key responsibilities (n_floor + days-since-FIRST-trade
+    vs explicit window) diverge enough that merging would muddle both.
+    """
+    end_eff = end if end is not None else datetime.now(timezone.utc)
+    span = end_eff - start
+    jdir.mkdir(parents=True, exist_ok=True)
+    syms = [single_sym] if single_sym else ["BTCUSDT", "ETHUSDT", "XLMUSDT"]
+    interval = span / max(1, n)
+    by_month: dict[str, list[str]] = {}
+    # Interleave wins evenly across the timeline using a running accumulator
+    # rather than "first n_wins are wins". The latter clusters all wins at
+    # the start of the window and breaks any test that examines a sub-window
+    # (e.g. "net-positive last 30d") because the recent slice would be
+    # all-losses. Accumulator pattern: at win_rate=0.21 it picks roughly
+    # every 4.76th trade as a win, evenly spaced.
+    running = 0.0
+    for i in range(n):
+        ts = start + interval * i
+        running += win_rate
+        is_win = running >= 1.0
+        if is_win:
+            running -= 1.0
+        sym = syms[i % len(syms)]
+        ts_str = iso(ts)
+        ts_close_str = iso(ts + timedelta(minutes=30))
+        month = ts.strftime("%Y-%m")
+        key = f"{sym}-{month}"
+        lines = by_month.setdefault(key, [])
+        lines.append(json.dumps({
+            "event": "open", "symbol": sym, "ts": ts_str,
+            "side": "LONG", "entry": 100, "stop": 99, "target": 106,
+        }))
+        lines.append(json.dumps({
+            "event": "close", "symbol": sym, "ts": ts_close_str,
+            "side": "LONG", "entry": 100, "exit": 99, "stop": 99, "target": 106,
+            "outcome": "TARGET" if is_win else "STOP",
+            "pnl_usd": win_pnl if is_win else loss_pnl,
+            "fee_usd": fee_usd,
+            "slip_usd": 0 if is_win else slip_usd,
+            "notional_usd": notional_usd,
+        }))
+    for key, lines in by_month.items():
+        path = jdir / f"{key}.jsonl"
+        # If a prior stage wrote to this same file (cross-stage cohort),
+        # append rather than overwrite so trades from both stages persist.
+        if path.exists():
+            existing = path.read_text().rstrip("\n")
+            path.write_text(existing + "\n" + "\n".join(lines) + "\n")
+        else:
+            path.write_text("\n".join(lines) + "\n")
+
+
+class HelpersTest(unittest.TestCase):
+
+    def test_filter_trades_after_excludes_earlier(self):
+        cutoff = datetime(2026, 5, 1, tzinfo=timezone.utc)
+        before = sp.Trade("2026-04-15T00:00:00Z", "BTC", "STOP", -1, 0, 0, 0)
+        on = sp.Trade("2026-05-01T00:00:00Z", "BTC", "STOP", -1, 0, 0, 0)
+        after = sp.Trade("2026-05-15T00:00:00Z", "BTC", "STOP", -1, 0, 0, 0)
+        result = sp.filter_trades_after([before, on, after], cutoff)
+        self.assertEqual(len(result), 2)  # on + after, not before
+
+    def test_filter_trades_skips_unparseable_ts(self):
+        cutoff = datetime(2026, 5, 1, tzinfo=timezone.utc)
+        bad = sp.Trade("not-a-ts", "BTC", "STOP", -1, 0, 0, 0)
+        good = sp.Trade("2026-05-15T00:00:00Z", "BTC", "STOP", -1, 0, 0, 0)
+        result = sp.filter_trades_after([bad, good], cutoff)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0].symbol, "BTC")
+
+    def test_parse_stage_start_arg_rejects_empty(self):
+        with self.assertRaises(ValueError):
+            sp.parse_stage_start_arg("", "--stage-1-start")
+
+    def test_parse_stage_start_arg_rejects_garbage(self):
+        with self.assertRaises(ValueError):
+            sp.parse_stage_start_arg("Tuesday-ish", "--stage-1-start")
+
+    def test_parse_stage_start_arg_accepts_valid_iso(self):
+        dt = sp.parse_stage_start_arg("2026-05-01T00:00:00Z", "--stage-1-start")
+        self.assertEqual(dt.year, 2026)
+        self.assertEqual(dt.month, 5)
+        self.assertEqual(dt.day, 1)
+
+
+class Stage1To2UnitTest(unittest.TestCase):
+    """Unit tests for STAGE_1 → STAGE_2 evaluators."""
+
+    def test_check_n_trades_passes_at_threshold(self):
+        trades = [sp.Trade("2026-05-01T00:00:00Z", "BTC", "STOP", -1, 0, 0, 0)] * 50
+        c = sp.check_n_trades(trades, 50, "test")
+        self.assertEqual(c.status, "PASS")
+
+    def test_check_n_trades_pending_below(self):
+        trades = [sp.Trade("2026-05-01T00:00:00Z", "BTC", "STOP", -1, 0, 0, 0)] * 49
+        c = sp.check_n_trades(trades, 50, "test")
+        self.assertEqual(c.status, "PENDING")
+
+    def test_check_days_at_stage_pass(self):
+        start = datetime.now(timezone.utc) - timedelta(days=35)
+        c = sp.check_days_at_stage(start, 30, "test")
+        self.assertEqual(c.status, "PASS")
+        self.assertIn("35d", c.actual)
+
+    def test_check_days_at_stage_pending(self):
+        start = datetime.now(timezone.utc) - timedelta(days=20)
+        c = sp.check_days_at_stage(start, 30, "test")
+        self.assertEqual(c.status, "PENDING")
+
+    def test_check_fee_within_tolerance_pass(self):
+        # 10bp realized × $100k notional = $100 fee. 5% tolerance = ceiling 10.5bp.
+        trades = [sp.Trade("2026-05-01T00:00:00Z", "BTC", "STOP", -1, 100, 50, 100000)] * 10
+        c = sp.check_fee_within_tolerance(trades, 10.0, 0.05, "test")
+        self.assertEqual(c.status, "PASS")
+
+    def test_check_fee_within_tolerance_fail(self):
+        # 11bp realized > 10.5bp ceiling → FAIL.
+        trades = [sp.Trade("2026-05-01T00:00:00Z", "BTC", "STOP", -1, 110, 50, 100000)] * 10
+        c = sp.check_fee_within_tolerance(trades, 10.0, 0.05, "test")
+        self.assertEqual(c.status, "FAIL")
+
+    def test_check_slip_within_tolerance_only_losers(self):
+        # Mix winners (no slip) + losers at 5bp. 20% tolerance = ceiling 6bp.
+        winners = [sp.Trade("2026-05-01T00:00:00Z", "BTC", "TARGET", 1, 100, 0, 100000)] * 10
+        losers = [sp.Trade("2026-05-01T00:00:00Z", "BTC", "STOP", -1, 100, 50, 100000)] * 10
+        c = sp.check_slip_within_tolerance(winners + losers, 5.0, 0.20, "test")
+        self.assertEqual(c.status, "PASS")
+        self.assertIn("5.00", c.actual)
+
+    def test_check_slip_within_tolerance_fail(self):
+        # 7bp slip > 6bp ceiling → FAIL.
+        losers = [sp.Trade("2026-05-01T00:00:00Z", "BTC", "STOP", -1, 100, 70, 100000)] * 10
+        c = sp.check_slip_within_tolerance(losers, 5.0, 0.20, "test")
+        self.assertEqual(c.status, "FAIL")
+
+    def test_check_no_daily_loss_above_under_floor_pending(self):
+        # Below n_floor → PENDING (sampling variance protection).
+        trades = [sp.Trade("2026-05-01T00:00:00Z", "BTC", "STOP", -300, 100, 50, 100000)] * 5
+        c = sp.check_no_daily_loss_above(trades, 200.0, 50, "test")
+        self.assertEqual(c.status, "PENDING")
+
+    def test_check_no_daily_loss_above_fires_on_bad_day(self):
+        # 60 trades on the same day, all losing $5 each = -$300 day < -$200 cap.
+        trades = [sp.Trade("2026-05-01T10:00:00Z", "BTC", "STOP", -5, 100, 50, 100000)] * 60
+        c = sp.check_no_daily_loss_above(trades, 200.0, 50, "test")
+        self.assertEqual(c.status, "FAIL")
+
+    def test_check_no_daily_loss_above_pass_when_no_bad_day(self):
+        # 60 trades spread across days, each day -$50 net.
+        base = datetime(2026, 5, 1, tzinfo=timezone.utc)
+        trades = [
+            sp.Trade(iso(base + timedelta(days=i)), "BTC", "STOP", -50, 100, 50, 100000)
+            for i in range(60)
+        ]
+        c = sp.check_no_daily_loss_above(trades, 200.0, 50, "test")
+        self.assertEqual(c.status, "PASS")
+
+    def test_check_net_positive_at_stage_pass(self):
+        trades = [sp.Trade("2026-05-01T00:00:00Z", "BTC", "TARGET", 100, 0, 0, 0)] * 50
+        c = sp.check_net_positive_at_stage(trades, 50, "test")
+        self.assertEqual(c.status, "PASS")
+
+    def test_check_net_positive_at_stage_below_floor_pending(self):
+        # Negative pnl but below floor → PENDING, not FAIL.
+        trades = [sp.Trade("2026-05-01T00:00:00Z", "BTC", "STOP", -100, 0, 0, 0)] * 5
+        c = sp.check_net_positive_at_stage(trades, 50, "test")
+        self.assertEqual(c.status, "PENDING")
+
+    def test_check_net_positive_at_stage_above_floor_fail(self):
+        trades = [sp.Trade("2026-05-01T00:00:00Z", "BTC", "STOP", -100, 0, 0, 0)] * 50
+        c = sp.check_net_positive_at_stage(trades, 50, "test")
+        self.assertEqual(c.status, "FAIL")
+
+
+class Stage2To3UnitTest(unittest.TestCase):
+    """Unit tests for STAGE_2 → STAGE_3 evaluators."""
+
+    def test_recent_window_stability_both_pass(self):
+        # 30 trades at exactly modeled fee + slip ceiling → PASS.
+        trades = [sp.Trade("2026-05-01T00:00:00Z", "BTC", "STOP", -1, 100, 50, 100000)] * 30
+        c = sp.check_recent_window_stability(
+            trades, 30, 10.0, 5.0, 0.10, "test")
+        self.assertEqual(c.status, "PASS")
+
+    def test_recent_window_stability_fee_fails(self):
+        # 12bp fee > 11bp ceiling (10×1.10) → FAIL.
+        trades = [sp.Trade("2026-05-01T00:00:00Z", "BTC", "STOP", -1, 120, 50, 100000)] * 30
+        c = sp.check_recent_window_stability(
+            trades, 30, 10.0, 5.0, 0.10, "test")
+        self.assertEqual(c.status, "FAIL")
+        self.assertIn("12.00", c.actual)
+
+    def test_recent_window_stability_slip_fails(self):
+        # Fee fine (10bp), but slip 6bp > 5.5bp ceiling (5×1.10) → FAIL.
+        trades = [sp.Trade("2026-05-01T00:00:00Z", "BTC", "STOP", -1, 100, 60, 100000)] * 30
+        c = sp.check_recent_window_stability(
+            trades, 30, 10.0, 5.0, 0.10, "test")
+        self.assertEqual(c.status, "FAIL")
+
+    def test_recent_window_stability_window_too_small(self):
+        # Only 20 trades w/ cost data, need 30 → PENDING.
+        trades = [sp.Trade("2026-05-01T00:00:00Z", "BTC", "STOP", -1, 100, 50, 100000)] * 20
+        c = sp.check_recent_window_stability(
+            trades, 30, 10.0, 5.0, 0.10, "test")
+        self.assertEqual(c.status, "PENDING")
+
+    def test_recent_window_stability_no_losers_skips_slip(self):
+        # 30 winners → slip n/a but fee should still apply.
+        trades = [sp.Trade("2026-05-01T00:00:00Z", "BTC", "TARGET", 1, 100, 0, 100000)] * 30
+        c = sp.check_recent_window_stability(
+            trades, 30, 10.0, 5.0, 0.10, "test")
+        self.assertEqual(c.status, "PASS")
+        self.assertIn("n/a", c.actual)
+
+    def test_recent_net_positive_pass(self):
+        # 30 wins in last 5 days = +$30k → PASS.
+        recent = datetime.now(timezone.utc) - timedelta(days=5)
+        trades = [sp.Trade(iso(recent + timedelta(hours=i)), "BTC", "TARGET",
+                          1000, 100, 0, 100000) for i in range(30)]
+        c = sp.check_recent_net_positive(trades, 30, 30, "test")
+        self.assertEqual(c.status, "PASS")
+
+    def test_recent_net_positive_excludes_old(self):
+        # 50 old wins (> 30 days ago) → only 0 in window → PENDING (need 30).
+        old = datetime.now(timezone.utc) - timedelta(days=60)
+        trades = [sp.Trade(iso(old + timedelta(hours=i)), "BTC", "TARGET",
+                          1000, 100, 0, 100000) for i in range(50)]
+        c = sp.check_recent_net_positive(trades, 30, 30, "test")
+        self.assertEqual(c.status, "PENDING")
+
+    def test_check_single_symbol_at_stage_n_floor_blocks_spurious_kill(self):
+        # 1 trade on one sym = 100% concentration but n=1 → PENDING, not FAIL.
+        trades = [sp.Trade("2026-05-01T00:00:00Z", "BTC", "STOP", -100, 0, 0, 0)]
+        c = sp.check_single_symbol_at_stage(trades, 40.0, 100, "test")
+        self.assertEqual(c.status, "PENDING")
+
+
+class Stage3To4UnitTest(unittest.TestCase):
+    """Unit tests for STAGE_3 → STAGE_4 evaluators."""
+
+    def test_annualized_at_stage_pass(self):
+        # Threshold at 90d: $69k × (90/365.25) × 0.5 = $8,500.
+        # Need $8.5k+ over 90d → 30 wins × $300 = $9k.
+        start = datetime.now(timezone.utc) - timedelta(days=90)
+        trades = [sp.Trade(iso(start + timedelta(days=i*3)), "BTC", "TARGET",
+                          300, 100, 0, 100000) for i in range(30)]
+        c = sp.check_annualized_at_stage(trades, start, 0.50, "test", 30)
+        self.assertEqual(c.status, "PASS")
+
+    def test_annualized_at_stage_below_threshold_fails(self):
+        start = datetime.now(timezone.utc) - timedelta(days=90)
+        # Only $1k pnl over 90d, threshold is ~$8.5k → FAIL.
+        trades = [sp.Trade(iso(start + timedelta(days=i*3)), "BTC", "TARGET",
+                          33, 100, 0, 100000) for i in range(30)]
+        c = sp.check_annualized_at_stage(trades, start, 0.50, "test", 30)
+        self.assertEqual(c.status, "FAIL")
+
+    def test_annualized_at_stage_low_n_pending(self):
+        start = datetime.now(timezone.utc) - timedelta(days=90)
+        trades = [sp.Trade(iso(start), "BTC", "TARGET", 100000, 100, 0, 100000)] * 5
+        c = sp.check_annualized_at_stage(trades, start, 0.50, "test", 30)
+        self.assertEqual(c.status, "PENDING")
+
+
+class MultiStageVerdictIntegrationTest(unittest.TestCase):
+    """End-to-end exit-code tests for STAGE_1/2/3 transitions via CLI."""
+
+    def test_stage_1_missing_start_arg_errors(self):
+        code, out = run_cli([
+            "--from-stage", "STAGE_1",
+            "--live-source", "local",
+            "--live-dir", "/tmp/__nonexistent_stage_1__",
+        ])
+        self.assertEqual(code, 3, f"expected ERROR, got {code}\n{out}")
+        self.assertIn("--stage-1-start is required", out)
+
+    def test_stage_2_missing_one_start_errors(self):
+        code, out = run_cli([
+            "--from-stage", "STAGE_2",
+            "--stage-1-start", "2026-04-01T00:00:00Z",
+            # Missing --stage-2-start.
+            "--live-source", "local",
+            "--live-dir", "/tmp/__nonexistent_stage_2__",
+        ])
+        self.assertEqual(code, 3, f"expected ERROR, got {code}\n{out}")
+        self.assertIn("--stage-2-start is required", out)
+
+    def test_stage_3_missing_one_start_errors(self):
+        # Missing --stage-3-start specifically.
+        code, out = run_cli([
+            "--from-stage", "STAGE_3",
+            "--stage-1-start", "2026-01-01T00:00:00Z",
+            "--stage-2-start", "2026-02-01T00:00:00Z",
+            "--live-source", "local",
+            "--live-dir", "/tmp/__nonexistent_stage_3__",
+        ])
+        self.assertEqual(code, 3, f"expected ERROR, got {code}\n{out}")
+        self.assertIn("--stage-3-start is required", out)
+
+    def test_stage_1_malformed_start_errors(self):
+        code, out = run_cli([
+            "--from-stage", "STAGE_1",
+            "--stage-1-start", "Tuesday afternoon",
+            "--live-source", "local",
+            "--live-dir", "/tmp",
+        ])
+        self.assertEqual(code, 3, f"expected ERROR, got {code}\n{out}")
+        self.assertIn("not a valid ISO timestamp", out)
+
+    def test_stage_1_promote_path_all_gates_pass(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            jdir = Path(tmp) / "journal"
+            history = Path(tmp) / "history.jsonl"
+            now = datetime.now(timezone.utc)
+            stage_1_start = now - timedelta(days=35)
+            # STAGE_1 economics: $100/trade stake, ~6:1 RR. Choosing
+            # loss_pnl=-40 keeps daily net loss below the $200 cap even on
+            # a 4-loser day (4 × $40 = $160 < $200). Fixture mirrors real
+            # STAGE_1 scale: small per-trade pnl, ~$15k notional → fee 10bp,
+            # slip 5bp (modeled). 60 trades / 35d = ~1.7/day, sustainable
+            # under 5min interleaving across 3 symbols.
+            write_trades_window(jdir, stage_1_start, n=60,
+                                win_rate=0.21, win_pnl=240, loss_pnl=-40,
+                                fee_usd=15, slip_usd=7.5, notional_usd=15000)
+            write_drift_history(history, [
+                ((now - timedelta(days=21)).strftime("%Y-%m-%dT%H:%M:%SZ"), "CLEAN"),
+                ((now - timedelta(days=14)).strftime("%Y-%m-%dT%H:%M:%SZ"), "CLEAN"),
+                ((now - timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ"), "CLEAN"),
+            ])
+            code, out = run_cli([
+                "--from-stage", "STAGE_1",
+                "--stage-1-start", iso(stage_1_start),
+                "--live-source", "local",
+                "--live-dir", str(jdir),
+                "--drift-history", str(history),
+            ])
+            self.assertEqual(code, 0,
+                f"expected PROMOTE (exit 0), got {code}\n{out}")
+            self.assertIn("PROMOTE", out)
+
+    def test_stage_1_blocked_on_fee_over_tolerance(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            jdir = Path(tmp) / "journal"
+            history = Path(tmp) / "history.jsonl"
+            now = datetime.now(timezone.utc)
+            stage_1_start = now - timedelta(days=35)
+            # Fee 11bp > 10.5bp ceiling → FAIL.
+            write_trades_window(jdir, stage_1_start, n=60,
+                                fee_usd=110, slip_usd=50)
+            write_drift_history(history, [
+                ((now - timedelta(days=21)).strftime("%Y-%m-%dT%H:%M:%SZ"), "CLEAN"),
+            ])
+            code, out = run_cli([
+                "--from-stage", "STAGE_1",
+                "--stage-1-start", iso(stage_1_start),
+                "--live-source", "local",
+                "--live-dir", str(jdir),
+                "--drift-history", str(history),
+            ])
+            self.assertEqual(code, 1,
+                f"expected BLOCKED, got {code}\n{out}")
+            self.assertIn("BLOCKED", out)
+
+    def test_stage_1_segments_out_pre_stage_trades(self):
+        """Critical correctness: trades from BEFORE stage_1_start (e.g. residual
+        STAGE_0 paper trades in the same journal directory) must NOT count
+        toward STAGE_1 gates. Otherwise the operator would be evaluating
+        STAGE_1 gates against a pool that's mostly pre-stage paper data."""
+        with tempfile.TemporaryDirectory() as tmp:
+            jdir = Path(tmp) / "journal"
+            history = Path(tmp) / "history.jsonl"
+            now = datetime.now(timezone.utc)
+            # 200 PAPER (pre-S1) trades that would WAY exceed thresholds.
+            paper_start = now - timedelta(days=120)
+            paper_end = now - timedelta(days=40)
+            write_trades_window(jdir, paper_start, n=200,
+                                win_rate=0.5, win_pnl=10000, loss_pnl=-100,
+                                fee_usd=100, slip_usd=50, end=paper_end)
+            # Only 5 actual S1 trades (below 50 floor).
+            stage_1_start = now - timedelta(days=35)
+            write_trades_window(jdir, stage_1_start, n=5,
+                                win_rate=0.5, win_pnl=10000, loss_pnl=-100,
+                                fee_usd=100, slip_usd=50)
+            write_drift_history(history, [
+                ((now - timedelta(days=21)).strftime("%Y-%m-%dT%H:%M:%SZ"), "CLEAN"),
+            ])
+            code, out = run_cli([
+                "--from-stage", "STAGE_1",
+                "--stage-1-start", iso(stage_1_start),
+                "--live-source", "local",
+                "--live-dir", str(jdir),
+                "--drift-history", str(history),
+            ])
+            # Expected: WAITING (only 5 S1 trades, below 50). If segmentation
+            # broken, the 200 paper trades would push it to PROMOTE — that's
+            # the regression this test catches.
+            self.assertEqual(code, 2,
+                f"expected WAITING (S1 segmentation), got {code}\n{out}")
+            self.assertIn("WAITING", out)
+            # The trade-count line should show 5, not 205.
+            self.assertIn(" 5  ", out, f"expected n=5 in output:\n{out}")
+
+    def test_stage_2_promote_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            jdir = Path(tmp) / "journal"
+            history = Path(tmp) / "history.jsonl"
+            now = datetime.now(timezone.utc)
+            stage_1_start = now - timedelta(days=80)
+            stage_2_start = now - timedelta(days=65)
+            # 110 S1+S2 trades — exceeds 100 floor.
+            write_trades_window(jdir, stage_1_start, n=110,
+                                win_rate=0.21, win_pnl=6000, loss_pnl=-1000,
+                                fee_usd=100, slip_usd=50, notional_usd=100000)
+            write_drift_history(history, [
+                ((now - timedelta(days=44)).strftime("%Y-%m-%dT%H:%M:%SZ"), "CLEAN"),
+                ((now - timedelta(days=14)).strftime("%Y-%m-%dT%H:%M:%SZ"), "CLEAN"),
+            ])
+            code, out = run_cli([
+                "--from-stage", "STAGE_2",
+                "--stage-1-start", iso(stage_1_start),
+                "--stage-2-start", iso(stage_2_start),
+                "--live-source", "local",
+                "--live-dir", str(jdir),
+                "--drift-history", str(history),
+            ])
+            self.assertEqual(code, 0,
+                f"expected PROMOTE, got {code}\n{out}")
+            self.assertIn("PROMOTE", out)
+
+    def test_stage_3_promote_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            jdir = Path(tmp) / "journal"
+            history = Path(tmp) / "history.jsonl"
+            now = datetime.now(timezone.utc)
+            stage_1_start = now - timedelta(days=180)
+            stage_2_start = now - timedelta(days=150)
+            stage_3_start = now - timedelta(days=95)
+            # 220 cumulative (≥200), reasonable cost profile.
+            write_trades_window(jdir, stage_1_start, n=220,
+                                win_rate=0.21, win_pnl=6000, loss_pnl=-1000,
+                                fee_usd=100, slip_usd=50, notional_usd=100000)
+            write_drift_history(history, [
+                ((now - timedelta(days=80)).strftime("%Y-%m-%dT%H:%M:%SZ"), "CLEAN"),
+                ((now - timedelta(days=40)).strftime("%Y-%m-%dT%H:%M:%SZ"), "CLEAN"),
+                ((now - timedelta(days=10)).strftime("%Y-%m-%dT%H:%M:%SZ"), "CLEAN"),
+            ])
+            code, out = run_cli([
+                "--from-stage", "STAGE_3",
+                "--stage-1-start", iso(stage_1_start),
+                "--stage-2-start", iso(stage_2_start),
+                "--stage-3-start", iso(stage_3_start),
+                "--live-source", "local",
+                "--live-dir", str(jdir),
+                "--drift-history", str(history),
+            ])
+            self.assertEqual(code, 0,
+                f"expected PROMOTE, got {code}\n{out}")
+            self.assertIn("PROMOTE", out)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
