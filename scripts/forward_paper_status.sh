@@ -361,26 +361,58 @@ echo "$DATA" | grep "^STRATEGY|" | while IFS='|' read -r _ label first_ts last_t
     strategy_closes=$(echo "$DATA" | awk -F'|' -v lbl="$label" '$1=="CLOSE" && $2==lbl {OFS="\t"; print $3, $4, $5, $6}')
     hodl_strategy_usd="0"; hodl_total_usd="0"; hodl_delta_usd="0"
     hodl_n_windows="0"; hodl_kill_pairs="0"; hodl_kill="0"; hodl_warning=""
+    # Failure mode tracking for the helper invocation. Three classes:
+    #   helper_failed=1 — non-zero exit OR empty stdout (crash/network/API)
+    #   helper_warned=1 — hodl_warning field set (helper ran but couldn't compute)
+    # Both must override s_hodl_cumul/s_hodl_window to PENDING — defaulting to
+    # 0 across all numeric fields means pass_or_fail "0" "0" ge = PASS, which
+    # is the fail-open this guard closes (yesterday's `|| true` pattern again).
+    helper_failed=0
+    helper_warned=0
     if [[ -n "$strategy_closes" ]] && [[ -x "$HODL_HELPER" ]]; then
+        # Capture exit code separately from output so a crashing helper can't
+        # masquerade as a "no data, all zeros" healthy response.
+        set +e
         hodl_out=$(echo "$strategy_closes" | "$HODL_HELPER" \
             --benchmark-notional "$BENCHMARK_NOTIONAL" \
-            --kill-threshold-usd "$KILL_HODL_WINDOW_USD" 2>/dev/null || true)
-        if [[ -n "$hodl_out" ]]; then
+            --kill-threshold-usd "$KILL_HODL_WINDOW_USD" 2>/dev/null)
+        hodl_exit=$?
+        set -e
+        if [[ "$hodl_exit" -ne 0 ]] || [[ -z "$hodl_out" ]]; then
+            helper_failed=1
+        else
             IFS=$'\t' read -r hodl_strategy_usd hodl_total_usd hodl_delta_usd \
                 hodl_n_windows hodl_kill_pairs hodl_kill hodl_warning <<<"$hodl_out"
+            [[ -n "$hodl_warning" ]] && helper_warned=1
         fi
+    elif [[ ! -x "$HODL_HELPER" ]]; then
+        # Missing helper itself is a config error worth surfacing — same
+        # severity as a crash. Don't silently default to PASS.
+        helper_failed=1
     fi
-    if [[ "$trades" -ge "$MIN_TRADES" ]]; then
+    if [[ "$helper_failed" == "1" ]] || [[ "$helper_warned" == "1" ]]; then
+        # Override BOTH gates to PENDING. The renderer below will surface the
+        # cause (warning text vs "(helper unavailable)").
+        s_hodl_cumul="PENDING"
+        s_hodl_window="PENDING"
+    elif [[ "$trades" -ge "$MIN_TRADES" ]]; then
         s_hodl_cumul=$(pass_or_fail "$hodl_delta_usd" "0" ge)
+        if [[ "$hodl_kill" == "1" ]]; then
+            s_hodl_window="FAIL"
+        elif [[ "$hodl_n_windows" -lt "2" ]]; then
+            s_hodl_window="PENDING"
+        else
+            s_hodl_window="PASS"
+        fi
     else
         s_hodl_cumul="INSUFFICIENT"
-    fi
-    if [[ "$hodl_kill" == "1" ]]; then
-        s_hodl_window="FAIL"
-    elif [[ "$hodl_n_windows" -lt "2" ]]; then
-        s_hodl_window="PENDING"
-    else
-        s_hodl_window="PASS"
+        if [[ "$hodl_kill" == "1" ]]; then
+            s_hodl_window="FAIL"
+        elif [[ "$hodl_n_windows" -lt "2" ]]; then
+            s_hodl_window="PENDING"
+        else
+            s_hodl_window="PASS"
+        fi
     fi
 
     # Overall verdict — fee/slip and HODL kill criteria check at any data volume
@@ -411,7 +443,9 @@ echo "$DATA" | grep "^STRATEGY|" | while IFS='|' read -r _ label first_ts last_t
     printf "    Realized slip bps:   %-6s  / ≤%dbp (losers)       [%s]\n" "$slip_bps_val" "$KILL_MAX_SLIP_BP" "$s_slip"
     hodl_delta_int=$(awk -v d="$hodl_delta_usd" 'BEGIN{printf "%+d", d}')
     hodl_total_int=$(awk -v h="$hodl_total_usd" 'BEGIN{printf "%+d", h}')
-    if [[ -n "$hodl_warning" ]]; then
+    if [[ "$helper_failed" == "1" ]]; then
+        printf "    BTC-HODL Δ vs \$%-5d: (helper unavailable or crashed)        [PENDING]\n" "$BENCHMARK_NOTIONAL"
+    elif [[ -n "$hodl_warning" ]]; then
         printf "    BTC-HODL Δ vs \$%-5d: (%s)                          [PENDING]\n" "$BENCHMARK_NOTIONAL" "$hodl_warning"
     else
         printf "    BTC-HODL Δ vs \$%-5d: \$%-12s  (HODL=\$%s)  [%s]\n" \
@@ -486,6 +520,57 @@ if [[ -n "$LIVE_DATA" ]]; then
             printf "    Both gates met — STAGE_1 eligible pending completion-review document\n"
         fi
     fi
+fi
+
+# ── Drift detector heartbeat ─────────────────────────────────────────────────
+# Surfaces a stale drift_check_history.jsonl at every status check. Without
+# this, an operator running forward_paper_status (which they do far more
+# often than redeploys) had no reason to know the launchd-driven drift cron
+# had silently stopped. post_deploy_check §11 covers the same ground but
+# only at deploy time. With these two touchpoints, "cron silently died" gets
+# surfaced at every natural operator interaction with the system.
+SCRIPT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+DRIFT_HISTORY="${SCRIPT_ROOT}/results/drift_check_history.jsonl"
+echo
+echo "$SEP"
+echo "  Drift detector heartbeat"
+echo "$SEP"
+if [[ ! -s "$DRIFT_HISTORY" ]]; then
+    # File missing OR empty — the launchd cron has either never registered
+    # (post_deploy_check §11 catches that) or registered-but-never-fired.
+    # Render with explicit ⚠ rather than informational so a fresh-deploy
+    # operator sees and confirms.
+    printf "    %-50s  [⚠ history missing/empty]\n" "$DRIFT_HISTORY"
+    printf "    %-50s\n" "→ run scripts/run_drift_check.sh once to seed; verify launchd plist"
+elif command -v jq >/dev/null 2>&1; then
+    last_drift_ts=$(tail -1 "$DRIFT_HISTORY" | jq -r '.ts // ""')
+    if [[ -z "$last_drift_ts" ]]; then
+        printf "    %-50s  [⚠ tail entry has no .ts field]\n" "drift history"
+    else
+        last_drift_epoch=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "$last_drift_ts" +%s 2>/dev/null || \
+                           date -u -d "$last_drift_ts" +%s 2>/dev/null || echo 0)
+        if [[ "$last_drift_epoch" == "0" ]]; then
+            printf "    %-50s  [⚠ malformed ts: %s]\n" "drift history" "$last_drift_ts"
+        else
+            age_days=$(( (NOW - last_drift_epoch) / 86400 ))
+            if [[ "$age_days" -gt 10 ]]; then
+                # >10d = expected weekly cadence missed twice. The cron is
+                # dead or the laptop has been off. Either way investigate.
+                printf "    %-50s  [⚠ %dd ago — cron may be dead]\n" \
+                       "last drift run ($last_drift_ts)" "$age_days"
+                printf "    %-50s\n" \
+                       "→ launchctl list | grep tradingengine; check launchd.err.log"
+            elif [[ "$age_days" -gt 7 ]]; then
+                printf "    %-50s  [ⓘ %dd ago (1 cycle of cadence)]\n" \
+                       "last drift run ($last_drift_ts)" "$age_days"
+            else
+                printf "    %-50s  [✓ %dd ago]\n" \
+                       "last drift run ($last_drift_ts)" "$age_days"
+            fi
+        fi
+    fi
+else
+    printf "    %-50s\n" "(jq not available — install jq to enable freshness check)"
 fi
 
 echo

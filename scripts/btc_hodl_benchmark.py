@@ -34,7 +34,9 @@ Usage:
       --benchmark-notional 32000 \
       --kill-threshold-usd 5000
 
-Exit code is always 0 even on warning — the caller decides what to do.
+Exit code: 0 on success or runtime warning (caller reads warning field
+to decide); 2 on argument validation error (loud failure for bad
+config — must not silently produce zero math).
 """
 
 import argparse
@@ -126,6 +128,21 @@ def main() -> int:
     ap.add_argument("--kill-threshold-usd", type=float, default=5000,
                     help="Per-window underperformance ($) that counts toward the consecutive-window kill rule.")
     args = ap.parse_args()
+
+    # Defensive arg validation. Caller passes literal values from CLAUDE.md
+    # so neither path triggers in production, but a future caller misconfig
+    # would silently produce "all zeros" math (hodl_total = 0 × pct → 0)
+    # which the surrounding overall-verdict logic could read as PASS. Force
+    # a loud exit instead — bad config should fail fast, not silently skew
+    # a decision-grade gate.
+    if args.benchmark_notional <= 0:
+        print(f"error: --benchmark-notional must be > 0 (got {args.benchmark_notional})",
+              file=sys.stderr)
+        return 2
+    if args.kill_threshold_usd < 0:
+        print(f"error: --kill-threshold-usd must be ≥ 0 (got {args.kill_threshold_usd})",
+              file=sys.stderr)
+        return 2
 
     events = parse_close_events(sys.stdin)
     if not events:

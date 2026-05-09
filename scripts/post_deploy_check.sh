@@ -245,8 +245,19 @@ EXEC_REPORT=$(ssh "${TARGET}" "real_count=0
 real_list=''
 testnet_count=0
 testnet_list=''
+missing_count=0
+missing_list=''
 for sym in $SYMBOLS_LC; do
     es=\$(systemctl show -p ExecStart --value paper-live@\${sym}.service 2>/dev/null || true)
+    # Empty ExecStart means systemctl failed or the service doesn't exist.
+    # Was a fail-open: the engine fell through every pattern and was silently
+    # counted as 'stub' by absence, masquerading systemd brokenness as healthy.
+    # Now: track explicitly so 16 broken engines can't pose as 16 stub engines.
+    if [[ -z \"\$es\" ]]; then
+        missing_count=\$((missing_count + 1))
+        missing_list=\"\$missing_list \$sym\"
+        continue
+    fi
     # Match the binance_live token exactly — trailing space (common, more args
     # follow) or end-of-string. Without the trailing-space anchor, the glob
     # '*--executor binance_live*' would falsely match binance_live_testnet too.
@@ -259,11 +270,22 @@ for sym in $SYMBOLS_LC; do
         testnet_list=\"\$testnet_list \$sym\"
     fi
 done
-echo \"\$real_count|\$real_list|\$testnet_count|\$testnet_list\"")
-IFS='|' read -r REAL_COUNT REAL_LIST TESTNET_COUNT TESTNET_LIST <<<"$EXEC_REPORT"
+echo \"\$real_count|\$real_list|\$testnet_count|\$testnet_list|\$missing_count|\$missing_list\"")
+IFS='|' read -r REAL_COUNT REAL_LIST TESTNET_COUNT TESTNET_LIST MISSING_COUNT MISSING_LIST <<<"$EXEC_REPORT"
+MISSING_COUNT="${MISSING_COUNT:-0}"
 TOTAL=$(echo "$SYMBOLS_LC" | wc -w | tr -d ' ')
-if [[ "$REAL_COUNT" == "0" && "$TESTNET_COUNT" == "0" ]]; then
+if [[ "$MISSING_COUNT" != "0" ]]; then
+    # Loud warn — empty ExecStart on N engines means we cannot tell their
+    # executor mode at all. Section 1 may show those engines as "active" but
+    # this section's contract — "verify executor mode" — fails.
+    warn "$MISSING_COUNT / $TOTAL engines have empty ExecStart (systemctl failed):$MISSING_LIST"
+fi
+if [[ "$REAL_COUNT" == "0" && "$TESTNET_COUNT" == "0" && "$MISSING_COUNT" == "0" ]]; then
     ok "all $TOTAL engines on stub (paper-money) — pre-STAGE_1 expected state"
+elif [[ "$REAL_COUNT" == "0" && "$TESTNET_COUNT" == "0" ]]; then
+    # All visible engines are stub but some couldn't be inspected. Don't
+    # report a green "all on stub" — the missing ones are unknowns.
+    :  # warn for $MISSING_COUNT was already emitted above
 else
     if [[ "$REAL_COUNT" != "0" ]]; then
         # Real money is loud: emit an unmistakable banner. This is NOT a warning
@@ -363,22 +385,43 @@ if ! echo "$LAUNCHD_LIST" | grep -q "$LAUNCHD_LABEL"; then
     else
         echo "  ⓘ  launchd not available on this OS — skipping registration check"
     fi
-elif [[ ! -s "$HISTORY" ]]; then
-    echo "  ⓘ  drift_check_history.jsonl empty/missing — first cron run pending"
-elif command -v jq >/dev/null 2>&1; then
-    last_ts=$(tail -1 "$HISTORY" | jq -r '.ts')
-    last_epoch=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "$last_ts" +%s 2>/dev/null || \
-                 date -u -d "$last_ts" +%s 2>/dev/null || echo 0)
-    if [[ "$last_epoch" == "0" ]]; then
-        echo "  ⓘ  could not parse last drift_check timestamp — manually verify $HISTORY"
-    else
-        age_days=$(( (NOW_EPOCH - last_epoch) / 86400 ))
-        if [[ "$age_days" -gt 10 ]]; then
-            warn "drift_check last ran ${age_days}d ago (>10d — weekly cron may have stopped firing)"
-        elif [[ "$age_days" -gt 7 ]]; then
-            echo "  ⓘ  drift_check last ran ${age_days}d ago (within 1 cycle of expected weekly cadence)"
+else
+    # Closes a fail-open: a launchd job can be REGISTERED but FAILING on
+    # every invocation (wrong path in plist, ENV missing, plist syntax
+    # error that loads but doesn't run). The original check only verified
+    # registration; a registered-but-failing cron would silently look
+    # healthy here while never producing drift_check runs. `launchctl list`
+    # output shows last-exit-status in column 2: 0 = clean, anything else
+    # = the cron's last invocation failed. ENOENT (78) is the launchd code
+    # for "couldn't exec the program" — a particularly noisy fail mode.
+    LAUNCHD_STATUS=$(echo "$LAUNCHD_LIST" | awk -v lbl="$LAUNCHD_LABEL" '$3 == lbl {print $2}' | head -1)
+    if [[ -n "$LAUNCHD_STATUS" ]] && [[ "$LAUNCHD_STATUS" != "0" ]] && [[ "$LAUNCHD_STATUS" != "-" ]]; then
+        warn "launchd job '$LAUNCHD_LABEL' last exit status = $LAUNCHD_STATUS"
+        warn "  → tail results/drift_runs/launchd.err.log for the failure cause"
+    fi
+
+    if [[ ! -s "$HISTORY" ]]; then
+        # If launchd is loaded AND last exit clean (or never run) but history
+        # is empty, that's "first run pending" — legitimate state when the
+        # plist was just registered. The launchd-status check above catches
+        # the "registered but failing" variant separately.
+        echo "  ⓘ  drift_check_history.jsonl empty/missing — first cron run pending"
+        echo "     If this persists >7d, verify the plist actually invokes weekly_audit.sh"
+    elif command -v jq >/dev/null 2>&1; then
+        last_ts=$(tail -1 "$HISTORY" | jq -r '.ts')
+        last_epoch=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "$last_ts" +%s 2>/dev/null || \
+                     date -u -d "$last_ts" +%s 2>/dev/null || echo 0)
+        if [[ "$last_epoch" == "0" ]]; then
+            echo "  ⓘ  could not parse last drift_check timestamp — manually verify $HISTORY"
         else
-            ok "drift_check last ran ${age_days}d ago (latest: ${last_ts})"
+            age_days=$(( (NOW_EPOCH - last_epoch) / 86400 ))
+            if [[ "$age_days" -gt 10 ]]; then
+                warn "drift_check last ran ${age_days}d ago (>10d — weekly cron may have stopped firing)"
+            elif [[ "$age_days" -gt 7 ]]; then
+                echo "  ⓘ  drift_check last ran ${age_days}d ago (within 1 cycle of expected weekly cadence)"
+            else
+                ok "drift_check last ran ${age_days}d ago (latest: ${last_ts})"
+            fi
         fi
     fi
 fi

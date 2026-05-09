@@ -52,6 +52,14 @@ N_MIN = 30                  # minimum live trades for a meaningful comparison
 ALPHA = 0.001               # family-wise α — calibration-recommended operating point
 SHADOW_SUBDIRS = ("",)      # only the live strategy's journal dir; shadows handled separately
 
+# Sanity floor for the backtest reference distribution. The locked
+# reference (results/hod_journals/2026-05-07-mfe/) has ~2,210 trades.
+# A reference smaller than this is corrupted/wiped — refuse to compare
+# rather than silently emit a CLEAN verdict against an empty distribution.
+# Closes the catastrophic fail-open where a missing/wiped backtest dir
+# would let the decision-grade kill mechanism return exit 0 forever.
+BACKTEST_MIN_TRADES = 500
+
 
 @dataclass
 class Trade:
@@ -195,9 +203,13 @@ def main() -> int:
     args = ap.parse_args()
 
     backtest_dir = Path(args.backtest_dir)
+    # Exit 3 (ERROR) for environment/config failures — distinct from exit 2
+    # (INSUFFICIENT_DATA, normal early-deployment state). The wrapper
+    # (run_drift_check.sh) maps exit 3 to a Telegram WARN; exit 2 stays
+    # silent. Conflating them would silence config errors that need attention.
     if not backtest_dir.is_dir():
-        print(f"backtest dir not found: {backtest_dir}", file=sys.stderr)
-        return 2
+        print(f"ERROR: backtest dir not found: {backtest_dir}", file=sys.stderr)
+        return 3
 
     print(f"Live-vs-backtest distribution drift detector")
     print(f"=" * 80)
@@ -207,14 +219,28 @@ def main() -> int:
 
     # Load.
     backtest = load_local_trades(backtest_dir)
+    # Backtest-reference sanity floor. A wiped or partially-corrupt
+    # backtest dir would silently produce "all metrics insufficient →
+    # no drift detected → exit 0 CLEAN" — the decision-grade kill
+    # mechanism returning green forever despite having no reference.
+    if len(backtest) < BACKTEST_MIN_TRADES:
+        print(f"ERROR: backtest reference has only {len(backtest)} trades "
+              f"(< floor {BACKTEST_MIN_TRADES}). Reference may be corrupt or "
+              f"partially populated. Refusing to compare.", file=sys.stderr)
+        return 3
+
     if args.live_source == "vps":
         try:
             live = load_remote_trades(args.vps, args.live_dir)
         except subprocess.CalledProcessError as e:
-            print(f"ssh fetch failed: {e}", file=sys.stderr)
-            return 2
+            print(f"ERROR: ssh fetch failed: {e}", file=sys.stderr)
+            return 3
     else:
-        live = load_local_trades(Path(args.live_dir))
+        live_dir = Path(args.live_dir)
+        if not live_dir.is_dir():
+            print(f"ERROR: live dir not found: {live_dir}", file=sys.stderr)
+            return 3
+        live = load_local_trades(live_dir)
 
     print(f"backtest trades: {len(backtest):,}")
     print(f"live trades:     {len(live):,}")

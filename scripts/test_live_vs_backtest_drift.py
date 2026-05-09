@@ -164,6 +164,59 @@ class DriftDetectorFunctionalTest(unittest.TestCase):
             f"stdout:\n{result.stdout}")
         self.assertIn("DRIFT DETECTED", result.stdout)
 
+    def test_missing_backtest_dir_exits_3(self):
+        """Closes a fail-open: missing backtest dir used to return exit 2
+        (INSUFFICIENT_DATA, silent in cron) instead of exit 3 (ERROR,
+        Telegram WARN). Decision-grade kill mechanism's reference data
+        going missing is a config error, not a data shortage."""
+        # Don't create backtest_dir at all.
+        self.live_dir.mkdir(parents=True, exist_ok=True)
+        result = run_drift(self.backtest_dir, self.live_dir)
+        self.assertEqual(result.returncode, 3,
+            f"expected exit 3 (ERROR) on missing backtest dir, got {result.returncode}\n"
+            f"stderr:\n{result.stderr}")
+        self.assertIn("backtest dir not found", result.stderr)
+
+    def test_empty_backtest_dir_exits_3(self):
+        """Closes the catastrophic fail-open: a wiped backtest dir
+        (exists but empty) used to silently return exit 0 CLEAN forever
+        because every metric reported 'insufficient data' and skipped.
+        Now the BACKTEST_MIN_TRADES floor kicks in → exit 3 ERROR."""
+        self.backtest_dir.mkdir(parents=True, exist_ok=True)
+        # No journals written.
+        write_journal(self.live_dir, "BTCUSDT", "2026-05",
+                      make_winning_strategy(50))
+        result = run_drift(self.backtest_dir, self.live_dir)
+        self.assertEqual(result.returncode, 3,
+            f"expected exit 3 (ERROR) on empty backtest dir, got {result.returncode}\n"
+            f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}")
+        self.assertIn("backtest reference", result.stderr.lower())
+
+    def test_undersized_backtest_dir_exits_3(self):
+        """A backtest dir with very few trades (e.g., partial restore
+        from a backup) is not safe to compare against — refuse rather
+        than silently degrade. Boundary: 100 trades < 500 floor → ERROR."""
+        write_journal(self.backtest_dir, "BTCUSDT", "2025-01",
+                      make_winning_strategy(100))
+        write_journal(self.live_dir, "BTCUSDT", "2026-05",
+                      make_winning_strategy(50))
+        result = run_drift(self.backtest_dir, self.live_dir)
+        self.assertEqual(result.returncode, 3,
+            f"expected exit 3 (ERROR) on undersized backtest, got {result.returncode}")
+
+    def test_missing_live_dir_exits_3(self):
+        """Live dir not existing is a config error (not insufficient data).
+        Was: glob returned [] → 0 trades → exit 2 silent. Now: explicit
+        is_dir() check → exit 3 ERROR."""
+        write_journal(self.backtest_dir, "BTCUSDT", "2025-01",
+                      make_winning_strategy(500))
+        # Don't create live_dir.
+        result = run_drift(self.backtest_dir, self.live_dir)
+        self.assertEqual(result.returncode, 3,
+            f"expected exit 3 (ERROR) on missing live dir, got {result.returncode}\n"
+            f"stderr:\n{result.stderr}")
+        self.assertIn("live dir not found", result.stderr)
+
     def test_partial_closes_are_excluded(self):
         # PARTIAL outcomes (B2 mid-R partial-take) must be skipped per the
         # detector's load_local_trades logic. A backtest of healthy trades
