@@ -258,6 +258,7 @@ func main() {
 			FundingBpsPerDay: *fundingBpsPerDay,
 			MaxHoldHours:     *maxHoldHours,
 			FundingProvider:  fundingProvider,
+			Notifier:         notifier,
 		}
 		if fundingProvider != nil {
 			stub.FundingBpsPerDay = 0 // historical replaces constant
@@ -566,6 +567,7 @@ func main() {
 			FundingBpsPerDay: *fundingBpsPerDay,
 			MaxHoldHours:     spec.MaxHoldHours,
 			FundingProvider:  fundingProvider, // share — provider is read-only
+			Notifier:         notifier,
 		}
 		if fundingProvider != nil {
 			shadowExec.FundingBpsPerDay = 0

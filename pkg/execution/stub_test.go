@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -1084,6 +1085,81 @@ func TestRecover_PreOpenTickGuard_DoesNotCloseRecovered(t *testing.T) {
 	}
 	if len(stub.results) != 1 || !stub.results[0].won {
 		t.Errorf("expected one winning trade after recovery+target, got %d results", len(stub.results))
+	}
+}
+
+func TestStub_appendJournal_WriteFailureClearsHandleForRetry(t *testing.T) {
+	// Audit-pattern regression: appendJournal previously left s.journalFile
+	// non-nil after a write error, so every subsequent call wrote into the
+	// same dead handle and failed identically — forward-paper monitoring
+	// (forward_paper_status, drift detector, LIMBO resolution) would
+	// silently read stale data while the operator dashboard stayed green.
+	// Mirrors the BinanceLive `028e6a2` fix shape: handle MUST be cleared
+	// on failure so the next call goes through the open-or-create path.
+	//
+	// Stub journals are the forward-paper data source feeding the STAGE_1
+	// promotion decision — a silent journal-write failure invalidates 4
+	// months of monitoring. HIGH severity in the audit pattern.
+	dir := t.TempDir()
+	stub := &Stub{
+		StakeUSDT:   1000,
+		JournalPath: dir,
+		Symbol:      "BTCUSDT",
+	}
+
+	// Plant a closed-file handle as journalFile. Write on a closed *os.File
+	// returns os.ErrClosed — exactly the kind of mid-trade failure we want
+	// to simulate (disk full, fd leak, permissions revoked, etc.).
+	closedFile, err := os.CreateTemp(dir, "broken-*.jsonl")
+	if err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	if cerr := closedFile.Close(); cerr != nil {
+		t.Fatalf("setup close: %v", cerr)
+	}
+	stub.journalFile = closedFile
+	stub.journalMonth = time.Now().UTC().Format("2006-01")
+
+	// First call — Write fails on the closed handle.
+	stub.appendJournal(journalEntry{
+		Event:  "open",
+		Symbol: "BTCUSDT",
+		TS:     time.Now().UTC().Format(time.RFC3339),
+	})
+
+	// Critical assertion: handle MUST be cleared so next call reopens.
+	if stub.journalFile != nil {
+		t.Fatal("journalFile not cleared after write failure — next call would " +
+			"write to the same dead handle and fail identically")
+	}
+	if stub.journalMonth != "" {
+		t.Errorf("journalMonth not cleared: got %q", stub.journalMonth)
+	}
+
+	// Second call MUST succeed via the open-or-create path. JournalPath
+	// is a writable temp dir, so the recovery path runs cleanly.
+	stub.appendJournal(journalEntry{
+		Event:  "open",
+		Symbol: "BTCUSDT",
+		TS:     time.Now().UTC().Format(time.RFC3339),
+		Side:   "LONG",
+		Entry:  50000,
+		Stop:   49500,
+		Target: 53000,
+	})
+
+	if stub.journalFile == nil {
+		t.Error("journalFile not re-opened on subsequent call after failure clear")
+	}
+	// And the actual file on disk must contain the second event (proving the
+	// recovery path produced a real, writeable handle, not just a non-nil sentinel).
+	matches, _ := filepath.Glob(filepath.Join(dir, "BTCUSDT-*.jsonl"))
+	if len(matches) == 0 {
+		t.Fatal("no journal file on disk after recovery")
+	}
+	body, _ := os.ReadFile(matches[0])
+	if !strings.Contains(string(body), `"event":"open"`) {
+		t.Errorf("recovered journal did not contain expected event; got: %q", string(body))
 	}
 }
 

@@ -2,6 +2,7 @@ package execution
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/cristianmanoliu/trading-engine/pkg/funding"
 	"github.com/cristianmanoliu/trading-engine/pkg/models"
+	"github.com/cristianmanoliu/trading-engine/pkg/notify"
 )
 
 // OpenPosition tracks an active paper trade.
@@ -134,6 +136,13 @@ type Stub struct {
 	// leaves this empty so no files are produced during historical runs.
 	JournalPath string
 	Symbol      string // required when JournalPath is set
+
+	// Notifier is opt-in. When set, Stub fires SeverityCritical alerts on
+	// journal-write failures. Stub journals are the forward-paper data
+	// source feeding the STAGE_1 promotion decision — a silent journal
+	// write failure invalidates monitoring, so the operator must know
+	// loudly. Backtest path leaves this nil; cmd/engine wires it.
+	Notifier *notify.Notifier
 
 	journalFile  *os.File
 	journalMonth string // "YYYY-MM" of the open journal file
@@ -331,13 +340,21 @@ func (s *Stub) appendJournal(entry journalEntry) {
 			_ = s.journalFile.Close()
 		}
 		if err := os.MkdirAll(s.JournalPath, 0755); err != nil {
-			slog.Warn("journal mkdir failed", "err", err)
+			// Elevated from slog.Warn to slog.Error: Stub journals are the
+			// forward-paper data source feeding the STAGE_1 promotion
+			// decision — a missed write means the in-memory position state
+			// diverges from what forward_paper_status / drift detector /
+			// LIMBO resolution see. Surface loudly so post_deploy_check §5
+			// (ERROR-level events) catches it.
+			slog.Error("journal mkdir failed — PAPER POSITION MAY BE INVISIBLE TO FORWARD-PAPER MONITORING",
+				"symbol", s.Symbol, "path", s.JournalPath, "event", entry.Event, "err", err)
 			return
 		}
 		name := filepath.Join(s.JournalPath, fmt.Sprintf("%s-%s.jsonl", s.Symbol, month))
 		f, err := os.OpenFile(name, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 		if err != nil {
-			slog.Warn("journal open failed", "err", err)
+			slog.Error("journal open failed — PAPER POSITION MAY BE INVISIBLE TO FORWARD-PAPER MONITORING",
+				"symbol", s.Symbol, "path", name, "event", entry.Event, "err", err)
 			return
 		}
 		s.journalFile = f
@@ -345,7 +362,36 @@ func (s *Stub) appendJournal(entry journalEntry) {
 	}
 	line, _ := json.Marshal(entry)
 	line = append(line, '\n')
-	_, _ = s.journalFile.Write(line)
+	if _, werr := s.journalFile.Write(line); werr != nil {
+		// Same shape as BinanceLive's 028e6a2 fix: the failure path must
+		// reset the file handle so the NEXT call goes through open-or-
+		// create rather than persisting into "permanently broken" silent
+		// failure. Without this, every subsequent call writes to the
+		// same dead handle, fails the same way, and forward-paper
+		// monitoring continues to read stale data while the operator
+		// dashboard stays green. Audit pattern: failure path must not
+		// silently persist into success-looking state.
+		slog.Error("journal write failed — PAPER POSITION MAY BE INVISIBLE TO FORWARD-PAPER MONITORING",
+			"symbol", s.Symbol, "event", entry.Event, "err", werr)
+		_ = s.journalFile.Close()
+		s.journalFile = nil
+		s.journalMonth = ""
+		if s.Notifier != nil {
+			// Spawn the alert — fire-and-forget so notifier latency doesn't
+			// block the strategy event loop. Stub is single-goroutine by
+			// design but the notifier itself does network IO.
+			go func(sym, ev string, e error) {
+				_ = s.Notifier.SendStructured(context.Background(),
+					notify.SeverityCritical,
+					fmt.Sprintf("Journal write FAILED on %s (%s): %v\n"+
+						"Paper position may be invisible to forward-paper monitoring "+
+						"(forward_paper_status, drift detector, LIMBO resolution all "+
+						"read journals). Engine will retry on next event; if errors "+
+						"persist, investigate disk + permissions.",
+						sym, ev, e))
+			}(s.Symbol, entry.Event, werr)
+		}
+	}
 }
 
 type tradeResult struct {
