@@ -65,7 +65,16 @@ func main() {
 
 	cfg, err := config.Load(*cfgPath)
 	if err != nil {
-		slog.Error("failed to load config", "err", err)
+		slog.Error("failed to load config", "err", err, "path", *cfgPath)
+		// Telegram CRITICAL — without this, an operator's first deploy
+		// after a malformed YAML edit silently fails (engine never starts,
+		// systemd watchdog will catch the restart loop eventually but the
+		// primary signal is dashboard-blind). Best-effort: notifier may be
+		// a no-op when TELEGRAM env is unset, in which case this returns
+		// nil silently. Same pattern as the existing executor-validation
+		// alert at line ~119.
+		_ = notify.FromEnv().SendStructured(context.Background(), notify.SeverityCritical,
+			fmt.Sprintf("STARTUP FAILED — config load: %s\nerror: %v", *cfgPath, err))
 		os.Exit(1)
 	}
 
@@ -78,6 +87,9 @@ func main() {
 			cfg.Strategy.SignalTimeframe = *signalTFOverride
 		default:
 			slog.Error("invalid --signal-tf; must be 5m | 30m | 1H | 2H | 4H | 1D", "got", *signalTFOverride)
+			_ = notifier.SendStructured(context.Background(), notify.SeverityCritical,
+				fmt.Sprintf("STARTUP FAILED on %s — invalid --signal-tf=%q (must be 5m | 30m | 1H | 2H | 4H | 1D)",
+					cfg.Symbol, *signalTFOverride))
 			os.Exit(1)
 		}
 	}
@@ -92,6 +104,9 @@ func main() {
 		sideDir = models.Short
 	default:
 		slog.Error("invalid --side-filter; must be both | long | short", "got", *sideFilter)
+		_ = notifier.SendStructured(context.Background(), notify.SeverityCritical,
+			fmt.Sprintf("STARTUP FAILED on %s — invalid --side-filter=%q (must be both | long | short)",
+				cfg.Symbol, *sideFilter))
 		os.Exit(1)
 	}
 
@@ -138,7 +153,16 @@ func main() {
 
 	ticks, err := src.Subscribe(ctx)
 	if err != nil {
-		slog.Error("failed to subscribe to binance ws", "err", err)
+		slog.Error("failed to subscribe to binance ws", "err", err, "ws_url", cfg.Exchange.WSURL)
+		// Telegram CRITICAL — engine started alert fired at line ~123,
+		// so the operator expects a healthy engine; subscribe failure is
+		// a startup failure that contradicts the earlier alert. Without
+		// this, the only signal is "engine started" → silence (engine is
+		// dead). The watchdog catches the dead engine eventually but
+		// Telegram is the primary operational channel.
+		_ = notifier.SendStructured(context.Background(), notify.SeverityCritical,
+			fmt.Sprintf("STARTUP FAILED on %s — Binance WebSocket subscribe error\n%v\nws_url: %s",
+				cfg.Symbol, err, cfg.Exchange.WSURL))
 		os.Exit(1)
 	}
 
@@ -424,7 +448,14 @@ func main() {
 	// Parse shadow specs first so we know how many runners to fan-out to.
 	shadowSpecs, err := strategy.ParseShadowSpecs(*shadowFlag)
 	if err != nil {
-		slog.Error("invalid --shadow spec", "err", err)
+		slog.Error("invalid --shadow spec", "err", err, "shadow", *shadowFlag)
+		// Telegram CRITICAL — operator passed a malformed --shadow spec;
+		// engine has already announced "engine started" and is mid-startup.
+		// Silent failure here means the operator might think the shadow
+		// got registered when it didn't.
+		_ = notifier.SendStructured(context.Background(), notify.SeverityCritical,
+			fmt.Sprintf("STARTUP FAILED on %s — invalid --shadow spec\nspec: %q\nerror: %v",
+				cfg.Symbol, *shadowFlag, err))
 		os.Exit(1)
 	}
 
@@ -640,7 +671,17 @@ func main() {
 	}
 
 	if err := g.Wait(); err != nil {
-		slog.Error("engine error", "err", err)
+		slog.Error("engine error", "err", err, "symbol", cfg.Symbol)
+		// Telegram CRITICAL — engine has been running and a goroutine
+		// returned a non-nil error. Currently this path is mostly
+		// reached only via panic propagation through errgroup (the
+		// individual goroutines either return nil or context.Canceled
+		// which is filtered by errgroup), but the gap-coverage of the
+		// alert is still important: an undocumented future error path
+		// that surfaces here would otherwise log to /var/log only.
+		_ = notifier.SendStructured(context.Background(), notify.SeverityCritical,
+			fmt.Sprintf("ENGINE CRASHED on %s\nerror: %v\nThis is the errgroup error path; investigate logs for which goroutine surfaced the error.",
+				cfg.Symbol, err))
 		os.Exit(1)
 	}
 
