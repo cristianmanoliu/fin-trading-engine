@@ -162,13 +162,11 @@ func main() {
 	// also written to the kill notification.
 	fmt.Printf("\n=== KILL RESULT — reason: %s ===\n", result.Reason)
 	postFireMsg := fmt.Sprintf("KILL RESULT — %s", result.Reason)
-	failures := 0
 	for _, o := range result.Outcomes {
 		line := fmt.Sprintf("%-12s %-7s requested=%v filled=%v avg_price=%v",
 			o.Symbol, o.Status, o.Requested, o.Filled, o.AvgPrice)
 		if o.Error != "" {
 			line += "  ERR: " + o.Error
-			failures++
 		}
 		fmt.Println("  " + line)
 		postFireMsg += "\n  " + line
@@ -179,10 +177,70 @@ func main() {
 		slog.Warn("post-fire alert failed", "err", err)
 	}
 
-	if killErr != nil {
-		fmt.Fprintf(os.Stderr, "\nKILL had %d failures: %v\n", failures, killErr)
+	exitCode, msg, partialDetails := evaluateKillResult(result, killErr)
+	switch exitCode {
+	case 0:
+		fmt.Println("\n" + msg)
+	case 2:
+		// Audit-pattern fix 2026-05-10: PARTIAL fills are residual real-
+		// money exposure. KillSwitch.KillAll returns nil err when
+		// failureCount==0, but PARTIAL outcomes don't increment
+		// failureCount — pre-fix the success message ("All positions
+		// closed cleanly") fired even with PARTIAL residuals. Operator
+		// post-panic-kill MUST NOT miss residual positions.
+		fmt.Fprintln(os.Stderr, "\n"+msg)
+		for _, d := range partialDetails {
+			fmt.Fprintln(os.Stderr, "  "+d)
+		}
+		fmt.Fprintln(os.Stderr, "Operator must close residual positions manually via Binance UI before considering the kill complete.")
+		os.Exit(2)
+	default: // exit 1 — true failures
+		fmt.Fprintln(os.Stderr, "\n"+msg)
 		fmt.Fprintln(os.Stderr, "Operator must investigate failed symbols on Binance UI before considering the kill complete.")
 		os.Exit(1)
 	}
-	fmt.Println("\nAll positions closed cleanly. Record this output in results/kill_<date>_<reason>.md per Phase 4.")
+}
+
+// evaluateKillResult classifies a KillSwitch.KillAll outcome into one of three
+// operator-actionable buckets:
+//
+//	exit 0 — All CLOSED. Kill is done; record the artifact.
+//	exit 1 — One or more FAILED. Operator must investigate on Binance UI.
+//	exit 2 — One or more PARTIAL fills. Residual real-money exposure;
+//	         operator must close residuals manually.
+//
+// The PARTIAL bucket is the audit-pattern fix: KillSwitch.KillAll returns
+// nil err when failureCount==0, and PARTIAL outcomes don't increment
+// failureCount (the exchange filled some but not all of the requested
+// quantity due to liquidity). Pre-fix cmd/kill_switch printed "All
+// positions closed cleanly" on the same path, hiding the residual
+// exposure from the operator at the worst possible moment (post-panic-
+// kill). Same shape as today's other audit-pattern findings: a quietly-
+// successful path silently masking a partially-failed reality.
+//
+// Returns (exitCode, summaryMsg, partialDetails). partialDetails is empty
+// unless exitCode==2.
+func evaluateKillResult(result execution.KillResult, killErr error) (exitCode int, summary string, partialDetails []string) {
+	failures := 0
+	partials := 0
+	for _, o := range result.Outcomes {
+		switch {
+		case o.Error != "":
+			failures++
+		case o.Status == "PARTIAL":
+			partials++
+			residual := o.Requested - o.Filled
+			partialDetails = append(partialDetails, fmt.Sprintf(
+				"%s: requested=%v filled=%v residual=%v avg_price=%v",
+				o.Symbol, o.Requested, o.Filled, residual, o.AvgPrice))
+		}
+	}
+
+	if killErr != nil {
+		return 1, fmt.Sprintf("KILL had %d failures: %v", failures, killErr), nil
+	}
+	if partials > 0 {
+		return 2, fmt.Sprintf("KILL had %d PARTIAL fills — residual exposure on Binance:", partials), partialDetails
+	}
+	return 0, "All positions closed cleanly. Record this output in results/kill_<date>_<reason>.md per Phase 4.", nil
 }

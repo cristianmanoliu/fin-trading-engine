@@ -7,6 +7,8 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+
+	"github.com/cristianmanoliu/trading-engine/pkg/execution"
 )
 
 // End-to-end CLI tests for kill_switch.
@@ -218,5 +220,108 @@ func TestCLI_ConfirmGateIsPositional(t *testing.T) {
 			t.Errorf("almost-confirm %q: expected DRY RUN marker, got:\n%s",
 				almostConfirm, out)
 		}
+	}
+}
+
+// TestEvaluateKillResult_PartialFillsExits2_NotSuccess is the audit-pattern
+// regression for the highest-severity finding in the cmd/kill_switch audit:
+// KillSwitch.KillAll returns nil err when failureCount==0, but PARTIAL
+// outcomes don't increment failureCount (the exchange filled some but not
+// all of the requested quantity). Pre-fix, cmd/kill_switch printed "All
+// positions closed cleanly" on the killErr==nil path, hiding residual
+// real-money exposure from the operator at the worst possible moment
+// (post-panic-kill).
+//
+// The fix routes PARTIAL outcomes to a distinct exit code 2 with explicit
+// residual reporting. Operator MUST close residuals manually via Binance
+// UI before considering the kill complete.
+func TestEvaluateKillResult_PartialFillsExits2_NotSuccess(t *testing.T) {
+	// KillResult with 1 CLOSED + 1 PARTIAL — KillAll would return nil err
+	// because failureCount==0 (PARTIAL doesn't count as failure).
+	result := execution.KillResult{
+		Reason: "drift_kill_test",
+		Outcomes: []execution.KillOutcome{
+			{Symbol: "BTCUSDT", Status: "CLOSED", Requested: 0.5, Filled: 0.5, AvgPrice: 50000},
+			{Symbol: "ETHUSDT", Status: "PARTIAL", Requested: 2.0, Filled: 1.5, AvgPrice: 2300},
+		},
+	}
+	exitCode, summary, partialDetails := evaluateKillResult(result, nil)
+
+	if exitCode != 2 {
+		t.Errorf("PARTIAL outcome must exit 2, got %d (summary=%q)", exitCode, summary)
+	}
+	if !strings.Contains(summary, "PARTIAL") {
+		t.Errorf("summary must mention PARTIAL, got: %q", summary)
+	}
+	if len(partialDetails) != 1 {
+		t.Fatalf("expected 1 partial detail, got %d", len(partialDetails))
+	}
+	// Residual should be 2.0 - 1.5 = 0.5
+	if !strings.Contains(partialDetails[0], "ETHUSDT") {
+		t.Errorf("partial detail should name ETHUSDT, got: %q", partialDetails[0])
+	}
+	if !strings.Contains(partialDetails[0], "residual=0.5") {
+		t.Errorf("partial detail should show residual=0.5, got: %q", partialDetails[0])
+	}
+}
+
+func TestEvaluateKillResult_AllClosedExits0(t *testing.T) {
+	result := execution.KillResult{
+		Reason: "drift_kill_test",
+		Outcomes: []execution.KillOutcome{
+			{Symbol: "BTCUSDT", Status: "CLOSED", Requested: 0.5, Filled: 0.5},
+			{Symbol: "ETHUSDT", Status: "CLOSED", Requested: 2.0, Filled: 2.0},
+		},
+	}
+	exitCode, summary, partialDetails := evaluateKillResult(result, nil)
+
+	if exitCode != 0 {
+		t.Errorf("all CLOSED must exit 0, got %d", exitCode)
+	}
+	if !strings.Contains(summary, "All positions closed cleanly") {
+		t.Errorf("clean kill must produce success message, got: %q", summary)
+	}
+	if len(partialDetails) != 0 {
+		t.Errorf("clean kill should have no partial details, got %d", len(partialDetails))
+	}
+}
+
+func TestEvaluateKillResult_FailureExits1(t *testing.T) {
+	result := execution.KillResult{
+		Reason: "drift_kill_test",
+		Outcomes: []execution.KillOutcome{
+			{Symbol: "BTCUSDT", Status: "CLOSED", Requested: 0.5, Filled: 0.5},
+			{Symbol: "ETHUSDT", Status: "FAILED", Requested: 2.0, Error: "insufficient margin"},
+		},
+	}
+	killErr := fmt.Errorf("KillAll: 1 of 2 positions failed")
+	exitCode, summary, _ := evaluateKillResult(result, killErr)
+
+	if exitCode != 1 {
+		t.Errorf("FAILED outcome with non-nil killErr must exit 1, got %d", exitCode)
+	}
+	if !strings.Contains(summary, "1 failures") {
+		t.Errorf("failure message must include count, got: %q", summary)
+	}
+}
+
+// TestEvaluateKillResult_PartialAndFailedExits1_FailureWins verifies the
+// classification precedence: when both PARTIAL and FAILED outcomes exist,
+// the failure-exit-1 wins because killErr is non-nil from KillAll.
+// Operator gets the FAILURE message first; partial info is in the
+// per-symbol stdout printout above the summary.
+func TestEvaluateKillResult_PartialAndFailedExits1_FailureWins(t *testing.T) {
+	result := execution.KillResult{
+		Reason: "drift_kill_test",
+		Outcomes: []execution.KillOutcome{
+			{Symbol: "BTCUSDT", Status: "PARTIAL", Requested: 0.5, Filled: 0.3},
+			{Symbol: "ETHUSDT", Status: "FAILED", Requested: 2.0, Error: "rate-limited"},
+		},
+	}
+	killErr := fmt.Errorf("KillAll: 1 of 2 positions failed")
+	exitCode, _, _ := evaluateKillResult(result, killErr)
+
+	if exitCode != 1 {
+		t.Errorf("any FAILED (with non-nil killErr) must exit 1 even with PARTIAL present, got %d", exitCode)
 	}
 }
