@@ -179,6 +179,25 @@ class TrajectoryCLITest(unittest.TestCase):
             self.assertEqual(result.returncode, 2)
             self.assertIn("no snapshots", result.stderr)
 
+    def test_typoed_cohort_exits_2(self):
+        # Mirror of realized_cost_trajectory's bad-cohort fix. Operator
+        # typo'd --cohort; previously the script printed
+        # "(cohort 'foo' not found in any snapshot)" but exited 0 = PASS.
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "2026-05-08.txt").write_text(
+                make_snapshot(days=0, trades=1, wr_pct=0.0, pnl=-1306,
+                              cohort="live"))
+            result = subprocess.run(
+                ["python3", str(TRAJ), "--dir", tmp,
+                 "--cohort", "shadow/typoed-name"],
+                capture_output=True, text=True,
+            )
+            self.assertEqual(result.returncode, 2,
+                f"expected exit 2 (cohort not in any snapshot), got "
+                f"{result.returncode}\nstderr:\n{result.stderr}")
+            self.assertIn("not found", result.stderr)
+            self.assertIn("available cohorts", result.stderr)
+
     def test_unrecognised_format_exits_3(self):
         # Non-empty snapshot file that contains zero cohort markers — e.g.
         # an unrelated text file accidentally placed in the snapshot dir,

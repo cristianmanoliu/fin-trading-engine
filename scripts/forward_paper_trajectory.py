@@ -209,6 +209,18 @@ def main() -> int:
         except Exception as e:  # noqa: BLE001 — caller-friendly catch
             parse_errors.append((f, e))
 
+    # Cohort filter validation runs BEFORE rendering so a typo'd --cohort
+    # surfaces as exit 2 (no data) instead of exit 0 + diagnostic-in-stdout
+    # — same fail-open shape as realized_cost_trajectory's bad --cohort fix.
+    if args.cohort:
+        all_cohorts = {c for s in snapshots for c in s.cohorts}
+        if args.cohort not in all_cohorts:
+            print(f"cohort {args.cohort!r} not found in any of "
+                  f"{len(snapshots)} snapshot(s); available cohorts: "
+                  f"{', '.join(sorted(all_cohorts)) or '(none)'}",
+                  file=sys.stderr)
+            return 2
+
     print(render_trajectory(snapshots, cohort_filter=args.cohort), end="")
 
     if parse_errors:
