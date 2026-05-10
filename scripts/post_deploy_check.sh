@@ -25,6 +25,12 @@ TARGET="${1:-root@178.105.24.230}"
 STRICT="${STRICT:-0}"
 
 source "${ROOT}/scripts/lib/symbols.sh"
+# notify.sh sourced early so `crit` (below) can fire CRITICAL Telegram alerts
+# inline rather than waiting for the end-of-script roll-up. The shared helper
+# is a graceful no-op when TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID are unset, so
+# this doesn't introduce a Telegram dependency for local invocations.
+# shellcheck source=lib/notify.sh
+source "${ROOT}/scripts/lib/notify.sh"
 SYMBOLS_LC=$(get_symbols deployed lower)
 
 echo "════════════════════════════════════════════════════════════════════════════════"
@@ -34,6 +40,19 @@ echo "════════════════════════�
 FAIL=0
 warn() { echo "  ⚠  $*"; FAIL=$((FAIL + 1)); }
 ok()   { echo "  ✓  $*"; }
+# crit fires a CRITICAL-tier Telegram alert inline AND counts to FAIL so STRICT
+# mode still exits 1. CRITICAL bypasses the WARN rate-limit (5/hr) and mute-hour
+# suppression — reserved for failures where a delayed alert means a delayed
+# response and the cost of that delay is high. As of 2026-05-10 only the drift-
+# cron-absent case uses this: silent cron unload = silent decision-grade-kill
+# offline = real-money exposure with no automated stop. If you add other crit
+# call sites, make sure they meet the "no delay tolerated" bar — every CRITICAL
+# trains the operator on what to drop everything for.
+crit() {
+    echo "  🚨 $*"
+    FAIL=$((FAIL + 1))
+    notify_telegram CRITICAL "post_deploy_check on $(hostname)" "$*"
+}
 
 # ── 1. Engine systemd state ────────────────────────────────────────────────────
 echo ""
@@ -415,7 +434,19 @@ else
             echo "  ⓘ  could not parse last drift_check timestamp — manually verify $HISTORY"
         else
             age_days=$(( (NOW_EPOCH - last_epoch) / 86400 ))
-            if [[ "$age_days" -gt 10 ]]; then
+            # Tier ladder: ≤7d clean (within one weekly cycle), 8-10d info
+            # (within slack of one missed cycle e.g. DST drift), 11-14d WARN
+            # (one cycle definitely missed — investigate), >14d CRITICAL (two
+            # cycles missed → decision-grade kill mechanism is offline → real-
+            # money exposure with no automated stop).
+            if [[ "$age_days" -gt 14 ]]; then
+                crit "drift_check last ran ${age_days}d ago (>14d — decision-grade kill mechanism OFFLINE)
+Two consecutive weekly cycles missed. Investigate IMMEDIATELY:
+  - launchctl list | grep tradingengine  (verify plist still loaded)
+  - tail results/drift_runs/launchd.{out,err}.log  (last invocation cause)
+  - launchctl unload + reload the plist if no recent runs
+Real-money positions (if any) have no automated drift kill while this remains red."
+            elif [[ "$age_days" -gt 10 ]]; then
                 warn "drift_check last ran ${age_days}d ago (>10d — weekly cron may have stopped firing)"
             elif [[ "$age_days" -gt 7 ]]; then
                 echo "  ⓘ  drift_check last ran ${age_days}d ago (within 1 cycle of expected weekly cadence)"
@@ -503,12 +534,10 @@ else
     done <<< "$DEVIATIONS"
 fi
 
-# Telegram alert path uses the shared scripts/lib/notify.sh helper —
-# tier-aware retry (CRITICAL 3 / WARN 2 / INFO 1), graceful no-op when env
-# vars unset. Mirrors the Go engine's pkg/notify package semantics so a
-# transient network failure during alert won't silently drop the message.
-# shellcheck source=lib/notify.sh
-source "${ROOT}/scripts/lib/notify.sh"
+# notify.sh is sourced at the top of the script (above) so inline crit()
+# helpers can fire CRITICAL Telegram alerts as the failure is detected, not
+# only via the end-of-script roll-up. The roll-up below remains for WARN-tier
+# warnings that don't warrant immediate operator paging.
 
 # ── Verdict ───────────────────────────────────────────────────────────────────
 echo ""
