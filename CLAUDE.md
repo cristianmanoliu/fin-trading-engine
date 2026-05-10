@@ -18,7 +18,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Recent session logs
 
-See `docs/findings/<date>.md` per session. Latest: `2026-05-10.md` (audit sweep, +10 fail-opens fixed, real-money executor first pass, LIMBO rule + cron-wired); `2026-05-09-pm.md` (stage_promotion_check + 13 fail-opens + CI lint expansion); `2026-05-08.md` (milestone-1 closure + drift detector + BinanceLive). **Cumulative across 5 sessions: 38 fail-open bugs of the "missing input → silent success" shape closed.**
+See `docs/findings/<date>.md` per session. Latest: `2026-05-10.md` (full-day record — morning: +10 trajectory + 4 fwd_paper_status + Layer 3 wrapper + 3 binance_live + LIMBO rule mechanical wiring; afternoon: +9 commits across handbook, cmd/engine 2nd-pass, Stub 1st-pass, marketdata 2nd-pass, strategy 1st-pass, kill_switch 1st-pass — critical-path audit complete across all 5 layers); `2026-05-09-pm.md` (stage_promotion_check + 13 fail-opens + CI lint expansion); `2026-05-08.md` (milestone-1 closure + drift detector + BinanceLive). **Cumulative across 6 sessions: 57 fail-open bugs of the "missing input → silent success" shape closed. Pattern observation: silent-journal-write-failure shape co-exists in 3 paired implementations (BinanceLive 028e6a2 + Stub 4154374 + SignalContextWriter f760327) — by the 3rd instance the lens is predictive.**
 
 Pre-registration catalog: `results/INDEX.md` (53 docs: 26 decision rules + 22 verdicts + 5 syntheses).
 
