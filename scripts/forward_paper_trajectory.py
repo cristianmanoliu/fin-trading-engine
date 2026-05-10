@@ -44,11 +44,14 @@ NO_CLOSES_RE = re.compile(
 )
 
 # Metric line patterns. Tolerant of whitespace; capture numeric content.
+# Numerics allow optional decimal portion so that a future format change in
+# forward_paper_status.sh (e.g. emitting cents on PnL) doesn't silently
+# truncate to integer dollars and quietly mis-render the trajectory delta.
 METRICS = [
     ("days",       re.compile(r"Days elapsed:\s+(\d+)\s*/")),
     ("trades",     re.compile(r"Trades closed:\s+(\d+)\s*/")),
     ("wr_pct",     re.compile(r"Wins\s*/\s*WR:\s+\d+\s*/\s*([\d.]+)%")),
-    ("pnl_usd",    re.compile(r"Net PnL:\s+\$([\-+]?\d+)")),
+    ("pnl_usd",    re.compile(r"Net PnL:\s+\$([\-+]?\d+(?:\.\d+)?)")),
     ("fee_bps",    re.compile(r"Realized fee bps:\s+([\d.]+)")),
     ("slip_bps",   re.compile(r"Realized slip bps:\s+([\d.]+)")),
     ("single_pct", re.compile(r"Single-sym pct:\s+([\d.]+)%")),

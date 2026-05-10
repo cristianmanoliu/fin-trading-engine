@@ -150,6 +150,19 @@ class TrajectoryParserTest(unittest.TestCase):
             out = t.render_trajectory([snap])
             self.assertIn("cohort: shadow/bb20", out)
 
+    def test_pnl_with_decimals_captured_fully(self):
+        # Forward-compat: if forward_paper_status.sh ever emits cents
+        # on PnL ($-1306.45), the regex must not truncate to integer.
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp) / "2026-05-08.txt"
+            p.write_text(
+                "  ── live ───────────────────────────────────\n"
+                "    Net PnL:             $-1306.45              [INSUFFICIENT]\n"
+            )
+            snap = t.parse_snapshot(p)
+            self.assertEqual(snap.cohorts["live"]["pnl_usd"], "-1306.45",
+                "PnL regex must capture decimal portion, not truncate")
+
     def test_no_data_yet_cohort_recognised(self):
         # The other no-closes shape: `(no data yet)` when open_count=0.
         with tempfile.TemporaryDirectory() as tmp:
