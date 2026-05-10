@@ -144,23 +144,38 @@ func (b *BinanceFutures) backfill(ctx context.Context, ch chan<- models.Tick) er
 		}
 
 		var lastOpenMs int64
+		var skippedMalformed int
 		for _, row := range raw {
 			if len(row) < 7 {
+				skippedMalformed++
 				continue
 			}
 			openMs, err := parseRawInt64(row[0])
 			if err != nil {
+				skippedMalformed++
 				continue
 			}
 			closeMs, err := parseRawInt64(row[6])
 			if err != nil {
+				skippedMalformed++
 				continue
 			}
-			o, _ := parseRawFloat(row[1])
-			h, _ := parseRawFloat(row[2])
-			l, _ := parseRawFloat(row[3])
-			c, _ := parseRawFloat(row[4])
-			v, _ := parseRawFloat(row[5])
+			// Audit-pattern fix 2026-05-10: previously these parse errors were
+			// swallowed via `o, _ := parseRawFloat(row[1])`. A malformed price
+			// field from Binance would produce a kline at price=0, which then
+			// expands into 0-priced ticks that poison EMA / BB / ATR priming.
+			// Skip-on-error matches the same-row int64 handling above; gaps
+			// are recoverable from subsequent klines + live ticks, but
+			// 0-priced indicators are not.
+			o, oerr := parseRawFloat(row[1])
+			h, herr := parseRawFloat(row[2])
+			l, lerr := parseRawFloat(row[3])
+			c, cerr := parseRawFloat(row[4])
+			v, verr := parseRawFloat(row[5])
+			if oerr != nil || herr != nil || lerr != nil || cerr != nil || verr != nil {
+				skippedMalformed++
+				continue
+			}
 
 			for _, tick := range expandKlineToTicks(openMs, closeMs, o, h, l, c, v, b.symbol) {
 				select {
@@ -175,6 +190,19 @@ func (b *BinanceFutures) backfill(ctx context.Context, ch chan<- models.Tick) er
 
 		fetched += len(raw)
 		pages++
+
+		// Surface malformed-row count if any. A non-zero count means Binance
+		// returned data the parser couldn't handle — could be transient
+		// (single bad row) or signal a schema change (every row failing).
+		// Either way the operator should know rather than silently lose
+		// klines from indicator priming.
+		if skippedMalformed > 0 {
+			slog.Warn("kline backfill: skipped malformed rows",
+				"symbol", b.symbol,
+				"page", pages,
+				"skipped", skippedMalformed,
+				"page_size", len(raw))
+		}
 
 		// Advance cursor past the last 1m bar we just received.
 		nextStart := lastOpenMs + 60_000
@@ -395,6 +423,14 @@ func (b *BinanceFutures) aggTradeLoop(ctx context.Context, ch chan<- models.Tick
 		body, err := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		if err != nil {
+			// Audit-pattern fix 2026-05-10: previously this `continue` was
+			// silent — a body-read failure mid-response (network blip after
+			// the headers but before the full body) would silently miss the
+			// batch's trades with zero operator visibility. The polling
+			// loop's other failure paths all slog.Warn; this one was the
+			// outlier. Symmetric logging keeps the operator's mental model
+			// of "every recoverable failure is visible somewhere."
+			slog.Warn("aggTrade poll: body read error", "symbol", b.symbol, "err", err)
 			continue
 		}
 

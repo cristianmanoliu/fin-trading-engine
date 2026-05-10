@@ -60,6 +60,60 @@ func (h *klineHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(klines)
 }
 
+// TestBackfill_MalformedRowsSkippedNotZeroPriced verifies the 2026-05-10 audit
+// fix: previously parseRawFloat errors in backfill were silently swallowed via
+// `o, _ := parseRawFloat(...)`. A malformed Binance response with non-numeric
+// price would produce klines at price=0, which expand into 0-priced ticks
+// that poison EMA / BB / ATR priming. The fix checks each parse error and
+// skips the row entirely; gaps recover from subsequent klines + live ticks,
+// but 0-priced indicators do not.
+func TestBackfill_MalformedRowsSkippedNotZeroPriced(t *testing.T) {
+	// Mixed response: 3 valid rows + 1 row with non-numeric price + 1 valid row.
+	// Pre-fix the malformed row would have produced 4 ticks at price=0,
+	// dragging any EMA initialized off these klines down toward 0.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		startTime, _ := strconv.ParseInt(r.URL.Query().Get("startTime"), 10, 64)
+		klines := []any{
+			mockKline(startTime, "100.0"),
+			mockKline(startTime+60_000, "101.0"),
+			// Malformed row — price field is a non-numeric string.
+			[]any{
+				startTime + 120_000,
+				"not-a-number", "100.0", "100.0", "100.0",
+				"1.0", startTime + 120_000 + 60_000 - 1,
+				"100.0", 1, "0", "0", "0",
+			},
+			mockKline(startTime+180_000, "102.0"),
+			mockKline(startTime+240_000, "103.0"),
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(klines)
+	}))
+	defer server.Close()
+
+	b := NewBinanceFutures("ws://unused", server.URL, "TESTUSDT", 1) // 1h = 60 klines requested
+	ch := make(chan models.Tick, 1000)
+
+	if err := b.backfill(context.Background(), ch); err != nil {
+		t.Fatalf("backfill returned error: %v", err)
+	}
+	close(ch)
+
+	// Collect all ticks; assert NONE has price=0 (the regression we're guarding).
+	var ticks []models.Tick
+	for tick := range ch {
+		ticks = append(ticks, tick)
+		if tick.Price == 0 {
+			t.Errorf("backfill emitted a price=0 tick — malformed row silently produced 0-priced data")
+		}
+	}
+	// 4 valid rows × 4 ticks per kline (expandKlineToTicks) = 16 ticks expected.
+	// Pre-fix would have been 5 rows × 4 = 20 ticks (4 of them price=0).
+	if len(ticks) != 16 {
+		t.Errorf("expected 16 ticks (4 valid klines × 4 ticks/kline), got %d", len(ticks))
+	}
+}
+
 // TestBackfillPaginates verifies that backfill walks forward in 1500-kline pages
 // when backfillHours requires more than one Binance call (per-call cap is 1500
 // klines = 25h of 1m data). Pre-fix this silently truncated at 25h regardless of
