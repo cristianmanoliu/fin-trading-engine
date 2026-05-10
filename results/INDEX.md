@@ -81,6 +81,7 @@ Live paper-trading; weekly drift detection; threshold cross-checks. The kill rul
 Sits between mechanical DEPLOY-READY verdict and STAGE_1 promotion. The discipline payoff moment.
 
 - **`forward_paper_completion_review_decision_rule_2026-05-08.md`** — qualitative audit gate; three sections (cost realization / empirical-vs-prediction shape / anomaly + qualitative); composite GREEN/AMBER/RED; required artifact + AMBER resolution path
+- **`forward_paper_outcome_resolution_decision_rule_2026-05-10.md`** — five-verdict mechanical decision tree (CONTINUE / WATCH / PROMOTE / KILL / OPERATOR_REVIEW) for the LIMBO case (calendar gate met but trade gate not, or any genuinely ambiguous outcome); locks the response BEFORE the data forces a heuristic call. Rule 3 explicitly handles 2026-05-10's emotional reaction to n=9 by mandating CONTINUE below n=50
 
 ### Stage 3 — Real-money execution (STAGE_1 through STAGE_4)
 
