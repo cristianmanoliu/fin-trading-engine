@@ -164,8 +164,6 @@ The `Runner.Run` select loop handles four channels: `candle4H`, `candle30m`, `ca
 
 Cost-geometry rationale: on the 5m timeframe, wick stops are tight (~0.18% on BTC at p50) which forces ~500× implicit leverage to size each trade to a $1k stake, which makes round-trip taker fees eat the entire edge (Option C falsification). The 4H wick is wider, implicit leverage drops, fee per trade as a fraction of risked $ falls below the gross edge.
 
-**Live strategy (as of 2026-05-05):** the VPS engines are still running the falsified **Option C** — 5m EMA9×EMA21, `ema_mode: true`, `target_rr: 5.0`, both sides, no max-hold, no funding accrual. They are paper-only and produce no decision-grade signal until migrated.
-
 Two legacy entry types remain in code and are toggleable via `ema_mode: false` (neither is in the candidate or live path):
 
 - **Absorption (reversal):** N consecutive 5m candles near a key level with wick/body ≥ `wick_ratio`, body closing away from the level. Allowed in any 4H bias.
@@ -229,7 +227,7 @@ Bugs 1–6 + pre-milestone fixes resolved. See commit history + `docs/findings/`
 
 ## Forward-paper go/no-go criteria
 
-Forward-paper validation started 2026-05-05 20:06 UTC (32 Strategy B engines, since reduced to deployed-16). The deployed-32 list backtested at +$129k/yr at slip=25bp, but the train-only-shortlist diagnostic shows +70% look-ahead inflation at that slip level. **Anchor expectations to the honest annual: ≈ $69k/yr at slip=25bp**, not the deployed-claim or all-57 headline.
+Forward-paper validation started 2026-05-05 20:06 UTC (originally 32 Strategy B engines, now reduced to deployed-16). The original 32-list backtested at +$129k/yr at slip=25bp, but the train-only-shortlist diagnostic shows +70% look-ahead inflation at that slip level. **Anchor expectations to the honest annual: ≈ $69k/yr at slip=25bp**, not the deployed-claim or all-57 headline.
 
 ### Kill mechanism (decision-grade vs advisory) — IMPORTANT
 
@@ -304,7 +302,7 @@ When forward-paper resolves: read the pre-reg file. The promotion or kill decisi
 
 ### Things to NOT do during forward-paper
 
-- Don't reshuffle the deployed-32 mid-flight. Look-ahead is in backtest test_NET, not forward data.
+- Don't reshuffle the deployed list mid-flight. Look-ahead is in backtest test_NET, not forward data.
 - Don't promote to Strategy A pre-emptively (Strategy A vs B is a forward-paper question; backtest difference was inside the noise floor).
 - Don't add symbols. Trade-count throughput is currently 1.8/day; adding symbols increases REST-poll load against the 2400 weight/min Binance Regular cap.
 - Don't tune target_rr, signal_tf, or side-filter. Every additional sweep cell consumes statistical degrees of freedom you've already spent.
