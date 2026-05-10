@@ -201,12 +201,76 @@ $(echo "$PROMOTE_OUTPUT" | tail -3)"
         ;;
 esac
 
+# --- 6. Forward-paper resolution (LIMBO synthesis) ---
+# forward_paper_resolution.py implements the locked LIMBO decision rule
+# (forward_paper_outcome_resolution_decision_rule_2026-05-10.md). It
+# synthesizes drift state + kill_protocol exit + stage_promotion exit +
+# the latest snapshot's cohort metrics into a single 5-verdict outcome
+# (CONTINUE / WATCH / PROMOTE / KILL / OPERATOR_REVIEW). Telegram tier
+# is mapped per the locked rule. Pass the captured exit codes from
+# steps 4 + 5 so the resolution script doesn't re-invoke the siblings.
+RESOLUTION_OUTPUT=$(python3 "${REPO_ROOT}/scripts/forward_paper_resolution.py" \
+    --kill-exit "$KILL_EXIT" --promote-exit "$PROMOTE_EXIT" 2>&1)
+RESOLUTION_EXIT=$?
+echo "resolution: exit=$RESOLUTION_EXIT"
+case "$RESOLUTION_EXIT" in
+    0)
+        # CONTINUE — silent per the locked rule (no operator alert on
+        # status-quo to prevent alert fatigue per kill-bar mis-calibration).
+        :
+        ;;
+    1)
+        # PROMOTE — captured separately by promotion_check above, but
+        # surface here too so the resolution view is complete.
+        notify_telegram INFO "weekly_audit resolution: PROMOTE" \
+"forward_paper_resolution returned PROMOTE (Rule 4 — all gates pass).
+This duplicates the promotion_check CRITICAL alert above; treat them
+as a paired confirmation."
+        ;;
+    2)
+        # WATCH — soft signal in slack window. INFO only per locked rule.
+        notify_telegram INFO "weekly_audit resolution: WATCH" \
+"forward_paper_resolution returned WATCH — 1-2 soft signals fired
+(slack-window threshold approached, single drift firing, etc.). Not
+a kill; investigate at next operator session.
+$(echo "$RESOLUTION_OUTPUT" | grep '•' | head -3)"
+        ;;
+    3)
+        # OPERATOR_REVIEW — locked rule's middle ground. WARN tier so
+        # the operator knows but isn't paged at CRITICAL.
+        notify_telegram WARN "weekly_audit resolution: OPERATOR_REVIEW" \
+"forward_paper_resolution returned OPERATOR_REVIEW — rule application
+produced no clear answer (3+ soft signals, slow-bleed, low trade rate,
+or input freshness issue). Cross-check drift detector + write rationale
+before continuing. Per the locked rule, OPERATOR_REVIEW is NOT a kill.
+$(echo "$RESOLUTION_OUTPUT" | grep '•' | head -3)"
+        ;;
+    4)
+        # KILL — captured separately by kill_check above, but surface
+        # here too. Paired CRITICAL with the kill_check alert.
+        notify_telegram CRITICAL "weekly_audit resolution: KILL" \
+"forward_paper_resolution returned KILL (Rule 1). Paired confirmation
+with kill_check above. Execute auto-kill per auto_kill_execution_
+decision_rule_2026-05-08.md."
+        ;;
+    5)
+        # INPUT_ERROR — distinct from CONTINUE per audit-pattern: must
+        # not collapse into "no kill, all clear." WARN tier.
+        notify_telegram WARN "weekly_audit resolution: INPUT_ERROR" \
+"forward_paper_resolution returned INPUT_ERROR — missing/stale snapshot
+or drift history. The locked rule cannot be evaluated against incomplete
+input. Investigate the cron output to see which input shape failed.
+$(echo "$RESOLUTION_OUTPUT" | tail -3)"
+        ;;
+esac
+
 # --- Persist decision snapshots for longitudinal review ---
 SNAP_DIR="${REPO_ROOT}/results/decision_snapshots"
 mkdir -p "$SNAP_DIR"
 TODAY=$(date -u +%Y-%m-%d)
 echo "$KILL_OUTPUT" > "${SNAP_DIR}/${TODAY}-kill.txt"
 echo "$PROMOTE_OUTPUT" > "${SNAP_DIR}/${TODAY}-promote.txt"
+echo "$RESOLUTION_OUTPUT" > "${SNAP_DIR}/${TODAY}-resolution.txt"
 
 # --- exit with the drift wrapper's code so launchd surfaces the right thing ---
 # Rationale: drift is the decision-grade KILL signal calibrated against null;
