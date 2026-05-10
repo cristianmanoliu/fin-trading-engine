@@ -82,15 +82,25 @@ def closest_close(prices: dict[dt.date, float], when: dt.datetime) -> float | No
     return None
 
 
-def parse_close_events(stream) -> list[tuple[dt.datetime, float, str]]:
-    """Parse stdin TSV: ts, symbol, pnl_usd, outcome. Returns sorted (ts, pnl_usd, outcome)."""
+def parse_close_events(stream) -> tuple[list[tuple[dt.datetime, float, str]], int]:
+    """Parse stdin TSV: ts, symbol, pnl_usd, outcome.
+
+    Returns (sorted events, skipped_count). Skipped count distinguishes
+    "stdin was empty" (skipped=0) from "stdin had lines but format was
+    wrong" (skipped > 0) — the audit-pattern fix for the silent-collapse
+    case where a caller format change drops every line and the helper
+    silently emits 'no-closes'. Caller surfaces skipped count in the
+    warning field so the operator can tell typo from genuine empty.
+    """
     events: list[tuple[dt.datetime, float, str]] = []
+    skipped = 0
     for line in stream:
         line = line.rstrip("\n")
         if not line:
             continue
         cols = line.split("\t")
         if len(cols) < 4:
+            skipped += 1
             continue
         ts_str, _symbol, pnl_str, outcome = cols[0], cols[1], cols[2], cols[3]
         # Strip RFC3339 tz suffix variants — close events are always UTC.
@@ -98,14 +108,16 @@ def parse_close_events(stream) -> list[tuple[dt.datetime, float, str]]:
         try:
             ts = dt.datetime.fromisoformat(ts_str)
         except ValueError:
+            skipped += 1
             continue
         try:
             pnl = float(pnl_str)
         except ValueError:
+            skipped += 1
             continue
         events.append((ts, pnl, outcome))
     events.sort(key=lambda e: e[0])
-    return events
+    return events, skipped
 
 
 def emit(strategy_usd: float, hodl_usd: float, delta_usd: float,
@@ -144,9 +156,14 @@ def main() -> int:
               file=sys.stderr)
         return 2
 
-    events = parse_close_events(sys.stdin)
+    events, skipped = parse_close_events(sys.stdin)
     if not events:
-        emit(0.0, 0.0, 0.0, 0, 0, False, "no-closes")
+        # Distinguish "stdin had lines but all were malformed" from "stdin was
+        # genuinely empty" — the audit-pattern shape that closed 40+ similar
+        # bugs in observability tooling: format-change drift silently maps
+        # to the same verdict as "no data yet" and the operator can't tell.
+        warning = f"all-{skipped}-lines-malformed" if skipped > 0 else "no-closes"
+        emit(0.0, 0.0, 0.0, 0, 0, False, warning)
         return 0
 
     first_ts = events[0][0]
@@ -185,16 +202,30 @@ def main() -> int:
             windows.append((cursor, win_end, win_strategy, win_hodl))
         cursor = win_end
 
-    # Kill rule: ANY pair of consecutive windows where (strategy − hodl) < −threshold in BOTH.
+    # Kill rule: ANY pair of consecutive windows where (strategy − hodl) <
+    # −threshold in BOTH. CRITICAL: "consecutive" must mean ACTUALLY adjacent
+    # in calendar time, not "adjacent in the windows list". When closest_close
+    # fails to resolve a window's endpoints (rare: BTC kline gap exceeding the
+    # 7-day fallback in closest_close), that window is dropped from the list
+    # but the next window has a 30-day cursor gap from the previous. Treating
+    # them as "consecutive" would chain non-adjacent windows into a false-
+    # positive kill verdict. Reset prev_underperf when a gap is detected.
+    # Audit-pattern catch 2026-05-10.
     kill_pairs = 0
     prev_underperf = False
+    prev_win_end: dt.datetime | None = None
     triggered = False
-    for _, _, win_s, win_h in windows:
+    for cursor, win_end, win_s, win_h in windows:
+        if prev_win_end is not None and cursor != prev_win_end:
+            # Gap detected — reset state; W1 and W3 are NOT consecutive when
+            # W2 was skipped, regardless of underperformance.
+            prev_underperf = False
         underperf = (win_s - win_h) < -args.kill_threshold_usd
         if underperf and prev_underperf:
             kill_pairs += 1
             triggered = True
         prev_underperf = underperf
+        prev_win_end = win_end
 
     emit(strategy_total, hodl_total, delta_total, len(windows), kill_pairs, triggered)
     return 0
