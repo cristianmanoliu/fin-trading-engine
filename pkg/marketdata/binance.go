@@ -457,38 +457,75 @@ func (b *BinanceFutures) aggTradeLoop(ctx context.Context, ch chan<- models.Tick
 			continue
 		}
 
-		for _, t := range trades {
-			price, err := strconv.ParseFloat(t.Price, 64)
-			if err != nil {
-				continue
-			}
-			qty, err := strconv.ParseFloat(t.Qty, 64)
-			if err != nil {
-				continue
-			}
-
-			tick := models.Tick{
-				Symbol:    b.symbol,
-				Timestamp: time.UnixMilli(t.Timestamp).UTC(),
-				Price:     price,
-				Volume:    qty,
-			}
-
-			select {
-			case <-ctx.Done():
-				return
-			case ch <- tick:
-			}
-
-			if t.ID > lastID {
-				lastID = t.ID
-			}
+		newLastID, parsed, skipped := b.processAggTradeBatch(ctx, trades, lastID, ch)
+		if ctx.Err() != nil {
+			return
 		}
+		lastID = newLastID
 
-		if len(trades) > 0 {
-			slog.Info("aggTrade poll", "symbol", b.symbol, "count", len(trades), "lastID", lastID)
+		switch {
+		case len(trades) == 0:
+			// silent — natural quiet period between polls
+		case skipped == len(trades):
+			// Audit-pattern fix 2026-05-10 (2nd pass): all trades in batch
+			// failed price/qty parse. Distinct from "no trades" (silent)
+			// and "some skipped" (Warn). slog.Error so post_deploy_check
+			// §5 (ERROR-level scan) catches schema drift / data corruption.
+			// Pre-fix: `count=len(trades)` was logged as INFO regardless,
+			// masking all-skipped batches. Note: if t.ID also fails to
+			// populate (schema rename of "a"), lastID won't advance and
+			// the loop spins on the same range — heartbeat catches via
+			// stale-feed alert but the operator still needs this Error to
+			// know WHERE the spin is.
+			slog.Error("aggTrade poll: every trade failed price/qty parse — schema drift suspected",
+				"symbol", b.symbol, "batch_size", len(trades), "lastID", lastID)
+		case skipped > 0:
+			slog.Warn("aggTrade poll: some trades skipped due to parse failure",
+				"symbol", b.symbol, "skipped", skipped, "parsed", parsed, "lastID", lastID)
+		default:
+			slog.Info("aggTrade poll", "symbol", b.symbol, "count", parsed, "lastID", lastID)
 		}
 	}
+}
+
+// processAggTradeBatch parses a batch of REST aggTrades, emits valid ticks to
+// ch, and returns (newLastID, parsedCount, skippedCount). Cursor advance via
+// max(t.ID) is independent of price/qty parse outcomes: a malformed price
+// must NOT cause the next poll to re-fetch the same range, but it also must
+// NOT silently emit a 0-priced tick. Extracted so unit tests can verify the
+// cursor + counter invariants without spinning the long-running poll loop.
+func (b *BinanceFutures) processAggTradeBatch(ctx context.Context, trades []aggTradeREST, lastID int64, ch chan<- models.Tick) (newLastID int64, parsed, skipped int) {
+	newLastID = lastID
+	for _, t := range trades {
+		if t.ID > newLastID {
+			newLastID = t.ID
+		}
+		price, perr := strconv.ParseFloat(t.Price, 64)
+		if perr != nil {
+			skipped++
+			continue
+		}
+		qty, qerr := strconv.ParseFloat(t.Qty, 64)
+		if qerr != nil {
+			skipped++
+			continue
+		}
+
+		tick := models.Tick{
+			Symbol:    b.symbol,
+			Timestamp: time.UnixMilli(t.Timestamp).UTC(),
+			Price:     price,
+			Volume:    qty,
+		}
+
+		select {
+		case <-ctx.Done():
+			return newLastID, parsed, skipped
+		case ch <- tick:
+		}
+		parsed++
+	}
+	return newLastID, parsed, skipped
 }
 
 // latestAggTradeID fetches the most recent aggTrade ID to use as the starting

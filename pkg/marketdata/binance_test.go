@@ -398,6 +398,109 @@ func TestBackfillEmptyResponse_GracefulBreak(t *testing.T) {
 	}
 }
 
+// TestProcessAggTradeBatch_AdvancesCursor_AllSkipped verifies the 2026-05-10
+// 2nd-pass audit fix on Finding J: when every trade in a batch fails price/
+// qty parse (e.g., Binance schema rename of "p" or "q"), lastID must STILL
+// advance via max(t.ID) so the next poll fetches new data. Pre-fix the
+// cursor advance was inside the parse-success branch — all-skipped batches
+// left lastID stuck and the loop spun on the same range indefinitely while
+// `count=len(trades)` masked the failure as a normal "1500 trades" log.
+//
+// The heartbeat catches the no-tick downstream, but at the marketdata layer
+// the spin was invisible. The fix is twofold: cursor advances independently
+// of parse outcome, and an all-skipped batch routes to slog.Error rather
+// than the misleading INFO.
+func TestProcessAggTradeBatch_AdvancesCursor_AllSkipped(t *testing.T) {
+	b := NewBinanceFutures("ws://unused", "http://unused", "TESTUSDT", 0)
+	ch := make(chan models.Tick, 100)
+
+	// Batch where every trade has a malformed price (e.g., schema rename
+	// where "p" no longer exists so Price comes back as ""). IDs are valid.
+	trades := []aggTradeREST{
+		{ID: 1001, Price: "", Qty: "1.0", Timestamp: time.Now().UnixMilli()},
+		{ID: 1002, Price: "not-a-num", Qty: "1.0", Timestamp: time.Now().UnixMilli()},
+		{ID: 1003, Price: "", Qty: "1.0", Timestamp: time.Now().UnixMilli()},
+	}
+
+	newLastID, parsed, skipped := b.processAggTradeBatch(context.Background(), trades, 1000, ch)
+
+	// Cursor MUST advance via max(t.ID) even though every trade was skipped.
+	// Pre-fix: newLastID would equal 1000 (lastID didn't move).
+	if newLastID != 1003 {
+		t.Errorf("cursor not advanced on all-skipped batch: expected lastID=1003, got %d", newLastID)
+	}
+	if parsed != 0 {
+		t.Errorf("expected 0 parsed (every trade malformed), got %d", parsed)
+	}
+	if skipped != 3 {
+		t.Errorf("expected 3 skipped, got %d", skipped)
+	}
+	if len(ch) != 0 {
+		t.Errorf("expected 0 ticks emitted from all-skipped batch, got %d", len(ch))
+	}
+}
+
+// TestProcessAggTradeBatch_AdvancesCursor_AllValid verifies the happy path
+// is unchanged: every valid trade emits a tick and lastID advances.
+func TestProcessAggTradeBatch_AdvancesCursor_AllValid(t *testing.T) {
+	b := NewBinanceFutures("ws://unused", "http://unused", "TESTUSDT", 0)
+	ch := make(chan models.Tick, 100)
+
+	now := time.Now().UnixMilli()
+	trades := []aggTradeREST{
+		{ID: 2001, Price: "100.5", Qty: "1.0", Timestamp: now},
+		{ID: 2002, Price: "100.6", Qty: "1.5", Timestamp: now + 100},
+		{ID: 2003, Price: "100.7", Qty: "0.5", Timestamp: now + 200},
+	}
+
+	newLastID, parsed, skipped := b.processAggTradeBatch(context.Background(), trades, 2000, ch)
+
+	if newLastID != 2003 {
+		t.Errorf("expected lastID=2003 on clean batch, got %d", newLastID)
+	}
+	if parsed != 3 {
+		t.Errorf("expected 3 parsed, got %d", parsed)
+	}
+	if skipped != 0 {
+		t.Errorf("expected 0 skipped on clean batch, got %d", skipped)
+	}
+	if len(ch) != 3 {
+		t.Errorf("expected 3 ticks emitted, got %d", len(ch))
+	}
+}
+
+// TestProcessAggTradeBatch_PartialSkipped_StillAdvancesCursor verifies the
+// realistic mixed-batch case: 1 of N trades has a malformed price (e.g.,
+// transient corruption on a single record). Cursor still advances to the
+// max ID in the batch — the malformed trade is skipped but does not cause
+// re-fetching of the surrounding valid trades.
+func TestProcessAggTradeBatch_PartialSkipped_StillAdvancesCursor(t *testing.T) {
+	b := NewBinanceFutures("ws://unused", "http://unused", "TESTUSDT", 0)
+	ch := make(chan models.Tick, 100)
+
+	now := time.Now().UnixMilli()
+	trades := []aggTradeREST{
+		{ID: 3001, Price: "100.5", Qty: "1.0", Timestamp: now},
+		{ID: 3002, Price: "", Qty: "1.0", Timestamp: now + 100}, // malformed
+		{ID: 3003, Price: "100.7", Qty: "0.5", Timestamp: now + 200},
+	}
+
+	newLastID, parsed, skipped := b.processAggTradeBatch(context.Background(), trades, 3000, ch)
+
+	if newLastID != 3003 {
+		t.Errorf("expected lastID=3003 (max in batch), got %d", newLastID)
+	}
+	if parsed != 2 {
+		t.Errorf("expected 2 parsed (1 malformed skipped), got %d", parsed)
+	}
+	if skipped != 1 {
+		t.Errorf("expected 1 skipped, got %d", skipped)
+	}
+	if len(ch) != 2 {
+		t.Errorf("expected 2 ticks emitted, got %d", len(ch))
+	}
+}
+
 // TestBackfillRespectsContext verifies that an already-cancelled context aborts
 // the loop without making HTTP calls (or stops mid-way without leaking the
 // running goroutine). Important because Subscribe is called from main(),
