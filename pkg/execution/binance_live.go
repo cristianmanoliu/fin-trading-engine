@@ -623,11 +623,24 @@ func (b *BinanceLive) Summary() {
 		"open_at_summary", hasOpen)
 }
 
+// recent24hLossWindow is the rolling-loss horizon for Gate B. Centralized
+// here so RecoverFromJournal's journal-scan cutoff matches recent24hLossUSD's
+// summation cutoff exactly — drift between the two would create a window
+// where journal-recovered losses appear in `b.results` but get filtered out
+// by `recent24hLossUSD`.
+const recent24hLossWindow = 24 * time.Hour
+
 // recent24hLossUSD scans the in-memory results window for closes within the
-// last 24h and sums the negative pnl as positive loss. Used by SafetyGates
-// Gate B (daily-loss circuit breaker).
+// last recent24hLossWindow and sums the negative pnl as positive loss. Used
+// by SafetyGates Gate B (daily-loss circuit breaker).
+//
+// Cross-restart correctness depends on RecoverFromJournal having repopulated
+// `b.results` with recent close events from the journal. Without that hook,
+// every restart resets Gate B to $0 regardless of realized losses — which
+// silently disables the cap at exactly the moment (post-crash) when running
+// it most matters.
 func (b *BinanceLive) recent24hLossUSD() float64 {
-	cutoff := time.Now().Add(-24 * time.Hour)
+	cutoff := time.Now().Add(-recent24hLossWindow)
 	var loss float64
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -679,10 +692,44 @@ func (b *BinanceLive) RecoverFromJournal(ctx context.Context) (bool, error) {
 	}
 	b.mu.Unlock()
 
-	lastOpen, midRHit, remainingFrac, err := b.scanJournalForUnclosedOpen()
+	lastOpen, midRHit, remainingFrac, recentCloses, err := b.scanJournalForUnclosedOpen()
 	if err != nil {
 		return false, err
 	}
+
+	// Repopulate b.results from journal-recorded recent closes BEFORE the
+	// no-open short-circuit — Gate B's daily-loss circuit breaker depends
+	// on this state being present even when there's no open position to
+	// recover. Without this, an engine that crashed AFTER a losing trade
+	// closed but BEFORE the next entry would silently re-arm with $0 in
+	// `b.results` regardless of realized losses. Real-money exposure window.
+	if len(recentCloses) > 0 {
+		recovered := make([]tradeResult, 0, len(recentCloses))
+		for _, c := range recentCloses {
+			ts, terr := time.Parse(time.RFC3339, c.TS)
+			if terr != nil {
+				// Already filtered to parseable TSes by scanJournalForUnclosedOpen,
+				// but defensive against future schema drift. Skip individual
+				// bad lines rather than failing the whole recovery.
+				continue
+			}
+			recovered = append(recovered, tradeResult{
+				exitTime: ts,
+				pnlUSDT:  c.PnlUSD,
+				won:      c.Outcome == "TARGET" || c.Outcome == "PARTIAL",
+				// Other fields stay zero — only exitTime + pnlUSDT + won
+				// are read by recent24hLossUSD and Summary's wins counter.
+				// Full hydration would require parsing fee/slip/notional
+				// per close; deferred unless a future caller needs it.
+			})
+		}
+		b.mu.Lock()
+		b.results = append(b.results, recovered...)
+		b.mu.Unlock()
+		slog.Info("recovered recent closes from journal for Gate B",
+			"symbol", b.Symbol, "count", len(recovered))
+	}
+
 	if lastOpen == nil {
 		return false, nil
 	}
@@ -796,14 +843,21 @@ func (b *BinanceLive) RecoverFromJournal(ctx context.Context) (bool, error) {
 }
 
 // scanJournalForUnclosedOpen walks current + prior month's journal files
-// for the symbol and returns the most recent unclosed-open entry along with
-// the partial-close state (MidRHit + RemainingFrac).
+// for the symbol and returns:
+//   - the most recent unclosed-open entry along with partial-close state
+//     (MidRHit + RemainingFrac) — drives RecoverFromJournal's open recovery
+//   - all close events within the recent24hLossWindow — drives
+//     RecoverFromJournal's repopulation of b.results so Gate B (daily-loss
+//     circuit breaker) survives engine restarts. Without this, an engine
+//     that crashes mid-day with $X realized losses re-arms with $0 in
+//     memory on restart, silently disabling the cap until 24h naturally
+//     elapses. At STAGE_4 this is a real-money exposure window.
 //
 // Mirrors Stub.RecoverFromJournal's scanning loop exactly — same
 // chronological order (prior month first, then current), same
 // open/close/PARTIAL state machine, same corrupt-line tolerance. Duplicated
 // rather than shared to keep the journal-schema parity contract explicit.
-func (b *BinanceLive) scanJournalForUnclosedOpen() (*journalEntry, bool, float64, error) {
+func (b *BinanceLive) scanJournalForUnclosedOpen() (*journalEntry, bool, float64, []journalEntry, error) {
 	now := time.Now().UTC()
 	currentMonth := now.Format("2006-01")
 	priorMonth := now.AddDate(0, -1, 0).Format("2006-01")
@@ -812,7 +866,9 @@ func (b *BinanceLive) scanJournalForUnclosedOpen() (*journalEntry, bool, float64
 		filepath.Join(b.JournalPath, fmt.Sprintf("%s-%s.jsonl", b.Symbol, currentMonth)),
 	}
 
+	cutoff24h := now.Add(-recent24hLossWindow)
 	var lastOpen *journalEntry
+	var recentCloses []journalEntry
 	midRHit := false
 	remainingFrac := 1.0
 
@@ -841,6 +897,12 @@ func (b *BinanceLive) scanJournalForUnclosedOpen() (*journalEntry, bool, float64
 				midRHit = false
 				remainingFrac = 1.0
 			case "close":
+				// Collect for Gate B recovery if the close is within the
+				// 24h loss window. Parse failure or pre-cutoff = skip.
+				if ts, terr := time.Parse(time.RFC3339, e.TS); terr == nil &&
+					ts.After(cutoff24h) {
+					recentCloses = append(recentCloses, e)
+				}
 				if e.Outcome == "PARTIAL" {
 					midRHit = true
 					if remainingFrac > 0.5 {
@@ -855,7 +917,7 @@ func (b *BinanceLive) scanJournalForUnclosedOpen() (*journalEntry, bool, float64
 		}
 		_ = f.Close()
 	}
-	return lastOpen, midRHit, remainingFrac, nil
+	return lastOpen, midRHit, remainingFrac, recentCloses, nil
 }
 
 // appendJournal writes a single JSONL line to the per-symbol monthly journal.

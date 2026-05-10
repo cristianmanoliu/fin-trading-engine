@@ -839,6 +839,90 @@ func TestBinanceLive_Recover_PreExistingPosition_NoOverwrite(t *testing.T) {
 	}
 }
 
+func TestBinanceLive_Recover_RepopulatesGateBLossesAcrossRestart(t *testing.T) {
+	// Audit-pattern regression for the highest-severity finding in the
+	// 2026-05-10 binance_live.go audit: Gate B daily-loss circuit breaker
+	// silently reset to $0 on engine restart because recent24hLossUSD
+	// walked only the in-memory `b.results`, never the journal. At STAGE_4
+	// with the cap tripped, an engine crash would re-arm trading on
+	// restart with the cap effectively disabled until 24h naturally
+	// elapsed. RecoverFromJournal must repopulate b.results from journal-
+	// recorded recent closes so the cap survives restarts.
+	dir := t.TempDir()
+	month := time.Now().UTC().Format("2006-01")
+	priorMonth := time.Now().UTC().AddDate(0, -1, 0).Format("2006-01")
+
+	// Two closes within 24h (must be loaded), one outside (must NOT be).
+	// All have notional > 0 so they reflect post-cost-decomp closes.
+	now := time.Now().UTC()
+	old := now.Add(-30 * time.Hour).Format(time.RFC3339)   // OUTSIDE 24h
+	mid := now.Add(-12 * time.Hour).Format(time.RFC3339)   // inside
+	rec := now.Add(-2 * time.Hour).Format(time.RFC3339)    // inside
+	// Each close must follow an open (state machine), but the open ts is
+	// not consulted by recent24hLossUSD — only the close ts matters.
+	openLine := func(ts string) string {
+		return `{"event":"open","symbol":"BTCUSDT","ts":"` + ts +
+			`","side":"LONG","entry":50000,"stop":49500,"target":53000,"reason":"r"}`
+	}
+	closeLine := func(ts string, pnl float64, outcome string) string {
+		return fmt.Sprintf(
+			`{"event":"close","symbol":"BTCUSDT","ts":"%s","side":"LONG",`+
+				`"entry":50000,"exit":49500,"stop":49500,"target":53000,`+
+				`"outcome":"%s","pnl_usd":%v,"notional_usd":100000,`+
+				`"fee_usd":100,"slip_usd":50,"reason":"r"}`,
+			ts, outcome, pnl)
+	}
+	// Mix prior + current month so cross-month scan is exercised.
+	blWriteJournal(t, dir, "BTCUSDT", priorMonth, []string{
+		openLine(old), closeLine(old, -1000, "STOP"),
+	})
+	blWriteJournal(t, dir, "BTCUSDT", month, []string{
+		openLine(mid), closeLine(mid, -200, "STOP"),
+		openLine(rec), closeLine(rec, -300, "STOP"),
+	})
+
+	// No exchange call expected — fully-closed journal short-circuits the
+	// recovery before FetchExchangePosition. Use a server that fails loudly
+	// if hit, so a regression that adds a stray HTTP call surfaces.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		t.Errorf("unexpected HTTP call during fully-closed journal recovery: %s", req.URL.Path)
+		w.WriteHeader(500)
+	}))
+	defer srv.Close()
+	bl := newBinanceLiveWithMock(t, srv, dir)
+
+	recovered, err := bl.RecoverFromJournal(context.Background())
+	if err != nil {
+		t.Fatalf("recovery: unexpected err: %v", err)
+	}
+	if recovered {
+		t.Error("recovered=true on fully-closed journal; want false")
+	}
+
+	// recent24hLossUSD must see the two recent losses ($200 + $300 = $500),
+	// NOT the 30h-old one ($1000). Without the fix, this returns 0.
+	got := bl.recent24hLossUSD()
+	if math.Abs(got-500) > 1e-6 {
+		t.Fatalf("recent24hLossUSD after recovery: got %v, want 500 "+
+			"(only 12h-old + 2h-old closes; the 30h-old must be filtered)",
+			got)
+	}
+
+	// End-to-end: Gate B must now block a new entry when DailyLossUSDCap < $500.
+	bl.SafetyGates.DailyLossUSDCap = 100
+	bl.OnSignal(&models.Signal{
+		Symbol: "BTCUSDT", Side: models.Short,
+		EntryPrice: 50000, StopLoss: 50100, TakeProfit: 49500,
+		Timestamp: time.Now().UTC(), Reason: "post-restart-test",
+	})
+	bl.Wait()
+	if bl.position != nil {
+		t.Error("Gate B failed: signal opened position despite recovered " +
+			"24h losses ($500) exceeding cap ($100). Gate B journal-recovery " +
+			"is the audit fix for the silent-restart-bypass.")
+	}
+}
+
 func TestBinanceLive_Recover_CrossMonthRecovery(t *testing.T) {
 	dir := t.TempDir()
 	priorMonth := time.Now().UTC().AddDate(0, -1, 0).Format("2006-01")
