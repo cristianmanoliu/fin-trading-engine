@@ -206,18 +206,32 @@ class PreflightTest(unittest.TestCase):
             self.assertIn("Sample data file missing", err)
 
     def test_missing_binary_and_no_go_exits_3(self):
-        # `go` resolves via PATH; we can't reliably remove it from CI.
-        # Instead delete bin/backtest AND restrict PATH to the minimum
-        # needed to run bash itself (so `command -v go` also fails). The
-        # /bin:/usr/bin minimum keeps bash + coreutils discoverable without
-        # exposing developer toolchains.
-        with tempfile.TemporaryDirectory() as d:
+        # The script's preflight fails only when BOTH bin/backtest is absent
+        # AND `command -v go` returns nothing. Removing bin/backtest is easy;
+        # forcing `command -v go` to fail requires a PATH that has bash +
+        # coreutils but no `go`. Setting PATH to `/bin:/usr/bin` works on
+        # macOS dev hosts but Ubuntu 24.04 GitHub runners ship golang-go,
+        # which puts `/usr/bin/go` on disk — the restriction doesn't help.
+        #
+        # Solution: build a clean stub PATH containing symlinks to ONLY the
+        # binaries the script needs (tr/grep/date/head/git/cat/ls). `go` is
+        # provably absent from this dir, regardless of host.
+        needed = ["tr", "grep", "date", "head", "git", "cat", "ls", "bash",
+                  "printf", "rm", "mkdir", "find", "dirname", "basename"]
+        with tempfile.TemporaryDirectory() as bin_dir, \
+             tempfile.TemporaryDirectory() as d:
+            for tool in needed:
+                src = shutil.which(tool)
+                if src is None:
+                    self.skipTest(f"host lacks `{tool}` — can't build stub PATH")
+                os.symlink(src, Path(bin_dir) / tool)
+
             tmp = scaffold_root(Path(d), with_binary=False)
             write_trigger(tmp)
             code, _, err = run_launch(
                 tmp,
                 "--dry-run",
-                env_extra={"PATH": "/bin:/usr/bin"},
+                env_extra={"PATH": bin_dir},
             )
             self.assertEqual(code, 3, err)
             self.assertIn("Neither bin/backtest nor 'go' available", err)
@@ -285,7 +299,7 @@ class ResumeTest(unittest.TestCase):
             tmp = scaffold_root(Path(d), phase_runners=runners)
             write_trigger(tmp)
             # Pre-populate phase-1 verdict (the artifact resume reads).
-            (tmp / "results" / f"m2_phase1_a2_verdict_2026-05-09.md").write_text(
+            (tmp / "results" / "m2_phase1_a2_verdict_2026-05-09.md").write_text(
                 "Mechanical verdict: ADOPT\n"
             )
             code, out, err = run_launch(
