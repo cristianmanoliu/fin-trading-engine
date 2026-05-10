@@ -127,20 +127,37 @@ class TrajectoryParserTest(unittest.TestCase):
             out = t.render_trajectory([snap], cohort_filter="shadow/foo")
             self.assertIn("not found", out)
 
-    def test_missing_metric_renders_em_dash(self):
-        # Cohort header but no metric body — defensive. Real-world: a cohort
-        # with no closes ("no closes yet — N open" line) gets parsed as
-        # an empty metric dict.
+    def test_no_closes_cohort_recognised_without_header(self):
+        # Real-world: forward_paper_status.sh emits the bare line
+        #   `  shadow/bb20  no closes yet — N open (N LONG, N SHORT)`
+        # for cohorts in their pre-first-close window — NO `── ── ──`
+        # header, since aggregate() short-circuits via `continue` before
+        # printing the header. Trajectory must still register the cohort
+        # so the first close shows up as 0→1 trades on the next snapshot.
         with tempfile.TemporaryDirectory() as tmp:
             p = Path(tmp) / "2026-05-08.txt"
             p.write_text(
-                "  ── shadow/bb20 ───────────────────────────\n"
-                "  no closes yet — 13 open (13 LONG, 0 SHORT)\n"
+                "  ── live ───────────────────────────────────\n"
+                "    Trades closed:          5 / 150              [IN-PROGRESS]\n"
+                "  shadow/bb20                 no closes yet — 13 open (13 LONG, 0 SHORT)\n"
+                "      ETCUSDT       LONG   entry=9.622  ... opened=...\n"
             )
             snap = t.parse_snapshot(p)
+            self.assertIn("shadow/bb20", snap.cohorts,
+                "no-closes cohort must register even without ── header")
+            self.assertEqual(snap.cohorts["shadow/bb20"]["trades"], "0",
+                "no-closes cohort must record trades=0 for trajectory")
             out = t.render_trajectory([snap])
             self.assertIn("cohort: shadow/bb20", out)
-            self.assertIn("—", out)
+
+    def test_no_data_yet_cohort_recognised(self):
+        # The other no-closes shape: `(no data yet)` when open_count=0.
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp) / "2026-05-08.txt"
+            p.write_text("  shadow/bb20                 (no data yet)\n")
+            snap = t.parse_snapshot(p)
+            self.assertIn("shadow/bb20", snap.cohorts)
+            self.assertEqual(snap.cohorts["shadow/bb20"]["trades"], "0")
 
 
 class TrajectoryCLITest(unittest.TestCase):

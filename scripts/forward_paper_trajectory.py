@@ -35,6 +35,14 @@ DEFAULT_DIR = Path("results/forward_paper_snapshots")
 # Cohort header markers — `── live ───...` or `── shadow/alt5-15-336 ──...`
 COHORT_RE = re.compile(r"──\s+(live|shadow/[A-Za-z0-9_-]+)\s+─+")
 
+# No-closes cohort lines emitted by forward_paper_status.sh when a cohort has
+# zero terminal closes — either `  shadow/bb20  no closes yet — N open` or
+# `  shadow/bb20  (no data yet)`. Without this match, cohorts in their pre-
+# first-close window are silently invisible across the whole trajectory.
+NO_CLOSES_RE = re.compile(
+    r"^\s+(live|shadow/[A-Za-z0-9_-]+)\s+(?:no closes yet|\(no data yet\))"
+)
+
 # Metric line patterns. Tolerant of whitespace; capture numeric content.
 METRICS = [
     ("days",       re.compile(r"Days elapsed:\s+(\d+)\s*/")),
@@ -58,8 +66,12 @@ def parse_snapshot(path: Path) -> Snapshot:
     snap = Snapshot(date=path.stem)  # e.g. "2026-05-08"
     text = path.read_text()
 
-    # Split into cohort sections by the header line.
+    # Split into cohort sections by the header line. A no-closes cohort
+    # (single-line `shadow/bb20  no closes yet — N open`) terminates the
+    # current section without starting a new ── header section, but still
+    # registers the cohort so trajectory tracks its first close when it lands.
     sections: list[tuple[str, str]] = []
+    no_closes_cohorts: list[str] = []
     current_cohort: str | None = None
     current_lines: list[str] = []
     for line in text.splitlines():
@@ -69,7 +81,16 @@ def parse_snapshot(path: Path) -> Snapshot:
                 sections.append((current_cohort, "\n".join(current_lines)))
             current_cohort = m.group(1)
             current_lines = []
-        elif current_cohort is not None:
+            continue
+        nc = NO_CLOSES_RE.match(line)
+        if nc:
+            if current_cohort is not None:
+                sections.append((current_cohort, "\n".join(current_lines)))
+                current_cohort = None
+                current_lines = []
+            no_closes_cohorts.append(nc.group(1))
+            continue
+        if current_cohort is not None:
             current_lines.append(line)
     if current_cohort is not None:
         sections.append((current_cohort, "\n".join(current_lines)))
@@ -81,6 +102,10 @@ def parse_snapshot(path: Path) -> Snapshot:
             if m:
                 metrics[name] = m.group(1)
         snap.cohorts[cohort] = metrics
+    for cohort in no_closes_cohorts:
+        # Only register if we didn't already see a full ── section for the
+        # same cohort in the same file (defensive against malformed input).
+        snap.cohorts.setdefault(cohort, {"trades": "0"})
     return snap
 
 
