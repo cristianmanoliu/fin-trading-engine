@@ -185,12 +185,22 @@ def render(trades: list[TradeCost], cohort_filter: str | None) -> str:
     out.append(sep)
     out.append(f"  Cumulative: n={cum_n} (losers={cum_n_losers})")
     final_fee_avg = cum_fee_sum / cum_n
-    final_slip_avg = cum_slip_sum / cum_n_losers if cum_n_losers > 0 else 0.0
     fee_status = "PASS" if final_fee_avg <= KILL_FEE_BPS else "FAIL"
-    slip_status = "PASS" if final_slip_avg <= KILL_SLIP_BPS else "FAIL"
     out.append(f"    fee   = {final_fee_avg:.2f} bp  / modeled {MODELED_FEE_BPS}bp / kill {KILL_FEE_BPS}bp  [{fee_status}]")
-    out.append(f"    slip  = {final_slip_avg:.2f} bp  / modeled {MODELED_SLIP_BPS}bp / kill {KILL_SLIP_BPS}bp  [{slip_status}]"
-               f"   (n_losers={cum_n_losers})")
+    # Slip is computed only on losing trades. With zero losers there is no
+    # data to evaluate the gate against — emit PENDING (gate unevaluated)
+    # rather than PASS via 0.0 ≤ 25.0. The kill-bar mis-calibration verdict
+    # 2026-05-07 (memory: kill_bar_miscalibration_2026-05-07) found this
+    # exact "no data = clean" failure mode in the threshold kill mechanism;
+    # the audit pattern keeps the same lens applied here.
+    if cum_n_losers > 0:
+        final_slip_avg = cum_slip_sum / cum_n_losers
+        slip_status = "PASS" if final_slip_avg <= KILL_SLIP_BPS else "FAIL"
+        out.append(f"    slip  = {final_slip_avg:.2f} bp  / modeled {MODELED_SLIP_BPS}bp / kill {KILL_SLIP_BPS}bp  [{slip_status}]"
+                   f"   (n_losers={cum_n_losers})")
+    else:
+        out.append(f"    slip  = —      bp  / modeled {MODELED_SLIP_BPS}bp / kill {KILL_SLIP_BPS}bp  [PENDING]"
+                   f"   (n_losers=0; gate unevaluated until first STOP close)")
     out.append(sep)
     return "\n".join(out) + "\n"
 

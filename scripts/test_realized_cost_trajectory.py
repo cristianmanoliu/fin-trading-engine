@@ -162,6 +162,27 @@ class RealizedCostParserTest(unittest.TestCase):
             self.assertIn("BTC", out)
             self.assertNotIn("ETH", out)
 
+    def test_render_slip_pending_when_no_losers(self):
+        # All-winners scenario — slip cannot be evaluated, so the gate
+        # must read PENDING (not PASS via 0.0 ≤ 25.0). This was the same
+        # "no data = clean" fail-open shape that mis-calibrated the
+        # threshold kill mechanism in 2026-05-07; same audit lens here.
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            write_journal(d, "BTCUSDT", "2026-05", [
+                {"outcome": "TARGET", "pnl_usd": 5000, "fee_usd": 100,
+                 "slip_usd": 0, "notional_usd": 100000},
+                {"outcome": "TARGET", "pnl_usd": 4000, "fee_usd": 80,
+                 "slip_usd": 0, "notional_usd": 80000},
+            ])
+            out = rc.render(rc.load_journals(d), None)
+            self.assertIn("[PENDING]", out,
+                "n_losers=0 must read PENDING, not PASS via 0.0≤25.0")
+            self.assertIn("n_losers=0", out)
+            self.assertIn("gate unevaluated", out)
+            # Fee gate is still evaluable (n=2 trades) → must show PASS.
+            self.assertIn("[PASS]", out)
+
     def test_render_summary_passes_when_within_thresholds(self):
         with tempfile.TemporaryDirectory() as tmp:
             d = Path(tmp)
