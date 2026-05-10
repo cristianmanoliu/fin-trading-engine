@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Operator-facing reference:** see `docs/OPERATOR_HANDBOOK.md` for daily/weekly cadence, Telegram tier guide, scenario playbook (drift fires, kill protocol, promotion ready, recovery drift, real-money emergency kill), and tool map. CLAUDE.md is project-history dense; the handbook is the focused operational reference.
 
-## Strategy status (2026-05-09)
+## Strategy status (2026-05-10)
 
 **Live:** 16 paper-trading engines on Hetzner VPS, each running 1 live + 3 shadow strategies (alt5-15-336, alt5-15-504, bb20). Engines now have **journal-replay on startup** — restarts no longer orphan in-flight positions (commit `9eaeb54`, deployed 2026-05-07T20:24 UTC, 7 orphans recovered cleanly on first run).
 - **Live config:** `--signal-tf 4H --side-filter short --target-rr 6.0 --max-hold-hours 504 --funding-csv-dir data/funding --fee-bps 10 --stop-slippage-bps 5` (EMA 9/21 hardcoded). Selected via 6-window walk-forward validation 2026-05-06.
@@ -20,7 +20,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 See `docs/findings/<date>.md` per session. Latest: `2026-05-10.md` (full-day record — morning: +10 trajectory + 4 fwd_paper_status + Layer 3 wrapper + 3 binance_live + LIMBO rule mechanical wiring; afternoon: +9 commits across handbook, cmd/engine 2nd-pass, Stub 1st-pass, marketdata 2nd-pass, strategy 1st-pass, kill_switch 1st-pass — critical-path audit complete across all 5 layers); `2026-05-09-pm.md` (stage_promotion_check + 13 fail-opens + CI lint expansion); `2026-05-08.md` (milestone-1 closure + drift detector + BinanceLive). **Cumulative across 6 sessions: 57 fail-open bugs of the "missing input → silent success" shape closed. Pattern observation: silent-journal-write-failure shape co-exists in 3 paired implementations (BinanceLive 028e6a2 + Stub 4154374 + SignalContextWriter f760327) — by the 3rd instance the lens is predictive.**
 
-Pre-registration catalog: `results/INDEX.md` (53 docs: 26 decision rules + 22 verdicts + 5 syntheses).
+Pre-registration catalog: `results/INDEX.md` (55 docs: 28 decision rules + 22 verdicts + 5 syntheses; INDEX.md itself trails by ~7 entries — refresh when convenient).
 
 ## Build & Run
 
