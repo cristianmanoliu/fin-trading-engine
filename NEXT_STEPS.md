@@ -81,12 +81,17 @@ These are the only **forward-motion** items permitted during forward-paper. Do t
 
 ### 1. Layer 2 testnet kickoff (this week)
 
-Plumbing complete; needs operator action:
+Plumbing + smoke harness complete; needs operator action:
 
 1. Generate testnet credentials at https://testnet.binancefuture.com (separate from mainnet keys).
-2. Set `BINANCE_API_KEY` / `BINANCE_API_SECRET` env vars.
-3. Run a single symbol via `--executor binance_live_testnet`. Confirm round-trip fills land in journal.
-4. Verify with the testnet integration tests in `pkg/execution/binance_live_test.go`.
+2. `export BINANCE_API_KEY=... BINANCE_API_SECRET=...`
+3. Run the smoke harness (5 min) to verify connectivity + auth + startup:
+   ```bash
+   LAYER2_SMOKE_ACKNOWLEDGE_TESTNET=YES bash scripts/layer2_smoke.sh BTCUSDT
+   ```
+   Exit codes: 0 PASS / 1-6 per failure shape (see script header). PASS = connectivity verified.
+4. After smoke PASS, run a longer 24-72h `--executor binance_live_testnet` window. This is when the writer-equals-model cost-stack gate flips from informationally-null to information-bearing (the first real fill produces non-Stub fee/slip).
+5. Verify with the testnet integration tests in `pkg/execution/binance_live_test.go`.
 
 Why now: Layer 2 must precede Layer 3, and Layer 3 needs 7 days of observation. Don't be on the critical path when forward-paper resolves.
 
@@ -102,7 +107,28 @@ Exit codes: 0 PASS / 1 THRESHOLD / 2 SIGNAL_DIV / 3 INPUT_ERROR / 4 INSUFFICIENT
 
 ### 3. Continued audit-fix sweep (ongoing)
 
-The 2026-05-10 session closed 9 fail-open / silent-failure fixes across 5 layers. Cumulative: 57 of this shape across 6 sessions. The "by the 3rd instance the lens is predictive" observation suggests more remain — but the critical-path audit is complete. Treat new findings as opportunistic, not scheduled.
+The 2026-05-10 session closed 9 fail-open / silent-failure fixes across 5 layers. Cumulative: 60 lens-applicable findings across 7 sessions (last 3 from T2a build, lens-as-self-correction). The "by the 3rd instance the lens is predictive" observation suggests more remain — but the critical-path audit is complete. Treat new findings as opportunistic, not scheduled. New adjacent pattern documented 2026-05-10 PM: writer-equals-model gate informationality — see `docs/AUDIT_LENS.md`.
+
+### 4. PROMOTE-day execution mechanic — DONE (operator can now use)
+
+When forward-paper resolves PROMOTE, the operator runs a single subcommand per phase:
+
+```bash
+bash scripts/stage_promotion.sh phase1 paper STAGE_1   # GATE verification
+bash scripts/stage_promotion.sh phase2                  # operator confirms config diff
+bash scripts/stage_promotion.sh phase3                  # redeploy + STRICT post_deploy
+bash scripts/stage_promotion.sh phase4                  # waits for FIRST_N_TRADES live closes (exit 9 = pending)
+bash scripts/stage_promotion.sh phase5                  # monitoring window 24-72h per stage
+bash scripts/stage_promotion.sh phase6                  # finalize + emit closure-template skeleton
+```
+
+The closure-template skeleton (per `results/promote_closure_template_decision_rule_2026-05-10.md`) prompts the operator to fill in the 11-section artifact within 7 days. State persists between phase invocations via `STATE: PHASE_<N>_COMPLETE` markers in the in-progress artifact, so phase-to-phase walks across days are normal — `phase4` and `phase5` are inherently calendar-bound.
+
+Rollback via `bash scripts/stage_promotion.sh rollback` per runbook §Rollback-path. `status` subcommand shows current progress.
+
+### 5. KILL-day execution mechanic — gap (next fresh-session piece)
+
+Symmetric to (4) but for the KILL path. `results/auto_kill_execution_decision_rule_2026-05-08.md` locks the 6 phases (HALT / OPEN-POSITIONS / ARCHIVE / DOCUMENT / NOTIFY / POSTMORTEM). `cmd/kill_switch` handles Phase 2 (close real-money positions). Phases 1/3/4/5/6 are scattered. A `scripts/auto_kill.sh` orchestrator analogous to `stage_promotion.sh` is the next fresh-session deliverable. ~3-4 hr; pattern transfers partially from `stage_promotion.sh` + `milestone2_launch.sh`. Per the session-length calibration memory: this IS a genuine fresh-session piece (different design space — single-shot urgent vs. staged calendar-bound).
 
 ## Things to NOT do (the deal with yourself)
 
@@ -140,10 +166,14 @@ The full operator scenarios — drift fires, kill protocol, recovery drift, real
 
 - `results/real_money_protocol_decision_rule_2026-05-08.md` — STAGE_1→4 sizing
 - `results/real_money_executor_architecture_decision_rule_2026-05-08.md` — Layer 2/3 gate definitions
-- `results/auto_kill_execution_decision_rule_2026-05-08.md` — Path C close-all
-- `results/INDEX.md` — full pre-reg catalog (53 decision rules + verdicts + syntheses)
+- `results/stage_promotion_runbook_decision_rule_2026-05-08.md` — 6-phase PROMOTE execution (implemented by `scripts/stage_promotion.sh`)
+- `results/promote_closure_template_decision_rule_2026-05-10.md` — 11-section PROMOTE-side closure artifact format
+- `results/auto_kill_execution_decision_rule_2026-05-08.md` — Path C close-all (orchestrator pending — see §5 above)
+- `results/postmortem_template_decision_rule_2026-05-08.md` — locked KILL closure template
+- `results/forward_paper_outcome_resolution_decision_rule_2026-05-10.md` — 5-verdict resolution tree
+- `results/INDEX.md` — full pre-reg catalog (58 artifacts = 30 decision rules + 22 verdicts + 5 syntheses + INDEX)
 
-When forward-paper resolves on ~2026-09-09: read the pre-reg files. Promotion or kill is a mechanical rule application, no design choices remaining.
+When forward-paper resolves on ~2026-09-09: PROMOTE-day is `bash scripts/stage_promotion.sh phase1 paper STAGE_1`; KILL-day still requires the auto_kill.sh orchestrator (§5) which is the remaining gap. The rule files lock the decisions; the orchestrators (one shipped, one pending) execute them mechanically.
 
 ## Roadmap (NOT urgent — do not let these sneak into the quiet period)
 
