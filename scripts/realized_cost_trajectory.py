@@ -258,6 +258,22 @@ def main() -> int:
             return 3
         trades, stats = load_journals(d)
 
+    # An empty journal dir (zero .jsonl files) is operator misconfiguration
+    # — wrong path, missed mount, etc. — not an early-stage no-closes-yet
+    # state. Previously this collapsed into exit 2 alongside legitimate
+    # "no closes yet, keep waiting" — so a typo'd --live-dir or a remote
+    # path that exists but is empty looked identical to a fresh deploy.
+    if stats.files_scanned == 0:
+        source = (f"remote {args.vps}:{args.live_dir}"
+                  if args.live_source == "vps" else f"local {args.live_dir}")
+        print(
+            f"⚠ no .jsonl files found in {source} — operator "
+            "misconfiguration likely (wrong path / missed mount / "
+            "permissions). For genuine 'no closes yet' a journal dir "
+            "still contains the open events, so an empty dir is a "
+            "different failure mode.", file=sys.stderr)
+        return 3
+
     # Distinguish "all closes pre-decomp" from "no closes yet". Both produce
     # `trades=[]` in the original code → both exit 2 → operator can't tell
     # whether to investigate stale journal format vs wait for first close.

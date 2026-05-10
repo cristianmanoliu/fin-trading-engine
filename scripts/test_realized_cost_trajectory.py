@@ -236,11 +236,34 @@ class RealizedCostParserTest(unittest.TestCase):
 
 class RealizedCostCLITest(unittest.TestCase):
 
-    def test_empty_local_dir_exits_2(self):
+    def test_empty_local_dir_exits_3(self):
+        # Empty journal dir = zero .jsonl files = operator misconfiguration.
+        # This used to exit 2 (collapsed with legit "no closes yet"); the
+        # audit-pattern fix surfaces it as exit 3 input-error so cron
+        # wrappers can route Telegram tier separately from "early-stage".
         with tempfile.TemporaryDirectory() as tmp:
             code, out = run_cli(["--live-source", "local", "--live-dir", tmp])
+            self.assertEqual(code, 3,
+                f"expected exit 3 (empty dir = operator error), got {code}\n{out}")
+            self.assertIn("no .jsonl files", out)
+            self.assertIn("misconfiguration", out)
+
+    def test_dir_with_files_but_no_closes_exits_2(self):
+        # Files exist but contain only open events — legitimate fresh-
+        # deploy "no closes yet" state. Must distinguish from empty-dir
+        # operator-error (exit 3) above.
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            (d / "BTCUSDT-2026-05.jsonl").write_text(
+                json.dumps({"event": "open", "symbol": "BTCUSDT",
+                            "ts": "2026-05-08T12:00:00Z", "side": "LONG",
+                            "entry": 60000, "stop": 59000, "target": 66000})
+                + "\n"
+            )
+            code, out = run_cli(["--live-source", "local", "--live-dir", str(d)])
             self.assertEqual(code, 2,
-                f"expected exit 2 (no qualifying trades), got {code}\n{out}")
+                f"expected exit 2 (no closes yet, legit), got {code}\n{out}")
+            self.assertNotIn("misconfiguration", out)
 
     def test_missing_local_dir_exits_3(self):
         code, out = run_cli(
