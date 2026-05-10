@@ -637,6 +637,45 @@ else
     printf "    %-50s\n" "(jq not available — install jq to enable freshness check)"
 fi
 
+# ── Mechanical resolution verdict (LIMBO rule) ──────────────────────────────
+# Surfaces forward_paper_resolution.py's verdict in the operator's most-
+# frequent dashboard, so the threshold gates above are read AS CONTEXT for
+# the mechanical verdict — not as action items in their own right. Closes
+# the loop on the n=9 emotional reaction pattern from 2026-05-10: even when
+# the threshold gates flash [INSUFFICIENT] / [PENDING] / advisory KILL, the
+# resolution verdict here gives the locked rule's actual answer.
+#
+# Runtime overhead ~2-5s (resolution.py invokes kill_protocol_check +
+# stage_promotion_check as subprocesses). Acceptable for an operator-
+# invoked dashboard. The weekly_audit.sh cron already runs this with
+# --kill-exit / --promote-exit overrides to avoid double-invocation.
+echo
+echo "$SEP"
+echo "  Resolution verdict (per LIMBO rule, results/forward_paper_outcome_resolution_decision_rule_2026-05-10.md)"
+echo "$SEP"
+RESOLUTION_SCRIPT="${SCRIPT_ROOT}/scripts/forward_paper_resolution.py"
+if [[ -x "$RESOLUTION_SCRIPT" ]] || [[ -f "$RESOLUTION_SCRIPT" ]]; then
+    set +e
+    RESOLUTION_OUTPUT=$(python3 "$RESOLUTION_SCRIPT" 2>&1)
+    RESOLUTION_EXIT=$?
+    set -e
+    case "$RESOLUTION_EXIT" in
+        0) verdict_line="  >>> CONTINUE — no action required; monitoring continues" ;;
+        1) verdict_line="  >>> PROMOTE — all gates met, STAGE_1 promotion eligible" ;;
+        2) verdict_line="  >>> WATCH — soft signals firing; investigate at next session" ;;
+        3) verdict_line="  >>> OPERATOR_REVIEW — manual rule cross-check needed" ;;
+        4) verdict_line="  >>> 🚨 KILL — locked criterion fired; EXECUTE auto-kill per auto_kill_execution_decision_rule_2026-05-08.md" ;;
+        5) verdict_line="  >>> INPUT_ERROR — missing/stale snapshot or drift history; investigate before trusting any verdict above" ;;
+        *) verdict_line="  >>> exit=$RESOLUTION_EXIT (unexpected; see output below)" ;;
+    esac
+    echo "$verdict_line"
+    # Surface up to 3 reasons (the bullet lines from resolution.py) so the
+    # operator sees WHICH rule fired without having to re-run the script.
+    echo "$RESOLUTION_OUTPUT" | grep -E "^[[:space:]]*•" | head -3
+else
+    echo "  >>> resolution script not found at $RESOLUTION_SCRIPT"
+fi
+
 echo
 echo "$SEP"
 echo "  Notes:"
