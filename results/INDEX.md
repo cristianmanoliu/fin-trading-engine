@@ -1,13 +1,13 @@
 # results/ index — decision rules, verdicts, and operational pre-registrations
 
-53 markdown artifacts as of 2026-05-08, organized by lifecycle stage and category.
+57 markdown artifacts (including INDEX) as of 2026-05-10, organized by lifecycle stage and category.
 
 **Three artifact types:**
 - `*_decision_rule_*.md` — pre-registered: rule LOCKED before data is observed
 - `*_verdict_*.md` — mechanical: rule applied to data, produces ACCEPT/REJECT
 - Synthesis / state docs (no _rule / _verdict suffix) — narrative or operational
 
-The asymmetric ratio (rules → verdicts) reflects today's heavy pre-registration phase: 9 operational pre-regs locked on 2026-05-08 await activation under future operational events.
+The asymmetric ratio (rules → verdicts) reflects today's heavy pre-registration phase: 10 operational pre-regs locked on 2026-05-08 + 2 pre-regs locked on 2026-05-10 (LIMBO outcome resolution + milestone-2 launch runbook) await activation under future operational events.
 
 ---
 
@@ -76,6 +76,9 @@ Live paper-trading; weekly drift detection; threshold cross-checks. The kill rul
 - **`drift_wrapper_cron_decision_rule_2026-05-08.md`** — phased deployment (manual through STAGE_2; VPS systemd timer required at STAGE_3+)
 - **`drift_firing_investigation_decision_rule_2026-05-08.md`** — three-tier triage A/B/C with locked cross-checks per tier
 
+#### Operator alerting layer
+- **`telegram_alert_design_decision_rule_2026-05-08.md`** — 3-tier alert system (INFO/WARN/CRITICAL) with locked rate limits, mute-hour semantics, per-event tier assignments, and aggregation behavior. Activates when first non-startup/shutdown alert fires; binds every other locked rule that references "Telegram alert" to a consistent format and cadence
+
 ### Stage 2 — Forward-paper → real-money gateway
 
 Sits between mechanical DEPLOY-READY verdict and STAGE_1 promotion. The discipline payoff moment.
@@ -104,13 +107,14 @@ When something goes wrong, these locks govern the response.
 Pre-registered now; activates when current milestone closes.
 
 - **`strategy_backlog_milestone2_2026-05-08.md`** — 8 mechanism ideas (A1 vol-regime / A2 ATR-sizing / B1 RSI-extremum / B2 BB-squeeze / C1 funding-extremum / D1 session-filter / F1 multi-TF-ensemble / G1 tick-imbalance) with locked verdict criteria, prioritization rubric, recommended top-5 selection
+- **`milestone2_runbook_decision_rule_2026-05-10.md`** — locked 5-phase execution sequence (A2 → A1 → C1 → B2 → D1), family-wise α=0.01 (Bonferroni at α_family=0.05, N=5), per-phase verdict template, mid-sequence rollback paths, audit-lens compliance contract for `scripts/milestone2_launch.sh`. Bridges the strategy backlog with the milestone-2 trigger conditions in `real_money_protocol`.
 
 ---
 
 ## Index by category (alternative view)
 
 ### Locked decision rules (rule pre-registered, awaits data)
-26 files. The pre-registration backbone of the project.
+29 files. The pre-registration backbone of the project. (+1 telegram_alert_design 2026-05-08 + 1 forward_paper_outcome_resolution 2026-05-10 + 1 milestone2_runbook 2026-05-10 since the 2026-05-08 snapshot.)
 
 ### Verdicts (rule applied to data)
 22 files. Each verdict mechanically applies its corresponding decision rule to specific data.
@@ -118,11 +122,12 @@ Pre-registered now; activates when current milestone closes.
 ### Synthesis / state docs
 5 files. Narrative summaries that don't fit the rule/verdict pattern (e.g., `holy_grail_synthesis`, `cost_stack_sensitivity`).
 
-### Locked 2026-05-08 (today)
-The 9 operational pre-regs locked today, organized by what they govern:
+### Locked 2026-05-08 (operational hardening day)
+10 operational pre-regs locked, organized by what they govern:
 
 - **WHEN to detect:** drift_wrapper_cron
 - **HOW to triage:** drift_firing_investigation
+- **HOW to alert:** telegram_alert_design — binds every "Telegram alert" reference in the other 9 to a consistent tier (INFO/WARN/CRITICAL), rate limit, and mute-hour policy
 - **HOW to kill (fleet):** auto_kill_execution
 - **HOW to pause (one symbol):** per_symbol_pause
 - **HOW to build (executor):** real_money_executor_architecture
@@ -130,6 +135,12 @@ The 9 operational pre-regs locked today, organized by what they govern:
 - **HOW to promote (each stage):** stage_promotion_runbook
 - **HOW to learn (after kill):** postmortem_template
 - **WHAT to research (next):** strategy_backlog_milestone2
+
+### Locked 2026-05-10 (LIMBO resolution + milestone-2 launch prep)
+2 pre-regs locked, both filling rule→tool gaps before the events they govern:
+
+- **HOW to resolve (calendar gate met, trade gate not):** forward_paper_outcome_resolution — five-verdict tree (CONTINUE / WATCH / PROMOTE / KILL / OPERATOR_REVIEW) implemented mechanically by `scripts/forward_paper_resolution.py`, wired into `weekly_audit.sh` stage 6
+- **HOW to execute (milestone-2 candidate sweep):** milestone2_runbook — locked A2 → A1 → C1 → B2 → D1 sequence with family-wise α=0.01, per-phase verdict template, mid-sequence rollback paths. Implemented mechanically by `scripts/milestone2_launch.sh` with trigger gate (refuses to run until paper→STAGE_1 promotion or kill artifact present)
 
 ---
 
