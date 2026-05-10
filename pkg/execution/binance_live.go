@@ -965,6 +965,29 @@ func (b *BinanceLive) appendJournal(entry journalEntry) {
 		// or no-line-at-all means the orphan is invisible to recovery.
 		slog.Error("journal write failed — REAL-MONEY POSITION MAY BE INVISIBLE TO LOCAL STATE",
 			"symbol", b.Symbol, "event", entry.Event, "err", werr)
+		// CRITICAL: close + clear the handle so the NEXT appendJournal call
+		// goes through the open-or-create path and gets a fresh fd. Without
+		// this, every subsequent call writes to the same dead handle, fails
+		// the same way, and burns the operator's attention with identical
+		// error lines while every new real-money position remains invisible
+		// to recovery. Audit-pattern shape: failure path must reset state
+		// rather than persist into "permanently broken" silent failure.
+		_ = b.journalFile.Close()
+		b.journalFile = nil
+		b.journalMonth = ""
+		if b.Notifier != nil {
+			// Spawn the alert (no Lock held in here) — alert is fire-and-forget;
+			// we don't want notifier latency holding the journal mutex.
+			go func(sym, ev string, e error) {
+				_ = b.Notifier.SendStructured(context.Background(),
+					notify.SeverityCritical,
+					fmt.Sprintf("Journal write FAILED on %s (%s): %v\n"+
+						"Real-money position may be invisible to recovery. "+
+						"Engine will retry on next event; if errors persist, "+
+						"investigate disk + permissions.",
+						sym, ev, e))
+			}(b.Symbol, entry.Event, werr)
+		}
 	}
 }
 

@@ -839,6 +839,69 @@ func TestBinanceLive_Recover_PreExistingPosition_NoOverwrite(t *testing.T) {
 	}
 }
 
+func TestBinanceLive_appendJournal_WriteFailureClearsHandleForRetry(t *testing.T) {
+	// Audit-pattern regression: appendJournal previously left b.journalFile
+	// non-nil after a write error, so every subsequent call wrote into the
+	// same dead handle and failed identically — the operator saw a recurring
+	// "REAL-MONEY POSITION MAY BE INVISIBLE" stream while every new position
+	// remained invisible to recovery. Fix clears the handle on failure so the
+	// next call goes through the open-or-create path and gets a fresh fd.
+	dir := t.TempDir()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer srv.Close()
+	bl := newBinanceLiveWithMock(t, srv, dir)
+
+	// Plant a closed-file handle as journalFile. Write on a closed *os.File
+	// returns os.ErrClosed — exactly the kind of mid-trade failure we want
+	// to simulate (disk full, fd leak, permissions revoked, etc.).
+	closedFile, err := os.CreateTemp(dir, "broken-*.jsonl")
+	if err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	if cerr := closedFile.Close(); cerr != nil {
+		t.Fatalf("setup close: %v", cerr)
+	}
+	bl.journalFile = closedFile
+	bl.journalMonth = time.Now().UTC().Format("2006-01")
+
+	// First call — Write fails on the closed handle.
+	bl.appendJournal(journalEntry{
+		Event: "open", Symbol: "BTCUSDT",
+		TS:    time.Now().UTC().Format(time.RFC3339),
+	})
+
+	// Critical assertion: handle MUST be cleared so next call reopens.
+	if bl.journalFile != nil {
+		t.Fatal("journalFile not cleared after write failure — next call would " +
+			"write to the same dead handle and fail identically")
+	}
+	if bl.journalMonth != "" {
+		t.Errorf("journalMonth not cleared: got %q", bl.journalMonth)
+	}
+
+	// Second call MUST succeed via the open-or-create path. JournalPath
+	// is a writable temp dir, so the recovery path runs cleanly.
+	bl.appendJournal(journalEntry{
+		Event: "open", Symbol: "BTCUSDT",
+		TS:    time.Now().UTC().Format(time.RFC3339),
+		Side:  "LONG", Entry: 50000, Stop: 49500, Target: 53000,
+	})
+
+	if bl.journalFile == nil {
+		t.Error("journalFile not re-opened on subsequent call after failure clear")
+	}
+	// And the actual file on disk must contain the second event (proving the
+	// recovery path produced a real, writeable handle, not just a non-nil sentinel).
+	matches, _ := filepath.Glob(filepath.Join(dir, "BTCUSDT-*.jsonl"))
+	if len(matches) == 0 {
+		t.Fatal("no journal file on disk after recovery")
+	}
+	body, _ := os.ReadFile(matches[0])
+	if !strings.Contains(string(body), `"event":"open"`) {
+		t.Errorf("recovered journal did not contain expected event; got: %q", string(body))
+	}
+}
+
 func TestBinanceLive_Recover_RepopulatesGateBLossesAcrossRestart(t *testing.T) {
 	// Audit-pattern regression for the highest-severity finding in the
 	// 2026-05-10 binance_live.go audit: Gate B daily-loss circuit breaker
