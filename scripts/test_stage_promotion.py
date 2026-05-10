@@ -261,7 +261,7 @@ class Phase2Test(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             tmp = scaffold_root(Path(d))
             self._setup_after_phase1(tmp)
-            code, out, err = run_sp(tmp, "phase2", env_extra={"STAGE_PROMOTION_CONFIRM": "YES"})
+            code, out, err = run_sp(tmp, "phase2", env_extra={"STAGE_PROMOTION_CONFIRM": "YES", "STAGE_PROMOTION_DRY_RUN": "1"})
             self.assertEqual(code, 0, err)
             self.assertIn("Phase 2 complete", out)
             content = in_progress_artifact(tmp).read_text()
@@ -274,7 +274,7 @@ class Phase3Test(unittest.TestCase):
     def _setup_after_phase2(self, tmp: Path) -> None:
         write_gate_doc(tmp, kind="paper")
         run_sp(tmp, "phase1", "paper", "STAGE_1")
-        run_sp(tmp, "phase2", env_extra={"STAGE_PROMOTION_CONFIRM": "YES"})
+        run_sp(tmp, "phase2", env_extra={"STAGE_PROMOTION_CONFIRM": "YES", "STAGE_PROMOTION_DRY_RUN": "1"})
 
     def test_phase3_without_phase2_exits_7(self):
         with tempfile.TemporaryDirectory() as d:
@@ -303,7 +303,7 @@ class Phase4Test(unittest.TestCase):
         """Returns the path of an empty journal dir prepared for tests."""
         write_gate_doc(tmp, kind="paper")
         run_sp(tmp, "phase1", "paper", "STAGE_1")
-        run_sp(tmp, "phase2", env_extra={"STAGE_PROMOTION_CONFIRM": "YES"})
+        run_sp(tmp, "phase2", env_extra={"STAGE_PROMOTION_CONFIRM": "YES", "STAGE_PROMOTION_DRY_RUN": "1"})
         run_sp(tmp, "phase3", env_extra={"STAGE_PROMOTION_DRY_RUN": "1"})
         journal_dir = tmp / "journal"
         journal_dir.mkdir()
@@ -372,7 +372,7 @@ class Phase5Test(unittest.TestCase):
     def _setup_after_phase4(self, tmp: Path, deploy_hours_ago: int) -> None:
         write_gate_doc(tmp, kind="paper")
         run_sp(tmp, "phase1", "paper", "STAGE_1")
-        run_sp(tmp, "phase2", env_extra={"STAGE_PROMOTION_CONFIRM": "YES"})
+        run_sp(tmp, "phase2", env_extra={"STAGE_PROMOTION_CONFIRM": "YES", "STAGE_PROMOTION_DRY_RUN": "1"})
         run_sp(tmp, "phase3", env_extra={"STAGE_PROMOTION_DRY_RUN": "1"})
         # Rewrite DEPLOY_TIMESTAMP to be N hours ago — phase5 reads from artifact.
         artifact = in_progress_artifact(tmp)
@@ -417,7 +417,7 @@ class Phase5Test(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             tmp = scaffold_root(Path(d))
             self._setup_after_phase4(tmp, deploy_hours_ago=25)
-            code, out, err = run_sp(tmp, "phase5", env_extra={"STAGE_PROMOTION_CONFIRM": "YES"})
+            code, out, err = run_sp(tmp, "phase5", env_extra={"STAGE_PROMOTION_CONFIRM": "YES", "STAGE_PROMOTION_DRY_RUN": "1"})
             self.assertEqual(code, 0, err)
             self.assertIn("Phase 5 complete", out)
 
@@ -430,7 +430,7 @@ class Phase6Test(unittest.TestCase):
             tmp = scaffold_root(Path(d))
             write_gate_doc(tmp, kind="paper")
             run_sp(tmp, "phase1", "paper", "STAGE_1")
-            run_sp(tmp, "phase2", env_extra={"STAGE_PROMOTION_CONFIRM": "YES"})
+            run_sp(tmp, "phase2", env_extra={"STAGE_PROMOTION_CONFIRM": "YES", "STAGE_PROMOTION_DRY_RUN": "1"})
             run_sp(tmp, "phase3", env_extra={"STAGE_PROMOTION_DRY_RUN": "1"})
             # Walk back deploy timestamp + add closes so phase4/5 can complete.
             artifact = in_progress_artifact(tmp)
@@ -451,7 +451,7 @@ class Phase6Test(unittest.TestCase):
                 "STAGE_PROMOTION_LOCAL_JOURNAL": str(journal_dir),
                 "STAGE_PROMOTION_CONFIRM": "YES",
             })
-            run_sp(tmp, "phase5", env_extra={"STAGE_PROMOTION_CONFIRM": "YES"})
+            run_sp(tmp, "phase5", env_extra={"STAGE_PROMOTION_CONFIRM": "YES", "STAGE_PROMOTION_DRY_RUN": "1"})
             code, out, err = run_sp(tmp, "phase6")
             self.assertEqual(code, 0, err)
             self.assertIn("Phase 6 complete", out)
@@ -486,7 +486,7 @@ class RollbackTest(unittest.TestCase):
     def _setup_promotion_in_flight(self, tmp: Path) -> None:
         write_gate_doc(tmp, kind="paper")
         run_sp(tmp, "phase1", "paper", "STAGE_1")
-        run_sp(tmp, "phase2", env_extra={"STAGE_PROMOTION_CONFIRM": "YES"})
+        run_sp(tmp, "phase2", env_extra={"STAGE_PROMOTION_CONFIRM": "YES", "STAGE_PROMOTION_DRY_RUN": "1"})
         run_sp(tmp, "phase3", env_extra={"STAGE_PROMOTION_DRY_RUN": "1"})
 
     def test_rollback_without_confirm_exits_6(self):

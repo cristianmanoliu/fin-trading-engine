@@ -417,16 +417,43 @@ EOF
 Apply the locked diff per runbook §Phase-2, then re-run with STAGE_PROMOTION_CONFIRM=YES."
     fi
 
-    cat >> "$ARTIFACT" <<EOF
+    # Best-effort capture of the as-of-Phase-2 systemd unit. The operator
+    # asserted via STAGE_PROMOTION_CONFIRM=YES that the diff was applied;
+    # this snapshot freezes the post-diff config in the artifact so future-
+    # self auditing can see WHAT was applied, not just that something was.
+    # NOT a gate — SSH failure logs a warning and Phase 2 continues. The
+    # operator can append the snapshot manually later if needed.
+    local systemd_snapshot=""
+    local target="${STAGE_PROMOTION_VPS:-root@178.105.24.230}"
+    if [[ "${STAGE_PROMOTION_DRY_RUN:-0}" == "1" ]]; then
+        systemd_snapshot="(DRY_RUN — systemctl cat capture skipped)"
+    else
+        # ConnectTimeout caps the wait if the VPS is unreachable; the
+        # operator's Phase 2 shouldn't hang on a transient SSH issue.
+        if systemd_snapshot=$(ssh -o ConnectTimeout=5 "$target" \
+                              'systemctl cat paper-live@.service 2>/dev/null' 2>/dev/null); then
+            if [[ -n "$systemd_snapshot" ]]; then
+                echo "✓ captured systemd unit snapshot from VPS"
+            else
+                systemd_snapshot="(ssh succeeded but returned empty — verify paper-live@.service exists on $target)"
+            fi
+        else
+            systemd_snapshot="(ssh to $target failed — operator may manually append systemctl cat output)"
+            echo "⚠ could not fetch systemd unit; continuing (non-gating)"
+        fi
+    fi
 
-## Phase 2: config preparation
-- Stake target: \$${STAKE_USD}
-$([[ "$FROM" == "paper" ]] && echo "- Executor flip: stub → binance_live")
-- Operator-confirm received at: $(date -u '+%Y-%m-%dT%H:%M:%SZ')
-- Reviewer: $(whoami)
-- Diff applied: yes (operator-asserted via STAGE_PROMOTION_CONFIRM=YES)
-
-EOF
+    {
+        printf '\n## Phase 2: config preparation\n'
+        printf '\n- Stake target: $%s\n' "$STAKE_USD"
+        [[ "$FROM" == "paper" ]] && printf -- '- Executor flip: stub → binance_live\n'
+        printf -- '- Operator-confirm received at: %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+        printf -- '- Reviewer: %s\n' "$(whoami)"
+        printf -- '- Diff applied: yes (operator-asserted via STAGE_PROMOTION_CONFIRM=YES)\n'
+        printf '\n### As-of-Phase-2 systemd unit snapshot\n'
+        printf '\n```\n%s\n```\n' "$systemd_snapshot"
+        printf '\n'
+    } >> "$ARTIFACT"
     mark_phase_complete 2
     notify_telegram INFO "stage_promotion: phase2 confirmed" \
         "${FROM} → ${TO}: operator confirmed config change.
@@ -468,7 +495,14 @@ The halt SSH command: systemctl stop paper-live@*.service on the VPS."
         fi
     fi
 
-    # All stages: redeploy via existing mechanism.
+    # All stages: redeploy via existing mechanism. redeploy.sh internally
+    # invokes post_deploy_check.sh in PERMISSIVE mode (STRICT=0) to surface
+    # warnings during fleet warm-up without failing. That's intentionally
+    # tolerant — engines just restarted may have transient stale-tick lines
+    # before the first heartbeat. The STRICT=1 call below is the SECOND
+    # check after redeploy.sh's permissive one; it's the gating verdict for
+    # this phase, run after warm-up has elapsed. Not redundant — the two
+    # checks have different acceptable-state thresholds by design.
     echo "── Phase 3: DEPLOY via ./deploy/redeploy.sh all ──"
     if [[ "${STAGE_PROMOTION_DRY_RUN:-0}" == "1" ]]; then
         echo "  (DRY_RUN — would run: ./deploy/redeploy.sh all)"
@@ -479,7 +513,8 @@ The halt SSH command: systemctl stop paper-live@*.service on the VPS."
         fi
     fi
 
-    # Verification: STRICT=1 post_deploy_check.
+    # Verification: STRICT=1 post_deploy_check — this is the gating call.
+    # Any warning here fails Phase 3 and triggers ROLLBACK per runbook §148.
     echo "── Phase 3 verification: STRICT=1 ./scripts/post_deploy_check.sh ──"
     if [[ "${STAGE_PROMOTION_DRY_RUN:-0}" == "1" ]]; then
         echo "  (DRY_RUN — would run: STRICT=1 ./scripts/post_deploy_check.sh)"
