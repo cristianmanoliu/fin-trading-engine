@@ -1025,6 +1025,39 @@ func TestRecover_CorruptTrailingLine_StillRecovers(t *testing.T) {
 	}
 }
 
+func TestRecover_AllCorruptLines_ReturnsNoRecovery_NoError(t *testing.T) {
+	// Audit-pattern regression: a journal whose every line fails JSON parse
+	// (schema drift / disk corruption / format change) previously returned
+	// (false, nil) silently — operator restart wouldn't crash but recovery
+	// was disabled and no diagnostic was emitted. Function still returns
+	// (false, nil) — RecoverFromJournal is best-effort by design — but the
+	// new path emits a slog.Warn with the anomaly counters so post_deploy_
+	// check §5 picks up the schema-drift signal. This test verifies the
+	// no-crash + no-error contract; slog output is observable in stderr.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "X-"+currentMonthStr()+".jsonl")
+	f, _ := os.Create(path)
+	// All five lines fail JSON parse — distinct from a 1-of-N trailing typo.
+	f.WriteString("not json line 1\n")
+	f.WriteString("{ broken json line 2\n")
+	f.WriteString("[also not valid line 3\n")
+	f.WriteString("trailing,comma,line4\n")
+	f.WriteString("{\"missing_close: 5\n")
+	f.Close()
+
+	stub := &Stub{StakeUSDT: 1000, JournalPath: dir, Symbol: "X"}
+	recovered, err := stub.RecoverFromJournal()
+	if err != nil {
+		t.Fatalf("expected no error on all-corrupt (best-effort), got: %v", err)
+	}
+	if recovered {
+		t.Fatal("all-corrupt journal should not produce a recovery — no valid open to find")
+	}
+	if stub.position != nil {
+		t.Errorf("expected nil position after corrupt-only scan, got non-nil")
+	}
+}
+
 func TestRecover_PreExistingPosition_NoOverwrite(t *testing.T) {
 	dir := t.TempDir()
 	openLine := `{"event":"open","symbol":"X","ts":"2026-05-07T08:00:00Z","side":"LONG","entry":100,"stop":99,"target":106,"reason":"journal"}`

@@ -228,12 +228,24 @@ func (s *Stub) RecoverFromJournal() (recovered bool, err error) {
 	var lastOpen *journalEntry
 	midRHit := false
 	remainingFrac := 1.0
+	var corruptLines, scannedLines, filesScanned int
 
 	for _, fname := range files {
 		f, openErr := os.Open(fname)
 		if openErr != nil {
-			continue // missing file is fine
+			// Audit-pattern fix: missing file is benign (first deploy, prior
+			// month never existed) but permission-denied / I/O errors are
+			// operator-misconfig that previously silently disabled recovery.
+			// Distinguish them so the operator knows when scanning was
+			// actually skipped vs nothing-to-find.
+			if os.IsNotExist(openErr) {
+				continue
+			}
+			slog.Warn("journal-recovery: skipping unreadable file",
+				"path", fname, "err", openErr)
+			continue
 		}
+		filesScanned++
 		sc := bufio.NewScanner(f)
 		// Allow up to 1MB per line — journal entries are small but defensive.
 		sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
@@ -242,9 +254,15 @@ func (s *Stub) RecoverFromJournal() (recovered bool, err error) {
 			if len(line) == 0 {
 				continue
 			}
+			scannedLines++
 			var e journalEntry
 			if jerr := json.Unmarshal(line, &e); jerr != nil {
-				// Corrupt line (e.g. partial trailing write from a kill mid-flush) — skip.
+				// Corrupt line (e.g. partial trailing write from a kill mid-flush) — skip,
+				// but track. A single trailing partial line is benign; ALL-N-corrupt
+				// indicates schema drift / disk corruption / format change. Same audit
+				// shape as the trajectory tooling fix from earlier today: distinguish
+				// "1 trailing typo" from "every line garbage."
+				corruptLines++
 				continue
 			}
 			switch e.Event {
@@ -272,6 +290,18 @@ func (s *Stub) RecoverFromJournal() (recovered bool, err error) {
 			}
 		}
 		_ = f.Close()
+	}
+
+	// Anomaly check: if every parsed line was corrupt, the operator's recovery
+	// is silently broken (schema drift / disk corruption / format change).
+	// Trailing partial line from a kill mid-flush is normal — that's 1 corrupt
+	// out of N. ALL-corrupt with non-zero scanned is the audit-pattern shape.
+	if scannedLines > 0 && corruptLines == scannedLines {
+		slog.Warn("journal-recovery: every scanned line failed JSON parse — schema drift or disk corruption",
+			"symbol", s.Symbol,
+			"files_scanned", filesScanned,
+			"lines_scanned", scannedLines,
+			"lines_corrupt", corruptLines)
 	}
 
 	if lastOpen == nil {
