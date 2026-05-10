@@ -53,10 +53,11 @@ If you receive **NO Telegram alerts** Sunday 09:00–10:00, the system is health
 If you want the Sunday read anyway:
 
 ```bash
-cat results/forward_paper_snapshots/$(date -u +%Y-%m-%d).txt
+cat results/forward_paper_snapshots/$(date -u +%Y-%m-%d).txt             # forward_paper_status snapshot
+cat results/forward_paper_snapshots/$(date -u +%Y-%m-%d)-resolution.txt  # LIMBO verdict
 ```
 
-That's the operator dashboard.
+The first is the operator dashboard; the second is the mechanical 5-verdict resolution. Both are sibling-paired by `weekly_audit.sh` so a fresh-deploy week without resolution.txt = stage 6 didn't run.
 
 For trends across snapshots:
 
@@ -90,6 +91,7 @@ Tier prefixes (from `pkg/notify/telegram.go`):
 - **Recovery drift on engine startup** — restart blocked by exchange divergence. Investigate before restarting.
 - **Drift detector exit 4 (auto-kill candidate)** — two firings ≥7 days apart OR drift+threshold match. Locked rule: stop the protocol. Execute per `results/auto_kill_execution_decision_rule_2026-05-08.md`.
 - **kill_protocol_check exit 1** — at least one locked kill criterion fires (slip>30bp sustained, drawdown 20%, single-sym>50%, 3-consecutive-day-loss). Cross-check drift detector before acting.
+- **forward_paper_resolution exit 4 (KILL)** — LIMBO Rule 1: locked kill criterion fired with paired confirmation. Execute `auto_kill_execution_decision_rule_2026-05-08.md`.
 - **PROMOTION READY** — stage_promotion_check exit 0 — all gates pass. Pre-promotion checklist (Layer 2 + Layer 3) before flipping --executor.
 - **Engine panic / crashed** — investigate logs, restart engine.
 - **Journal write failed** — REAL-MONEY POSITION MAY BE INVISIBLE. Check disk + permissions.
@@ -98,18 +100,19 @@ Tier prefixes (from `pkg/notify/telegram.go`):
 
 - Heartbeat: stalled feed, no ticks received. Usually clears within 90s.
 - forward_paper_resolution: OPERATOR_REVIEW (3+ soft signals OR low trade rate OR slow-bleed)
-- forward_paper_resolution: WATCH (1-2 soft signals)
+- forward_paper_resolution: INPUT_ERROR (exit 5) — missing/stale snapshot or drift history; investigate cron health, NOT strategy
 - weekly_audit: validate warnings (trailing-malformed-line tolerance)
 - Layer 2 / Layer 3 startup events
 - Funding CSV staleness >7 days
-- INPUT_ERROR (missing snapshot, missing drift history)
+- post_deploy_check.sh STRICT-mode FAIL
 
 ### What fires INFO (read at leisure)
 
 - Engine started / stopped (clean)
 - Position recovered + verified clean
 - Position drift cleared
-- forward_paper_resolution: PROMOTE / WATCH (paired confirmation)
+- forward_paper_resolution: PROMOTE (exit 1) — operator confirmation gate before STAGE_1 flip
+- forward_paper_resolution: WATCH (exit 2) — 1-2 soft signals; flagged in weekly digest, no kill
 
 ---
 
@@ -123,7 +126,7 @@ Tier prefixes (from `pkg/notify/telegram.go`):
 | `scripts/forward_paper_trajectory.py` | Trend across snapshots — direction-of-travel. |
 | `scripts/realized_cost_trajectory.py` | Per-trade fee/slip trend, not just cumulative average. |
 | `scripts/forward_paper_resolution.py` | LIMBO 5-verdict synthesis (CONTINUE / WATCH / PROMOTE / KILL / OPERATOR_REVIEW). |
-| `scripts/post_deploy_check.sh` | 13-section operational health audit. Run after every redeploy. |
+| `scripts/post_deploy_check.sh` | 13-section operational health audit. Run after every redeploy. `STRICT=1 ./scripts/post_deploy_check.sh` for fail-loud / CI mode (exit 1 + Telegram WARN on any FAIL). |
 | `scripts/paper_live_trades.sh` | Per-engine trade summary. |
 | `scripts/run_drift_check.sh` | Decision-grade kill detector (manual invocation). |
 
@@ -133,8 +136,21 @@ Tier prefixes (from `pkg/notify/telegram.go`):
 |---|---|
 | `scripts/kill_protocol_check.py` | Locked kill criteria → CONTINUE / KILL / WAITING / OPERATOR-VERIFY |
 | `scripts/stage_promotion_check.py` | Locked promotion gates → PROMOTE / BLOCKED / WAITING / DEFERRED |
-| `scripts/forward_paper_resolution.py` | LIMBO synthesis → 5 verdicts |
+| `scripts/forward_paper_resolution.py` | LIMBO synthesis → 5 verdicts (see exit-code table below) |
 | `scripts/layer3_verdict.sh` | Layer 3 7d shadow parity → PASS / THRESHOLD / SIGNAL_DIV / INPUT_ERROR / INSUFFICIENT_DURATION |
+
+**`forward_paper_resolution.py` exit-code map** (mirrors locked rule's Telegram tier mapping):
+
+| Exit | Verdict | Tier | Operator action |
+|:---:|---|:---:|---|
+| 0 | CONTINUE | silent | Nothing — system healthy, monitoring |
+| 1 | PROMOTE | INFO | Pre-promotion checklist (Layer 2 + Layer 3 gates) before flipping `--executor` |
+| 2 | WATCH | INFO | Read flagged metric in next weekly digest; no kill |
+| 3 | OPERATOR_REVIEW | WARN | Manual cross-check + written rationale before CONTINUE-ing or KILLing |
+| 4 | KILL | CRITICAL | Locked kill criterion fired — execute `auto_kill_execution_decision_rule_2026-05-08.md` |
+| 5 | INPUT_ERROR | WARN | Distinct from CONTINUE — missing/stale snapshot or drift history. Investigate cron health, NOT strategy |
+
+The 6-stage `weekly_audit.sh` cron exits with the **drift wrapper's** code so `launchctl list | grep tradingengine` surfaces drift state. Resolution / kill_check / promotion verdicts arrive **independently via Telegram** — exit 0 in launchctl ≠ "all five stages clean."
 
 ### Operations (modify state)
 
@@ -186,7 +202,7 @@ This is the moment forward-paper crosses STAGE_1 promotion criteria. Pre-flight:
 
 1. **Layer 2 testnet gate.** Generate Binance testnet credentials at `testnet.binancefuture.com` (SEPARATE from mainnet). Smoke-run: `BINANCE_API_KEY=<testnet> BINANCE_API_SECRET=<testnet> go run ./cmd/engine --config configs/btcusdt.yaml --executor binance_live_testnet`. Verify orders fill cleanly. Locked criterion: testnet smoke must pass before any mainnet flip.
 2. **Layer 3 dual-runner shadow.** With testnet creds: `go run ./cmd/engine --config configs/btcusdt.yaml --layer3-binance-testnet-journal-dir /var/log/paper-live/journal-testnet`. Run for ≥7 calendar days.
-3. **Layer 3 verdict:** `scripts/layer3_verdict.sh --stub-dir /var/log/paper-live/journal --testnet-dir /var/log/paper-live/journal-testnet`. Must return PASS (exit 0).
+3. **Layer 3 verdict:** `scripts/layer3_verdict.sh --stub-dir /var/log/paper-live/journal --testnet-dir /var/log/paper-live/journal-testnet`. Must return PASS (exit 0). Use `--skip-min-days` for a dry-run preview before the 7d gate elapses (verdict still computed; gate-shortfall not blocking).
 4. **Mainnet creds.** Generate FRESH mainnet credentials separate from testnet.
 5. **Stage 1 flip.** Per `results/real_money_protocol_decision_rule_2026-05-08.md`: $100/trade. Update systemd ExecStart with `--executor=binance_live` flag. Redeploy. Verify CRITICAL "REAL-MONEY engine started" alert fires.
 
