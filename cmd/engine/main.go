@@ -164,7 +164,17 @@ func main() {
 				}
 			}
 		} else {
+			// Symbol CSV missing while --funding-csv-dir is set. Falls back to
+			// *fundingBpsPerDay (defaults 0 → no funding accrual). Forward-paper
+			// PnL silently diverges from backtest's modeled funding — drift
+			// detector would catch eventually, but slowly. Same audit-pattern
+			// shape as funding-loader-bug-2026-05-06: missing input → silent
+			// "success" while the caller assumed funding was applied. WARN tier
+			// (paper-money accuracy concern, not operational fire).
 			slog.Warn("no historical funding file for symbol — falling back to constant rate", "symbol", cfg.Symbol)
+			_ = notifier.SendStructured(ctx, notify.SeverityWarn,
+				fmt.Sprintf("funding CSV missing for %s in %s — falling back to %.2f bps/day (default 0). Forward-paper PnL will diverge from backtest's modeled funding. Run scripts/refresh_funding.sh + redeploy.",
+					cfg.Symbol, *fundingCSVDir, *fundingBpsPerDay))
 		}
 	}
 
@@ -507,7 +517,18 @@ func main() {
 			})
 			slog.Info("funding filter enabled", "max_bps_per_day", *fundingFilterMaxBpsPerDay)
 		} else {
+			// Operator passed --funding-filter-max-bps-per-day but the funding
+			// provider isn't Historical (either --funding-csv-dir was unset, or
+			// the symbol CSV was missing). Silently disabling would mean the
+			// operator's regime-gate is inactive without their knowing — the
+			// strategy takes SHORT signals in extreme bull regimes that they
+			// thought were filtered out. Same audit-pattern shape as the
+			// missing-CSV finding above. WARN tier (operator misconfig, not
+			// operational fire).
 			slog.Warn("--funding-filter-max-bps-per-day requires --funding-csv-dir to load Historical provider; filter ignored")
+			_ = notifier.SendStructured(ctx, notify.SeverityWarn,
+				fmt.Sprintf("funding filter on %s IGNORED — --funding-filter-max-bps-per-day=%.2f set but funding provider is not Historical (need --funding-csv-dir with valid CSV for this symbol).",
+					cfg.Symbol, *fundingFilterMaxBpsPerDay))
 		}
 	}
 
