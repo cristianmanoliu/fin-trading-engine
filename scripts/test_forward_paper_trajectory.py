@@ -179,6 +179,26 @@ class TrajectoryCLITest(unittest.TestCase):
             self.assertEqual(result.returncode, 2)
             self.assertIn("no snapshots", result.stderr)
 
+    def test_unrecognised_format_exits_3(self):
+        # Non-empty snapshot file that contains zero cohort markers — e.g.
+        # an unrelated text file accidentally placed in the snapshot dir,
+        # or a format change in forward_paper_status.sh that renames the
+        # `── label ──` separator. Without this guard the script silently
+        # rendered an empty trajectory and exited 0.
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "2026-05-08.txt").write_text(
+                "this file has no cohort markers at all\n"
+                "just plain text that does not match any pattern\n"
+            )
+            result = subprocess.run(
+                ["python3", str(TRAJ), "--dir", tmp],
+                capture_output=True, text=True,
+            )
+            self.assertEqual(result.returncode, 3,
+                f"expected exit 3 (zero cohorts extracted), got "
+                f"{result.returncode}\nstderr:\n{result.stderr}")
+            self.assertIn("zero cohorts", result.stderr)
+
     def test_real_snapshot_dir_renders_successfully(self):
         # Smoke test against the actual repo snapshot dir if present.
         snap_dir = REPO / "results" / "forward_paper_snapshots"

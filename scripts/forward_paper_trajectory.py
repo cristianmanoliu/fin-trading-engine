@@ -216,6 +216,16 @@ def main() -> int:
         for path, err in parse_errors:
             print(f"  {path}: {err}", file=sys.stderr)
         return 3
+    # Files parsed without exceptions but no cohort sections matched anywhere.
+    # Without this guard, a format change in forward_paper_status.sh (different
+    # header characters, renamed cohorts, etc.) renders a near-empty trajectory
+    # and exits 0 — the audit-pattern fail-open ("missing input → silent
+    # success"). Exit 3 surfaces it loudly.
+    if snapshots and not any(s.cohorts for s in snapshots):
+        print(f"\n⚠ parsed {len(snapshots)} snapshot(s) but extracted zero "
+              "cohorts — forward_paper_status.sh format may have changed; "
+              "check COHORT_RE / NO_CLOSES_RE patterns.", file=sys.stderr)
+        return 3
     return 0
 
 
