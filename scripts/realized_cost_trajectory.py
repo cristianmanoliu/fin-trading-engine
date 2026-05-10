@@ -73,27 +73,53 @@ class TradeCost:
         return self.slip_usd / self.notional_usd * 10000.0
 
 
-def load_journals(journal_dir: Path) -> list[TradeCost]:
+@dataclass
+class JournalStats:
+    """Per-scan accounting needed to distinguish 'no closes yet' (legit
+    early-stage state) from 'all closes pre-decomp' (operator forgot to
+    restart engine after the cost-decomp extension landed) — the audit-
+    pattern dual where empty input maps to wrong verdict."""
+    files_scanned: int = 0
+    total_closes: int = 0
+    pre_decomp_skipped: int = 0
+    partial_skipped: int = 0
+    qualifying: int = 0
+
+
+def load_journals(journal_dir: Path) -> tuple[list[TradeCost], JournalStats]:
     """Walk *.jsonl files (top-level + shadow subdirs) and emit closed
-    trades with cost decomposition. Cohort is derived from path: top-level
-    files are 'live'; shadow/<label>/*.jsonl is 'shadow/<label>'."""
+    trades with cost decomposition + scan stats. Cohort is derived from
+    path: top-level files are 'live'; shadow/<label>/*.jsonl is
+    'shadow/<label>'.
+
+    Stats let main() distinguish three operator states that all produce
+    `len(trades)==0`: (a) directory missing/empty (input error),
+    (b) closes exist but none qualify (pre-decomp masking — restart
+    engine), (c) no closes yet (genuine early-stage). Without (b)
+    surfaced, an operator who forgets to restart engines after the
+    cost-decomp extension landed sees the same green-ish 'no qualifying
+    trades' message as a fresh deploy.
+    """
     trades: list[TradeCost] = []
+    stats = JournalStats()
     if not journal_dir.is_dir():
-        return trades
+        return trades, stats
 
     # Top-level → live
     for jf in sorted(journal_dir.glob("*.jsonl")):
-        trades.extend(_parse_one(jf, "live"))
+        stats.files_scanned += 1
+        trades.extend(_parse_one(jf, "live", stats))
     # Shadow subdirs
     shadow_root = journal_dir / "shadow"
     if shadow_root.is_dir():
         for label_dir in sorted(p for p in shadow_root.iterdir() if p.is_dir()):
             for jf in sorted(label_dir.glob("*.jsonl")):
-                trades.extend(_parse_one(jf, f"shadow/{label_dir.name}"))
-    return trades
+                stats.files_scanned += 1
+                trades.extend(_parse_one(jf, f"shadow/{label_dir.name}", stats))
+    return trades, stats
 
 
-def _parse_one(path: Path, cohort: str) -> list[TradeCost]:
+def _parse_one(path: Path, cohort: str, stats: JournalStats) -> list[TradeCost]:
     out: list[TradeCost] = []
     for line in path.read_text().splitlines():
         if not line:
@@ -104,12 +130,16 @@ def _parse_one(path: Path, cohort: str) -> list[TradeCost]:
             continue
         if ev.get("event") != "close":
             continue
+        stats.total_closes += 1
         # Skip pre-decomp closes (notional == 0 means cost columns weren't
         # written; they show 0 fee/slip and would falsely pull averages down).
         if ev.get("notional_usd", 0) <= 0:
+            stats.pre_decomp_skipped += 1
             continue
         if ev.get("outcome") == "PARTIAL":
+            stats.partial_skipped += 1
             continue
+        stats.qualifying += 1
         out.append(TradeCost(
             cohort=cohort,
             ts=ev.get("ts", ""),
@@ -123,7 +153,7 @@ def _parse_one(path: Path, cohort: str) -> list[TradeCost]:
     return out
 
 
-def fetch_remote(vps: str, remote_dir: str) -> list[TradeCost]:
+def fetch_remote(vps: str, remote_dir: str) -> tuple[list[TradeCost], JournalStats]:
     cmd = f'ssh {vps} "tar -cf - -C {remote_dir} . 2>/dev/null"'
     with tempfile.TemporaryDirectory() as tmp:
         result = subprocess.run(cmd, shell=True, check=True, capture_output=True)
@@ -217,7 +247,7 @@ def main() -> int:
 
     if args.live_source == "vps":
         try:
-            trades = fetch_remote(args.vps, args.live_dir)
+            trades, stats = fetch_remote(args.vps, args.live_dir)
         except subprocess.CalledProcessError as e:
             print(f"ssh fetch failed: {e}", file=sys.stderr)
             return 3
@@ -226,7 +256,23 @@ def main() -> int:
         if not d.is_dir():
             print(f"local journal dir not found: {d}", file=sys.stderr)
             return 3
-        trades = load_journals(d)
+        trades, stats = load_journals(d)
+
+    # Distinguish "all closes pre-decomp" from "no closes yet". Both produce
+    # `trades=[]` in the original code → both exit 2 → operator can't tell
+    # whether to investigate stale journal format vs wait for first close.
+    # Same audit pattern: missing-input shape silently maps to wrong verdict.
+    if not trades and stats.total_closes > 0:
+        print(
+            f"⚠ {stats.total_closes} close event(s) found across "
+            f"{stats.files_scanned} journal file(s), but ALL skipped "
+            f"({stats.pre_decomp_skipped} pre-decomp / "
+            f"{stats.partial_skipped} PARTIAL). Restart engines to "
+            "enable cost-decomposition columns on new closes — old "
+            "closes lacking notional_usd/fee_usd/slip_usd cannot be "
+            "back-filled.", file=sys.stderr)
+        # Still print a minimal summary block so the operator sees the
+        # script ran; the stderr warning routes Telegram tier separately.
 
     print(render(trades, args.cohort), end="")
     return 0 if trades else 2

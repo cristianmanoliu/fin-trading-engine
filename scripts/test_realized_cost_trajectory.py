@@ -66,7 +66,7 @@ class RealizedCostParserTest(unittest.TestCase):
                 {"outcome": "TARGET", "pnl_usd": 6000, "fee_usd": 0,
                  "slip_usd": 0, "notional_usd": 0},  # pre-decomp
             ])
-            trades = rc.load_journals(d)
+            trades = rc.load_journals(d)[0]
             self.assertEqual(len(trades), 1, "pre-decomp close should be skipped")
 
     def test_skips_partial_closes(self):
@@ -78,7 +78,7 @@ class RealizedCostParserTest(unittest.TestCase):
                 {"outcome": "TARGET", "pnl_usd": 5000, "fee_usd": 50,
                  "slip_usd": 0, "notional_usd": 50000},
             ])
-            trades = rc.load_journals(d)
+            trades = rc.load_journals(d)[0]
             self.assertEqual(len(trades), 1, "PARTIAL should be skipped")
             self.assertEqual(trades[0].outcome, "TARGET")
 
@@ -90,7 +90,7 @@ class RealizedCostParserTest(unittest.TestCase):
                 {"outcome": "STOP", "pnl_usd": -1000, "fee_usd": 100,
                  "slip_usd": 50, "notional_usd": 100000},
             ])
-            trades = rc.load_journals(d)
+            trades = rc.load_journals(d)[0]
             self.assertEqual(len(trades), 1)
             self.assertAlmostEqual(trades[0].fee_bps, 10.0, places=4)
             self.assertAlmostEqual(trades[0].slip_bps, 5.0, places=4)
@@ -103,7 +103,7 @@ class RealizedCostParserTest(unittest.TestCase):
                 {"outcome": "TARGET", "pnl_usd": 5000, "fee_usd": 100,
                  "slip_usd": 0, "notional_usd": 100000},
             ])
-            trades = rc.load_journals(d)
+            trades = rc.load_journals(d)[0]
             self.assertEqual(trades[0].slip_bps, 0.0)
 
     def test_picks_up_shadow_subdirs(self):
@@ -117,14 +117,53 @@ class RealizedCostParserTest(unittest.TestCase):
                 {"outcome": "TARGET", "pnl_usd": 5000, "fee_usd": 100,
                  "slip_usd": 0, "notional_usd": 100000},
             ], cohort="shadow/bb20")
-            trades = rc.load_journals(d)
+            trades = rc.load_journals(d)[0]
             cohorts = {t.cohort for t in trades}
             self.assertEqual(cohorts, {"live", "shadow/bb20"})
 
     def test_empty_journals_yields_empty(self):
         with tempfile.TemporaryDirectory() as tmp:
-            trades = rc.load_journals(Path(tmp))
+            trades, stats = rc.load_journals(Path(tmp))
             self.assertEqual(trades, [])
+            self.assertEqual(stats.files_scanned, 0)
+            self.assertEqual(stats.total_closes, 0)
+
+    def test_stats_distinguishes_pre_decomp_from_no_closes(self):
+        # All-pre-decomp journal: closes exist but none qualify. Stats
+        # must reflect the operator-actionable state ("restart engine to
+        # enable cost columns") rather than collapsing to look the same
+        # as "no closes yet".
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            write_journal(d, "BTCUSDT", "2026-05", [
+                {"outcome": "STOP", "pnl_usd": -1000, "fee_usd": 0,
+                 "slip_usd": 0, "notional_usd": 0},
+                {"outcome": "TARGET", "pnl_usd": 6000, "fee_usd": 0,
+                 "slip_usd": 0, "notional_usd": 0},
+            ])
+            trades, stats = rc.load_journals(d)
+            self.assertEqual(trades, [])
+            self.assertEqual(stats.files_scanned, 1)
+            self.assertEqual(stats.total_closes, 2)
+            self.assertEqual(stats.pre_decomp_skipped, 2)
+            self.assertEqual(stats.qualifying, 0)
+
+    def test_cli_warns_when_all_pre_decomp(self):
+        # CLI prints the pre-decomp warning to stderr instead of letting
+        # the operator confuse "stale format" with "no closes yet".
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            write_journal(d, "BTCUSDT", "2026-05", [
+                {"outcome": "STOP", "pnl_usd": -1000, "fee_usd": 0,
+                 "slip_usd": 0, "notional_usd": 0},
+            ])
+            code, out = run_cli(
+                ["--live-source", "local", "--live-dir", str(d)])
+            self.assertEqual(code, 2,
+                f"expected exit 2 (no qualifying), got {code}")
+            self.assertIn("close event(s) found", out)
+            self.assertIn("pre-decomp", out)
+            self.assertIn("Restart engines", out)
 
     def test_render_flags_kill_threshold_breach(self):
         # 13bp fee > 12bp kill → ★fee>kill flag.
@@ -134,7 +173,7 @@ class RealizedCostParserTest(unittest.TestCase):
                 {"outcome": "STOP", "pnl_usd": -1000, "fee_usd": 130,
                  "slip_usd": 50, "notional_usd": 100000},
             ])
-            trades = rc.load_journals(d)
+            trades = rc.load_journals(d)[0]
             out = rc.render(trades, None)
             self.assertIn("★fee>kill", out)
 
@@ -146,7 +185,7 @@ class RealizedCostParserTest(unittest.TestCase):
                 {"outcome": "STOP", "pnl_usd": -1000, "fee_usd": 100,
                  "slip_usd": 300, "notional_usd": 100000},
             ])
-            out = rc.render(rc.load_journals(d), None)
+            out = rc.render(rc.load_journals(d)[0], None)
             self.assertIn("★slip>kill", out)
 
     def test_render_cohort_filter(self):
@@ -158,7 +197,7 @@ class RealizedCostParserTest(unittest.TestCase):
             write_journal(d, "ETH", "2026-05", [
                 {"outcome": "STOP", "pnl_usd": -1, "fee_usd": 100,
                  "slip_usd": 50, "notional_usd": 100000}], cohort="shadow/bb20")
-            out = rc.render(rc.load_journals(d), cohort_filter="live")
+            out = rc.render(rc.load_journals(d)[0], cohort_filter="live")
             self.assertIn("BTC", out)
             self.assertNotIn("ETH", out)
 
@@ -175,7 +214,7 @@ class RealizedCostParserTest(unittest.TestCase):
                 {"outcome": "TARGET", "pnl_usd": 4000, "fee_usd": 80,
                  "slip_usd": 0, "notional_usd": 80000},
             ])
-            out = rc.render(rc.load_journals(d), None)
+            out = rc.render(rc.load_journals(d)[0], None)
             self.assertIn("[PENDING]", out,
                 "n_losers=0 must read PENDING, not PASS via 0.0≤25.0")
             self.assertIn("n_losers=0", out)
@@ -190,7 +229,7 @@ class RealizedCostParserTest(unittest.TestCase):
                 {"outcome": "STOP", "pnl_usd": -1000, "fee_usd": 100,
                  "slip_usd": 50, "notional_usd": 100000},
             ])
-            out = rc.render(rc.load_journals(d), None)
+            out = rc.render(rc.load_journals(d)[0], None)
             self.assertIn("[PASS]", out)
             self.assertNotIn("[FAIL]", out)
 
