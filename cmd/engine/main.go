@@ -134,6 +134,40 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Pre-flight funding load — local-IO validation, fail-fast BEFORE the
+	// "engine started" INFO + WS subscribe (~30s backfill). An operator
+	// misconfig (corrupt CSV, missing dir, schema drift) would otherwise
+	// fire INFO, waste backfill, then exit silently — the audit-pattern
+	// shape that c142e6e fixed for executor args. fundingProvider is
+	// referenced by the executor switch + shadow runners below.
+	var fundingProvider funding.Provider
+	if *fundingCSVDir != "" {
+		fp, err := funding.LoadFromDir(*fundingCSVDir, cfg.Symbol)
+		if err != nil {
+			slog.Error("failed to load historical funding", "err", err, "symbol", cfg.Symbol)
+			_ = notifier.SendStructured(ctx, notify.SeverityCritical,
+				fmt.Sprintf("STARTUP FAILED on %s — funding CSV load error\nerror: %v\ndir: %s",
+					cfg.Symbol, err, *fundingCSVDir))
+			os.Exit(1)
+		}
+		if fp != nil {
+			fundingProvider = fp
+			slog.Info("loaded historical funding", "symbol", cfg.Symbol, "dir", *fundingCSVDir)
+			if last := fp.LastTS(); !last.IsZero() {
+				age := time.Since(last)
+				if age > 7*24*time.Hour {
+					slog.Warn("funding CSV is stale; trades held past last entry will accrue $0 funding — run scripts/refresh_funding.sh + redeploy",
+						"symbol", cfg.Symbol,
+						"last_funding_ts", last.UTC().Format(time.RFC3339),
+						"stale_days", age.Hours()/24,
+					)
+				}
+			}
+		} else {
+			slog.Warn("no historical funding file for symbol — falling back to constant rate", "symbol", cfg.Symbol)
+		}
+	}
+
 	_ = notifier.SendStructured(ctx, notify.SeverityInfo,
 		fmt.Sprintf("engine started\nsymbol: %s\nhost: %s", cfg.Symbol, hostname))
 
@@ -194,41 +228,6 @@ func main() {
 	journalDir := os.Getenv("PAPER_LIVE_JOURNAL_DIR")
 	if journalDir == "" {
 		journalDir = "./logs/journal"
-	}
-
-	// Load funding provider once, before the executor branch — both Stub
-	// (legacy paper-live path) and the always-Stub shadow runners reference
-	// it. BinanceLive doesn't model funding locally; the locked design
-	// "Exchange-reported funding cost differs from local model" specifies
-	// that real-money runs use exchange-reported funding only.
-	var fundingProvider funding.Provider
-	if *fundingCSVDir != "" {
-		fp, err := funding.LoadFromDir(*fundingCSVDir, cfg.Symbol)
-		if err != nil {
-			slog.Error("failed to load historical funding", "err", err, "symbol", cfg.Symbol)
-			os.Exit(1)
-		}
-		if fp != nil {
-			fundingProvider = fp
-			slog.Info("loaded historical funding", "symbol", cfg.Symbol, "dir", *fundingCSVDir)
-			// Staleness warning: an operator-missed weekly refresh leaves trades
-			// held past the last entry accruing $0 funding silently. Bounded in
-			// steady state (refresh + restart caps drift at ~7d) — but if it
-			// ever exceeds a week, surface it loudly so the operator can run
-			// scripts/refresh_funding.sh + redeploy.
-			if last := fp.LastTS(); !last.IsZero() {
-				age := time.Since(last)
-				if age > 7*24*time.Hour {
-					slog.Warn("funding CSV is stale; trades held past last entry will accrue $0 funding — run scripts/refresh_funding.sh + redeploy",
-						"symbol", cfg.Symbol,
-						"last_funding_ts", last.UTC().Format(time.RFC3339),
-						"stale_days", age.Hours()/24,
-					)
-				}
-			}
-		} else {
-			slog.Warn("no historical funding file for symbol — falling back to constant rate", "symbol", cfg.Symbol)
-		}
 	}
 
 	// Branch on --executor: paper-money Stub (default, today's deployed

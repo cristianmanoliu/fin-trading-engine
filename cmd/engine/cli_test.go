@@ -214,6 +214,35 @@ func TestCLI_Layer3_RequiresStubPrimary_Exits1(t *testing.T) {
 	// is acceptable. What we care about is that exit != 0.
 }
 
+// TestCLI_FundingLoadError_Exits1 — funding CSV load failure must fire a
+// Telegram CRITICAL before os.Exit(1). The "engine started" INFO has
+// already fired by this point in main(); without the CRITICAL the dead
+// engine is invisible to the operator's dashboard until the systemd
+// watchdog catches it minutes later. Same shape as the c142e6e fix
+// (executor-validation silent on Telegram) — funding load was missed
+// in that pass. We verify exit code + that the slog Error message names
+// the failure (Telegram delivery itself isn't observable in CLI tests
+// without TELEGRAM_* env, but the slog-error-then-exit contract is).
+func TestCLI_FundingLoadError_Exits1(t *testing.T) {
+	cfg := minimalConfig(t)
+	// Create a funding dir with a malformed CSV for TESTUSDT — funding.NewHistorical
+	// returns a "X data rows but 0 parsed" error when the schema doesn't match,
+	// which is the realistic operator-misconfig failure mode (e.g., a bad
+	// refresh script left a corrupted CSV in place).
+	fundingDir := t.TempDir()
+	csvPath := filepath.Join(fundingDir, "TESTUSDT.csv")
+	if err := os.WriteFile(csvPath, []byte("not_a_real,header,row\nbad,data,1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, out := runEngine(t, nil, "--config", cfg, "--funding-csv-dir", fundingDir)
+	if code != 1 {
+		t.Errorf("expected exit 1 on funding load error, got %d\nout:\n%s", code, out)
+	}
+	if !strings.Contains(out, "failed to load historical funding") {
+		t.Errorf("expected funding load error in output, got:\n%s", out)
+	}
+}
+
 // TestCLI_Layer3_MissingCreds_Exits1 — when the Layer 3 wrap is requested
 // but BINANCE_API_* env is unset, the testnet shadow can't be constructed.
 // Must fail-fast.
