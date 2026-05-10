@@ -79,6 +79,71 @@ func TestSignalContextWriter_AppendsJSONLLines(t *testing.T) {
 	}
 }
 
+// TestSignalContextWriter_WriteFailureClearsHandleForRetry verifies the
+// 2026-05-10 audit-pattern fix on the THIRD paired-implementation of the
+// silent-write-failure shape (after Stub `4154374` and BinanceLive `028e6a2`).
+// When Write fails on the underlying file (disk full, fd revoked, etc.),
+// the file handle MUST be cleared so the next call goes through open-or-
+// create and gets a fresh fd. Pre-fix the writer left w.file non-nil after
+// failure → every subsequent Write hit the same dead handle and failed
+// identically while the engine kept emitting signals into a void.
+func TestSignalContextWriter_WriteFailureClearsHandleForRetry(t *testing.T) {
+	dir := t.TempDir()
+	w := &SignalContextWriter{Dir: dir, Symbol: "BTCUSDT"}
+	defer w.Close()
+
+	// Plant a closed-file handle as w.file. Write on a closed *os.File
+	// returns os.ErrClosed — exactly the kind of mid-runtime failure
+	// the audit pattern targets (disk full, fd leak, permissions revoked).
+	closedFile, err := os.CreateTemp(dir, "broken-*.jsonl")
+	if err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	if cerr := closedFile.Close(); cerr != nil {
+		t.Fatalf("setup close: %v", cerr)
+	}
+	w.file = closedFile
+	w.month = "2026-05" // matches what time.Now() Format produces today
+
+	// First Write — internal Write call on the closed handle fails.
+	w.Write(SignalContext{
+		Event: "signal_context", Symbol: "BTCUSDT",
+		TS: "2026-05-10T20:00:00Z", Label: "live", Side: "LONG",
+		Entry: 100000, Stop: 99000, Target: 106000,
+	})
+
+	// Critical assertion: handle MUST be cleared so next call reopens.
+	if w.file != nil {
+		t.Fatal("w.file not cleared after write failure — next call would " +
+			"write to the same dead handle and lose the record identically")
+	}
+	if w.month != "" {
+		t.Errorf("w.month not cleared: got %q", w.month)
+	}
+
+	// Second Write MUST succeed via the open-or-create path. Dir is a
+	// writable temp dir so the recovery path runs cleanly.
+	w.Write(SignalContext{
+		Event: "signal_context", Symbol: "BTCUSDT",
+		TS: "2026-05-10T20:01:00Z", Label: "live", Side: "LONG",
+		Entry: 100100, Stop: 99100, Target: 106100,
+	})
+
+	if w.file == nil {
+		t.Error("w.file not re-opened on subsequent Write after failure clear")
+	}
+	// And the on-disk file must contain the recovered event (proves a real,
+	// writeable handle, not just a non-nil sentinel).
+	matches, _ := filepath.Glob(filepath.Join(dir, "BTCUSDT-*.jsonl"))
+	if len(matches) == 0 {
+		t.Fatal("no signal-context file on disk after recovery")
+	}
+	body, _ := os.ReadFile(matches[0])
+	if len(body) == 0 {
+		t.Errorf("recovered file is empty — Write recovery did not actually write")
+	}
+}
+
 // TestSignalContextWriter_NilAndEmptyAreNoOps protects against panics when
 // the writer is unconfigured (cmd/backtest path, or when the operator hasn't
 // set --signal-context-dir).

@@ -108,13 +108,22 @@ func (w *SignalContextWriter) Write(ctx SignalContext) {
 			_ = w.file.Close()
 		}
 		if err := os.MkdirAll(w.Dir, 0755); err != nil {
-			slog.Warn("signal context mkdir failed", "err", err, "dir", w.Dir)
+			// Audit-pattern fix 2026-05-10 (3rd paired-implementation):
+			// elevated from slog.Warn to slog.Error. Signal-context records
+			// feed retroactive forward-paper pattern-matching ("why did this
+			// signal win/lose?") — silent loss compromises a key analysis
+			// surface. Same shape as Stub.appendJournal (4154374) and
+			// BinanceLive.appendJournal (028e6a2) — the audit pattern's
+			// "always check the sibling" lesson manifests for the third time.
+			slog.Error("signal context mkdir failed — SIGNAL CONTEXT MAY BE LOST",
+				"err", err, "dir", w.Dir, "symbol", w.Symbol, "label", ctx.Label)
 			return
 		}
 		name := filepath.Join(w.Dir, fmt.Sprintf("%s-%s.jsonl", w.Symbol, month))
 		f, err := os.OpenFile(name, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 		if err != nil {
-			slog.Warn("signal context open failed", "err", err, "path", name)
+			slog.Error("signal context open failed — SIGNAL CONTEXT MAY BE LOST",
+				"err", err, "path", name, "symbol", w.Symbol, "label", ctx.Label)
 			return
 		}
 		w.file = f
@@ -122,11 +131,26 @@ func (w *SignalContextWriter) Write(ctx SignalContext) {
 	}
 	line, err := json.Marshal(ctx)
 	if err != nil {
+		// json.Marshal of a struct with primitive fields rarely fails, but if
+		// it does (NaN / Inf in a float field), silent return would lose the
+		// record without operator visibility. Surface it.
+		slog.Error("signal context marshal failed — SIGNAL CONTEXT LOST",
+			"err", err, "symbol", w.Symbol, "label", ctx.Label)
 		return
 	}
 	line = append(line, '\n')
 	if _, err := w.file.Write(line); err != nil {
-		slog.Warn("signal context write failed", "err", err)
+		// Mirrors Stub.appendJournal 4154374 + BinanceLive 028e6a2 fix:
+		// reset file handle on Write failure so the next call goes through
+		// open-or-create rather than persisting into "permanently broken"
+		// silent failure. Without this, every subsequent write to the same
+		// dead handle fails identically — the operator's signal-context
+		// stream is silently dead while the engine keeps emitting signals.
+		slog.Error("signal context write failed — SIGNAL CONTEXT MAY BE LOST",
+			"err", err, "symbol", w.Symbol, "label", ctx.Label)
+		_ = w.file.Close()
+		w.file = nil
+		w.month = ""
 	}
 }
 
