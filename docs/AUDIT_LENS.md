@@ -72,7 +72,7 @@ The lens works on YOUR OWN code, including code committed minutes ago. When
 documenting a path, claim, or verdict, **read the actual writer to verify
 rather than assuming from context.**
 
-Demonstrated twice on 2026-05-10:
+Demonstrated on 2026-05-10 (morning) and again on 2026-05-10/11 (T2a build):
 - During smoke-testing of `forward_paper_resolution.py`, the script fired
   spurious KILL on n=1 production data because Rule 1 had a redundant inline
   `single_sym>=50` check (one trade = 100% concentration always trips).
@@ -82,9 +82,134 @@ Demonstrated twice on 2026-05-10:
   when the actual writer puts it in `decision_snapshots/`. Caught when the
   documented path produced "no such file"; fixed in `d4eaf84` 12 minutes
   later.
+- During `stage_promotion.sh` local smoke, phase1 happily created a real
+  in-progress artifact in production `results/` — the locked decision-rule
+  doc `forward_paper_completion_review_decision_rule_2026-05-08.md` itself
+  contains the literal `Composite verdict: ALL_GREEN` inside its template
+  scaffold. The grep check matched the rule's DESCRIPTION of an ALL_GREEN
+  verdict rather than an actual verdict. Fixed by excluding
+  `*_decision_rule_*`, `*_template_*`, `*_verdict_*` from gate-doc candidates;
+  regression test pins the fix (`test_phase1_rule_doc_doesnt_false_positive`).
+- During `stage_promotion.sh` test debugging, `/bin/ls "$pattern"` with the
+  glob INSIDE a quoted variable expansion silently fails — `/bin/ls` doesn't
+  glob and the shell can't expand a glob that lives inside a quoted
+  expansion. Standardized to `find` across all multi-file lookups.
+- During same debugging, `grep "..." *.jsonl | python3` with `set -euo
+  pipefail` crashes the script when grep returns zero matches (legitimate
+  state for "no closes yet"). Rewrote to pure python with `pathlib.glob`,
+  which returns empty list cleanly on no-match.
 
 Pattern principle: **knowing the design is not the same as knowing the
 implementation.**
+
+---
+
+## Adjacent pattern: writer-equals-model (the gate-informationality lens)
+
+A distinct pathology from the main "missing-input → silent-success" pattern,
+discovered on 2026-05-10 during T1b cost-trajectory analysis:
+
+> **When the verdict-value WRITER is the same as the model the verdict is
+> meant to CHALLENGE, the gate is informationally null. PASS is guaranteed
+> by construction regardless of reality.**
+
+Different from missing-input → silent-success: the values ARE present, ARE
+parseable, ARE within threshold — but the writer's behavior makes "within
+threshold" mechanical rather than empirical.
+
+### Discovered instance (2026-05-10, T1b)
+
+Forward-paper Day 5, n=15 closed trades across live + 3 shadow cohorts.
+`scripts/realized_cost_trajectory.py` reports:
+
+    fee   = 10.00 bp  / modeled 10.0bp / kill 12.0bp  [PASS]
+    slip  = 5.00 bp   / modeled 5.0bp  / kill 25.0bp  [PASS]   (n_losers=15)
+
+Both gates PASS. But every single trade reports fee=10.00 / slip=5.00 with
+zero variance. Root cause: the Stub executor applies flat-rate `FeeBps` and
+`StopSlippageBps` deterministically per trade — paper-mode realized cost IS
+the modeled cost, not an empirical measurement. The CLAUDE.md PROMOTE
+criterion "Realized round-trip taker fees ≤ 12 bp" cannot fire during the
+entire 127-day forward-paper window because its writer guarantees compliance.
+
+### Why this lens is distinct
+
+The missing-input lens asks: "if the input is absent/empty/corrupt, where
+does the verdict default to?"
+
+The writer-equals-model lens asks: "what produces the verdict's values, and
+is its behavior independent of what the verdict is testing?"
+
+A gate can be CLEAN under the missing-input lens (no fail-open paths) and
+still be informationally null under the writer-equals-model lens (the writer
+guarantees PASS).
+
+### How to apply
+
+For each verdict gate in the codebase:
+
+1. **Identify the writer.** Trace each value the gate reads back to its
+   producer. Is it (a) a deterministic model output, (b) an empirical
+   observation, or (c) a derived metric (some of both)?
+
+2. **Compare to the threshold.** If the threshold tests a property that the
+   writer guarantees, the gate is informationally null in that phase.
+   Example: testing "realized fee ≤ 12 bp" when the writer's only behavior
+   is to write exactly 10 bp.
+
+3. **Identify the activation point.** When does the writer change such that
+   the gate becomes informational? For trade-engine, paper→Layer-2-testnet
+   flips the cost-stack writer from Stub (model) to BinanceLive (real
+   exchange). At STAGE_1 the same writer is on real money. Each transition
+   is an activation point for the gate.
+
+4. **Document the plumbing-vs-signal distinction.** During the null phase,
+   the gate IS still useful as a plumbing test — verifies the schema
+   populates, the reader parses, the threshold evaluates. Discovering a
+   broken cost-decomp path at STAGE_1 day would be much worse than
+   discovering it during paper. But "PASS" during paper does NOT mean "the
+   strategy's cost stack holds in production" — it means "the gate would
+   not have surfaced a divergence even if one existed."
+
+### Audit results across current gates
+
+Quick survey of the locked PROMOTE criteria for this pathology:
+
+| Gate | Writer during paper | Independent of model? | Information-bearing? |
+|---|---|:---:|:---:|
+| WR % live vs backtest | Real Binance prices → real signals → real outcomes | YES (writer is market, model is strategy) | YES |
+| Realized fee bps | Stub `FeeBps` flat-rate | NO | NO (during paper) |
+| Realized slip bps | Stub `StopSlippageBps` flat-rate | NO | NO (during paper) |
+| Per-symbol concentration | Real signal-attribution by symbol | YES | YES |
+| Trade count threshold | Pure count of real signals | YES | YES |
+| Calendar days threshold | Pure elapsed time | YES | YES |
+| BTC-HODL benchmark | Real BTC prices vs strategy NET | YES | YES |
+| Drift detector (Welch t-test) | Real outcome distribution vs backtest distribution | YES (samples differ by signal-firing-time even with shared cost model) | YES |
+
+Only the cost-stack gates carry the pathology in the current criterion set.
+After Layer 2 testnet activation, the cost-stack writer flips from Stub to
+real Binance and the gate becomes information-bearing.
+
+### When this lens fires
+
+The yield is sparse compared to the main missing-input lens — most gates in
+this codebase are correctly designed with independent writers. But when it
+DOES fire, the cost is high: an entire phase of "monitoring" might produce
+no signal, masquerading as steady-state PASS.
+
+Audit-time: enumerate writers for any new criterion set BEFORE locking the
+thresholds. If writer ≡ model, the threshold IS the model and the gate is
+a self-affirming tautology.
+
+### Cross-reference
+
+- `CLAUDE.md ## Forward-paper go/no-go criteria` — paper-mode caveat on
+  the cost-stack gates (added 2026-05-10 with explicit activation-point
+  language)
+- `gate_informationality_2026-05-10.md` (project memory) — detailed instance
+  + the 5 criterion-families audited for the same shape
+- `results/real_money_executor_architecture_decision_rule_2026-05-08.md` —
+  defines the Layer 2/3 activation gates that flip the writer
 
 ---
 
