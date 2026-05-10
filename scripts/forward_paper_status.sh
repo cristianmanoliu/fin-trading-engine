@@ -43,10 +43,21 @@ HODL_HELPER="$(cd "$(dirname "$0")" && pwd)/btc_hodl_benchmark.py"
 
 # --- runner ---
 remote_or_local() {
+    # The operator-supplied JOURNAL_DIR override is honored in BOTH local and
+    # remote modes. Previously the remote branch hardcoded $JOURNAL_DIR_DEFAULT,
+    # so an operator who set `JOURNAL_DIR=/var/log/paper-live/journal-archive`
+    # to inspect archived journals saw the override path in the "Source:"
+    # header but the aggregation actually ran against the default path —
+    # every gate the operator inspected was computed from the wrong source.
+    #
+    # printf %q safely escapes the path for shell interpolation so a path
+    # containing quotes or shell metacharacters cannot inject on either side.
+    local journal_safe
+    journal_safe=$(printf %q "$JOURNAL_DIR")
     if [[ "$VPS" == "local" ]]; then
-        bash -c "JOURNAL_DIR='$JOURNAL_DIR' bash -s" <<<"$1"
+        bash -c "JOURNAL_DIR=$journal_safe bash -s" <<<"$1"
     else
-        ssh "$VPS" "JOURNAL_DIR='$JOURNAL_DIR_DEFAULT' bash -s" <<<"$1"
+        ssh "$VPS" "JOURNAL_DIR=$journal_safe bash -s" <<<"$1"
     fi
 }
 
@@ -59,6 +70,16 @@ remote_or_local() {
 DATA=$(remote_or_local '
 set -euo pipefail
 shopt -s nullglob
+
+# JOURNAL_DIR existence check — fail loudly so operator typos do not silently
+# route to "(no data yet)" output that looks identical to legitimate fresh-
+# deploy state. A real fresh deploy still has the directory present (engines
+# create it on first boot); a missing directory means wrong path / wrong host
+# / typo. The local side detects the FATAL_NOT_A_DIR sentinel and exits 2.
+if [[ ! -d "$JOURNAL_DIR" ]]; then
+    printf "FATAL_NOT_A_DIR|%s\n" "$JOURNAL_DIR"
+    exit 0
+fi
 
 aggregate() {
     local label="$1"; shift
@@ -145,6 +166,24 @@ fi
 if [[ -z "$DATA" ]]; then
     echo "No data returned from $VPS — check connectivity and JOURNAL_DIR."
     exit 1
+fi
+
+# Operator-typo guard: distinguish "directory missing" from "(no data yet)".
+# The remote side emits FATAL_NOT_A_DIR|<path> when JOURNAL_DIR doesn't exist
+# on the source. Without this guard, a wrong path silently rendered as a
+# clean fresh-deploy state across all cohorts.
+if echo "$DATA" | grep -q "^FATAL_NOT_A_DIR|"; then
+    bad_path=$(echo "$DATA" | grep "^FATAL_NOT_A_DIR|" | head -1 | cut -d'|' -f2)
+    echo "⚠ JOURNAL_DIR not found on $VPS: $bad_path" >&2
+    echo "  This is operator misconfiguration — a legitimate fresh-deploy" >&2
+    echo "  still has the directory present (engines create it on boot)." >&2
+    echo "  Verify path and host:" >&2
+    if [[ "$VPS" == "local" ]]; then
+        echo "    ls -ld '$bad_path'" >&2
+    else
+        echo "    ssh $VPS 'ls -ld \"$bad_path\"'" >&2
+    fi
+    exit 2
 fi
 
 NOW=$(date -u +%s)
@@ -299,9 +338,19 @@ echo "$DATA" | grep "^STRATEGY|" | while IFS='|' read -r _ label first_ts last_t
         max_sym_name="—"
     fi
 
-    # Top 3 symbols by abs PnL
-    top_syms=$(echo "$sym_lines" | awk -F'|' '{print $3, $4}' | sort -k2 -gr | head -3 | \
-        awk '{printf "%s%s%s%+d  ", (NR>1?", ":""), $1, "@", $2}' || true)
+    # Top 3 symbols by absolute PnL (magnitude of contribution to net cumulative).
+    # Previously sort -gr ranked by SIGNED value, so in mixed cohorts (some
+    # symbols positive, some negative) the biggest contributors to net loss
+    # were silently hidden behind the highest-positive entries. This is
+    # inconsistent with the single_sym_pct gate above which uses abs PnL —
+    # the operator's "Top symbols" view must match the basis the verdict
+    # is computed on.
+    top_syms=$(echo "$sym_lines" | awk -F'|' '{
+        p = $4 + 0
+        abs = (p < 0) ? -p : p
+        printf "%.2f|%s|%+d\n", abs, $3, p
+    }' | sort -t'|' -k1 -gr | head -3 | \
+        awk -F'|' '{printf "%s%s@%s  ", (NR>1?", ":""), $2, $3}' || true)
 
     # Verdict per criterion
     pass_or_inprogress() {
@@ -386,6 +435,19 @@ echo "$DATA" | grep "^STRATEGY|" | while IFS='|' read -r _ label first_ts last_t
             IFS=$'\t' read -r _hodl_strategy_usd hodl_total_usd hodl_delta_usd \
                 hodl_n_windows hodl_kill_pairs hodl_kill hodl_warning <<<"$hodl_out"
             [[ -n "$hodl_warning" ]] && helper_warned=1
+            # Validate numeric fields. If the helper outputs garbage in any
+            # field (e.g., partial-write on disk-full, schema-bug regression
+            # producing "banana" instead of a number, downstream encoding
+            # error), the awk math at line ~345/352 would coerce the non-
+            # numeric to 0 and yield a misleading PASS verdict. Treat any
+            # malformed numeric the same as helper crash → PENDING. Same
+            # audit pattern: garbage input must not silently become success.
+            _is_num() { [[ "$1" =~ ^[+-]?[0-9]+(\.[0-9]+)?$ ]]; }
+            if ! _is_num "$hodl_total_usd" || ! _is_num "$hodl_delta_usd" \
+               || ! _is_num "$hodl_n_windows" || ! _is_num "$hodl_kill_pairs" \
+               || ! _is_num "$hodl_kill"; then
+                helper_failed=1
+            fi
         fi
     elif [[ ! -x "$HODL_HELPER" ]]; then
         # Missing helper itself is a config error worth surfacing — same
