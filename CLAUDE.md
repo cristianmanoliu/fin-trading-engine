@@ -262,8 +262,8 @@ P4-Combined backtests at WR 20.64% with 6:1 R:R. Breakeven WR ≈ 14.3% — only
 Note: the "≥150 trades AND ≥60 days" gate is internally inconsistent at the historical fleet trade rate of ~1.18 trades/day. 60 days yields ~70 trades on average; ~127 days are needed to hit 150 trades. Surfaced in kill-bar calibration 2026-05-07. The two thresholds collide; apply both literally (whichever comes second).
 
 - ≥150 live trades accumulated AND ≥60 calendar days net-positive in dollar terms
-- Realized round-trip taker fees ≤ 12 bp (vs 10 bp modeled — 20% slack). The journal cost-decomposition schema (commit `7939786`, 2026-05-07) writes `fee_usd`/`slip_usd`/`notional_usd` per close so this is now directly evaluable in `forward_paper_status.sh`.
-- Realized stop-side slippage ≤ 20 bp on the losing-trade subsample (vs 5-25 bp modeled range)
+- Realized round-trip taker fees ≤ 12 bp (vs 10 bp modeled — 20% slack). The journal cost-decomposition schema (commit `7939786`, 2026-05-07) writes `fee_usd`/`slip_usd`/`notional_usd` per close so this is directly evaluable in `forward_paper_status.sh` AND `realized_cost_trajectory.py`. **Paper-mode caveat (cost-trajectory run 2026-05-10):** during forward-paper the realized values are produced by the Stub executor's flat-rate `FeeBps`/`StopSlippageBps`, so the criterion is by-construction PASS at the modeled values (10.00 / 5.00) with zero variance. The plumbing works end-to-end (verified n=15), but the criterion only carries divergence signal when fills come from Layer 2 testnet (`--executor binance_live_testnet` writes real Binance fee/slip into the same schema) or STAGE_1+ real money. Treat the gate as PLUMBING-only during paper, INFORMATIONAL once Layer 2 lights up.
+- Realized stop-side slippage ≤ 20 bp on the losing-trade subsample (vs 5-25 bp modeled range). Same paper-mode caveat as above — Stub computes slip from `StopSlippageBps` only on losers; the value is the model.
 - Live PnL ≥ 60% of pro-rated honest-annual ($69k/yr × elapsed-fraction × 0.60)
 - Live PnL beats `BTC HODL with $32k notional` over the same window
 - No single symbol contributes >40% of cumulative live PnL
