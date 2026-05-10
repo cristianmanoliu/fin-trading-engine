@@ -165,6 +165,60 @@ class RealizedCostParserTest(unittest.TestCase):
             self.assertIn("pre-decomp", out)
             self.assertIn("Restart engines", out)
 
+    def test_handles_null_numeric_fields_without_crash(self):
+        # Journal entries with `"fee_usd": null` (or other non-numeric
+        # numeric fields) used to TypeError out of _parse_one and crash
+        # the script. The dual-sense audit pattern: a Python exit-1 from
+        # a crash routes to the wrong cron tier in any wrapper that maps
+        # non-zero → critical. _num() coerces defensively to 0.0.
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            # notional_usd>0 is required to pass the qualifier gate; the
+            # other numeric fields are explicitly null.
+            (d / "BTCUSDT-2026-05.jsonl").write_text(
+                json.dumps({"event": "open", "symbol": "BTCUSDT",
+                            "ts": "2026-05-08T12:00:00Z", "side": "LONG",
+                            "entry": 60000, "stop": 59000, "target": 66000})
+                + "\n"
+                + json.dumps({"event": "close", "symbol": "BTCUSDT",
+                              "ts": "2026-05-08T12:30:00Z", "side": "LONG",
+                              "entry": 60000, "exit": 59000,
+                              "outcome": "STOP", "pnl_usd": None,
+                              "fee_usd": None, "slip_usd": None,
+                              "notional_usd": 100000})
+                + "\n"
+            )
+            trades, stats = rc.load_journals(d)
+            self.assertEqual(len(trades), 1)
+            self.assertEqual(trades[0].fee_usd, 0.0)
+            self.assertEqual(trades[0].slip_usd, 0.0)
+            self.assertEqual(trades[0].pnl_usd, 0.0)
+            # Render must complete without raising.
+            out = rc.render(trades, None)
+            self.assertIn("BTCUSDT", out)
+
+    def test_handles_string_encoded_numerics(self):
+        # Defensive: string-encoded numerics (e.g. "100" instead of 100)
+        # also coerce cleanly.
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            (d / "BTCUSDT-2026-05.jsonl").write_text(
+                json.dumps({"event": "open", "symbol": "BTCUSDT",
+                            "ts": "2026-05-08T12:00:00Z", "side": "LONG",
+                            "entry": 60000, "stop": 59000, "target": 66000})
+                + "\n"
+                + json.dumps({"event": "close", "symbol": "BTCUSDT",
+                              "ts": "2026-05-08T12:30:00Z",
+                              "outcome": "STOP", "pnl_usd": "-1000",
+                              "fee_usd": "100", "slip_usd": "50",
+                              "notional_usd": "100000"})
+                + "\n"
+            )
+            trades, stats = rc.load_journals(d)
+            self.assertEqual(len(trades), 1)
+            self.assertEqual(trades[0].fee_usd, 100.0)
+            self.assertAlmostEqual(trades[0].fee_bps, 10.0, places=4)
+
     def test_render_flags_kill_threshold_breach(self):
         # 13bp fee > 12bp kill → ★fee>kill flag.
         with tempfile.TemporaryDirectory() as tmp:

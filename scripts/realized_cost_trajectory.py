@@ -119,6 +119,23 @@ def load_journals(journal_dir: Path) -> tuple[list[TradeCost], JournalStats]:
     return trades, stats
 
 
+def _num(v) -> float:
+    """Coerce a JSON value to float defensively. Returns 0.0 for None,
+    missing, or non-numeric values. Without this, a journal entry with
+    `"fee_usd": null` (or a string-encoded number) makes _parse_one
+    construct a TradeCost with None in a numeric field, and the next
+    fee_bps division crashes the script with TypeError. The Telegram-tier
+    dual sense of the audit pattern: a Python exit-1 crash gets routed
+    to the wrong cron tier when a wrapper maps "non-zero = critical."
+    """
+    if v is None:
+        return 0.0
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def _parse_one(path: Path, cohort: str, stats: JournalStats) -> list[TradeCost]:
     out: list[TradeCost] = []
     for line in path.read_text().splitlines():
@@ -133,7 +150,8 @@ def _parse_one(path: Path, cohort: str, stats: JournalStats) -> list[TradeCost]:
         stats.total_closes += 1
         # Skip pre-decomp closes (notional == 0 means cost columns weren't
         # written; they show 0 fee/slip and would falsely pull averages down).
-        if ev.get("notional_usd", 0) <= 0:
+        notional = _num(ev.get("notional_usd"))
+        if notional <= 0:
             stats.pre_decomp_skipped += 1
             continue
         if ev.get("outcome") == "PARTIAL":
@@ -145,10 +163,10 @@ def _parse_one(path: Path, cohort: str, stats: JournalStats) -> list[TradeCost]:
             ts=ev.get("ts", ""),
             symbol=ev.get("symbol", "?"),
             outcome=ev.get("outcome", "?"),
-            pnl_usd=ev.get("pnl_usd", 0.0),
-            fee_usd=ev.get("fee_usd", 0.0),
-            slip_usd=ev.get("slip_usd", 0.0),
-            notional_usd=ev.get("notional_usd", 0.0),
+            pnl_usd=_num(ev.get("pnl_usd")),
+            fee_usd=_num(ev.get("fee_usd")),
+            slip_usd=_num(ev.get("slip_usd")),
+            notional_usd=notional,
         ))
     return out
 
