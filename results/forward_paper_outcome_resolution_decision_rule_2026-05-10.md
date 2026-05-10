@@ -185,15 +185,26 @@ written rationale before either CONTINUE-ing or escalating.
 If no rule above fires, the verdict is CONTINUE. Wait. Re-evaluate
 weekly per the locked drift cadence.
 
-## Mechanical implementation (deferred)
+## Mechanical implementation (shipped 2026-05-10 evening)
 
-This rule is intentionally NOT yet wired into automation. Operator
-runs it manually at the natural cadence trigger points (day 30, 60,
-90, 150). When forward-paper crosses n=50 (the first point any rule
-beyond CONTINUE could fire), a future commit may add
-`scripts/forward_paper_resolution.py` that consumes the inputs above
-and emits the verdict mechanically. Current state is "rule locked, no
-script yet" — the lock itself is the constraint.
+`scripts/forward_paper_resolution.py` consumes the inputs above and
+emits the verdict mechanically. Wired into `scripts/weekly_audit.sh`
+as the 6th stage: every Sunday cron firing, the resolution verdict is
+computed and Telegram-routed per the tier mapping below.
+
+Lens-applied during design (no retrofit needed). Self-audit catch
+during development: the redundant inline `single_sym >= 50` check in
+Rule 1 was firing spurious KILL at n=1 (one trade = 100% of pnl =
+always trips). Removed; kill_protocol_check.py is the source of truth
+for the locked criteria and applies the n_trades floor internally.
+
+21 regression tests cover all 7 rules + 5 input-error shapes. Self-
+contained synthetic fixtures so the script is exercisable end-to-end
+before forward-paper data forces an ambiguous-outcome call.
+
+Production smoke against current state (n=1 paper, drift clean) emits
+CONTINUE / Rule 3 — exactly the verdict the locked rule prescribes
+for the n=9 emotional case the operator hit on 2026-05-10.
 
 ## Telegram tier mapping (for future automation)
 
