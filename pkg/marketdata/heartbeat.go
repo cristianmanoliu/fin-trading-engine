@@ -43,7 +43,15 @@ type Heartbeat struct {
 // escalated from Info to Warn. Operational scripts and log-based alerting
 // rely on this contract — changing it (or the > vs >= comparison) silently
 // alters which intervals trigger the post-deploy check's STALE warning.
-const heartbeatStaleThreshold = 90 * time.Second
+//
+// Aligned with the WS→REST fallback boundary (wsReadDeadline × wsMaxStalls =
+// 90s × 2 = 180s = DefaultStartupGrace). Before alignment, WARN could fire at
+// 90s while the engine was still on its first WS read stall — auto-clearing
+// noise during normal internal recovery. After alignment, WARN fires only
+// once the engine's own recovery window has elapsed, separating genuine feed
+// stalls from thin-liquidity quiet periods on low-volume altcoins (KAVAUSDT,
+// IMXUSDT, ROSEUSDT) where natural inter-trade gaps routinely cross 90s.
+const heartbeatStaleThreshold = 180 * time.Second
 
 // DefaultStartupGrace covers backfill (~30s) + WebSocket read deadline
 // (90s) × wsMaxStalls (2) = the boundary at which BinanceFutures.readLoop

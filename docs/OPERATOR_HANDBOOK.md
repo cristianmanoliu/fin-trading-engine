@@ -100,7 +100,7 @@ Tier prefixes (from `pkg/notify/telegram.go`):
 
 ### What fires WARN (investigate within 24h)
 
-- Heartbeat: stalled feed, no ticks received. Usually clears within 90s.
+- Heartbeat: stalled feed, no ticks received. Threshold is 180s (aligned with WS→REST fallback boundary). Real stalls clear within a few minutes once REST polling engages; persistent fires on low-volume altcoins (KAVAUSDT, IMXUSDT, ROSEUSDT) during quiet sessions are not actionable.
 - forward_paper_resolution: OPERATOR_REVIEW (3+ soft signals OR low trade rate OR slow-bleed)
 - forward_paper_resolution: INPUT_ERROR (exit 5) — missing/stale snapshot or drift history; investigate cron health, NOT strategy
 - weekly_audit: validate warnings (trailing-malformed-line tolerance)

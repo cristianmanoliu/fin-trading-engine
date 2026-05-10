@@ -186,13 +186,19 @@ func TestHeartbeat_SnapshotForLog_BoundaryStrictGreater(t *testing.T) {
 	}
 }
 
-func TestHeartbeat_StaleThresholdConstant_Is90s(t *testing.T) {
+func TestHeartbeat_StaleThresholdConstant_Is180s(t *testing.T) {
 	// Pin the constant against drift. scripts/post_deploy_check.sh uses
 	// the Warn line to identify stalled feeds; if this threshold changes
 	// without updating the audit logic, the check would either over-alert
 	// (threshold lowered) or under-alert (threshold raised).
-	if heartbeatStaleThreshold != 90*time.Second {
-		t.Errorf("heartbeatStaleThreshold = %v, want 90s", heartbeatStaleThreshold)
+	//
+	// 180s aligns with the WS→REST fallback boundary (wsReadDeadline ×
+	// wsMaxStalls = 90s × 2) so WARN fires only after the engine's own
+	// recovery window has elapsed — eliminating the alert-fatigue pattern
+	// observed on thin-liquidity altcoins (KAVAUSDT/IMXUSDT) where natural
+	// inter-trade gaps routinely cross 90s in quiet sessions.
+	if heartbeatStaleThreshold != 180*time.Second {
+		t.Errorf("heartbeatStaleThreshold = %v, want 180s", heartbeatStaleThreshold)
 	}
 }
 
