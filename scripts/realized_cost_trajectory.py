@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -172,10 +173,18 @@ def _parse_one(path: Path, cohort: str, stats: JournalStats) -> list[TradeCost]:
 
 
 def fetch_remote(vps: str, remote_dir: str) -> tuple[list[TradeCost], JournalStats]:
-    cmd = f'ssh {vps} "tar -cf - -C {remote_dir} . 2>/dev/null"'
+    # Avoid shell=True with f-string interpolation. The local side now uses
+    # list-arg subprocess (no local shell), and the remote command quotes
+    # `remote_dir` via shlex.quote so a path containing shell metacharacters
+    # (`;`, `$()`, `"`) cannot inject on the remote side either. ssh accepts
+    # the remote command as a single argument and runs it through the remote
+    # user's shell verbatim — quoting is the right defense.
+    remote_cmd = f"tar -cf - -C {shlex.quote(remote_dir)} . 2>/dev/null"
     with tempfile.TemporaryDirectory() as tmp:
-        result = subprocess.run(cmd, shell=True, check=True, capture_output=True)
-        subprocess.run(["tar", "-xf", "-", "-C", tmp], input=result.stdout, check=True)
+        result = subprocess.run(
+            ["ssh", vps, remote_cmd], check=True, capture_output=True)
+        subprocess.run(
+            ["tar", "-xf", "-", "-C", tmp], input=result.stdout, check=True)
         return load_journals(Path(tmp))
 
 
