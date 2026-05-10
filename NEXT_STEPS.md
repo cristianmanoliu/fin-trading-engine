@@ -1,46 +1,46 @@
-# NEXT_STEPS — Live trial, 2026-05-05 onward
+# NEXT_STEPS — P4-Combined forward-paper validation, 2026-05-05 onward
 
-> **⚠️ 2026-05-05 (later that day) — Option C falsified by fee modeling.** The "30-day quiet period" plan below is **invalid**. Fees + stop slippage applied to the same continuous sweep flip the result from +$6.77M to −$143.76M, with 0/57 symbols profitable. The "edge is real but per-symbol selection is mostly noise" framing in the original opening paragraph is wrong: the *gross* edge is real, the *net* edge is deeply negative. The advice in this document about not tinkering for 30 days does not apply — you don't have a working strategy to leave alone. See `results/option_c_57sym_realistic_2026-05-05.txt` and lesson #24. Recommended action: stop the live engines, then run `scripts/realistic_targetrr_sweep.sh` to formally close the parameter door before deciding whether to pivot or stop.
+> **Supersedes the 2026-05-05 morning version** (which planned a 30-day quiet period on the 11-engine Option C deploy). Option C was falsified at realistic costs the same evening (NET −$143.76M, 0/57 profitable — `results/option_c_targetrr_realistic_2026-05-05.txt`); the VPS migrated to P4-Combined on 2026-05-07. The old document is preserved in git history.
 
-The Phase 4 audit is done. 11 paper-live engines on `root@178.105.24.230` are running Option C (EMA9×EMA21) with `target_rr: 5.0`. The OOS persistence test (train 2020-2022 vs test 2023-2025) confirmed the **strategy edge is real but per-symbol selection is mostly noise** (Spearman ρ=+0.25, train top-16 lost 69% of its edge OOS). Forward expected PnL is roughly $1.5–2M over the next 28 months at $1k stake — not the +$6.77M 5y in-sample headline.
+## Where we are
 
-**The biggest risk now is over-tinkering.** This doc is the commitment you make to yourself to stop tinkering for 30 days.
+**Live:** 16 paper-trading engines on Hetzner VPS `root@178.105.24.230`. Each engine runs **P4-Combined** as the live strategy + 3 shadow strategies (alt5-15-336, alt5-15-504, bb20). Live config — pinned, do not change:
 
----
+```
+--signal-tf 4H --side-filter short --target-rr 6.0 --max-hold-hours 504
+--funding-csv-dir data/funding --fee-bps 10 --stop-slippage-bps 5
+```
 
-## Pre-commit actions (before walking away from the keyboard)
+EMA 9/21 hardcoded. Wick stop, 6:1 fixed RR.
 
-Five things that take 30 minutes total and you'll regret skipping:
+**Deployed symbols (`configs/symbols.yaml:deployed`, single source of truth):** 1000SHIBUSDT, 1INCHUSDT, ADAUSDT, APTUSDT, AVAXUSDT, BCHUSDT, DOTUSDT, ENSUSDT, ETCUSDT, FILUSDT, GRTUSDT, IMXUSDT, KAVAUSDT, ROSEUSDT, RUNEUSDT, XLMUSDT.
 
-- [ ] **Initialize git.** `git init && git add -A && git commit -m "Snapshot: 11-symbol Option C target_rr=5.0 deploy 2026-05-05"`. After tonight's session there's no version control — fix that. Future-you running A/B comparisons will need this baseline.
-- [ ] **Pick a stopping rule.** What cumulative paper-loss across the 11 engines triggers a halt + reconciliation? Suggested default: **−$80k cumulative** (~10× the worst expected single month). Write the number here once chosen: `STOPPING_RULE = $______`.
-- [ ] **Set up a daily journal backup.** `crontab -e` on local machine: `0 3 * * * rsync -aq root@178.105.24.230:/var/log/paper-live/journal/ ~/backups/journal/` Or equivalent. The journal data is your only forward-OOS dataset. If the VPS dies tonight, you lose everything.
-- [ ] **Verify Telegram alerts.** Check `/etc/paper-live/env` on VPS has `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`. Restart one engine and confirm a message arrives. If not, fix it now or you won't notice when an engine dies silently.
-- [ ] **Calendar reminders for Day 7, Day 30, Day 60.** 2026-05-12, 2026-06-04, 2026-07-04. Without these you'll either forget or check obsessively daily.
+**Forward-paper started:** 2026-05-05 20:06 UTC. Real-money allocation = ZERO.
 
----
+**Honest annual expectation (anchor here):** walk-forward CI [−$111k, +$372k], mean +$130k/yr. Pro-rated honest annual ≈ $69k/yr at slip=25bp. Bootstrap CI [+$42k, +$220k] is tighter but underestimates per-quarter regime variance — do not anchor to it.
 
-## The deal with yourself: no changes for 30 days
+## The dual-gate timeline
 
-For the next 30 calendar days you do NOT:
+The promotion criterion is **≥150 live trades AND ≥60 calendar days net-positive**. At the historical fleet rate of ~1.18 trades/day, these collide:
 
-- Change `target_rr`, `min_rr`, or any strategy parameter
-- Add or drop symbols from the deployed 11
-- Modify any code in `pkg/strategy/`, `pkg/execution/`, `pkg/aggregator/`
-- Run additional backtests "to check" something
-- "Tune" anything
+| Threshold | Hits at | Calendar date |
+|---|---|---|
+| 60 calendar days | Day 60 | **2026-07-04** |
+| 150 trades (~1.18/day) | Day 127 | **~2026-09-09** |
+| **Effective dual-gate (whichever-second)** | Day 127 | **~2026-09-09** |
 
-You DO:
-- Watch logs for engine deaths or error spam
-- Run weekly reconciliation (Day 7, 14, 21, 28)
-- Compute rolling WR / PnL stats
-- Read this document when you're tempted to break the rules above
+So the real "decision day" is roughly **2026-09-09**, not Day 60. Plan accordingly.
 
-The exception: if you find an actual *bug* (not a "could be better"), fix it. Bug fixes are fine. Optimization is not.
+Earliest STAGE_4 ($1k/trade) reach per pre-reg protocol: ~2027-03-09.
 
----
+## Calendar reminders to set NOW
 
-## Daily / Weekly / Monthly playbook
+- **2026-05-12 (Day 7)** — first weekly drift check (also auto-runs via launchd Sunday 09:00). Validate launchd job actually fired: `launchctl list | grep tradingengine` and check `results/drift_runs/launchd.{out,err}.log`.
+- **2026-06-04 (Day 30)** — first material checkpoint. Statistically thin (~35 trades at fleet rate) but meaningful PnL signal. Compare per-symbol live PnL vs backtest for the same window.
+- **2026-07-04 (Day 60)** — calendar gate satisfied. Trade-count gate still ~67 days out.
+- **~2026-09-09 (Day 127)** — projected dual-gate satisfaction. Real promotion decision; apply `results/real_money_protocol_decision_rule_2026-05-08.md` mechanically.
+
+## What to do during the wait
 
 ### Daily (1 minute)
 
@@ -48,116 +48,116 @@ The exception: if you find an actual *bug* (not a "could be better"), fix it. Bu
 ssh root@178.105.24.230 'systemctl status "paper-live@*.service" --no-pager | grep Active' | grep -v active
 ```
 
-Should produce **no output**. Any output means a service died — investigate that one engine, leave the rest alone.
+No output = healthy. Any output = investigate that one engine, leave the rest alone.
 
-### Weekly (Day 7, 14, 21, 28 — 10 minutes)
+### Weekly (Sundays — 10 min)
+
+The `weekly_audit.sh` wrapper runs automatically via launchd. Manually verify by reviewing:
 
 ```bash
-# 1. Reconciliation: live vs backtest expectation
-./scripts/paper_live_report.sh
+# Fresh drift check (decision-grade kill signal)
+./scripts/run_drift_check.sh
 
-# 2. Rolling stats per symbol — compute live WR over last 7 days
-ssh root@178.105.24.230 'for s in btcusdt ethusdt solusdt runeusdt linkusdt xlmusdt apeusdt enjusdt tiausdt zilusdt ldousdt; do
-  jq -s --arg sym "$s" "[.[] | select(.event==\"close\")] | length as \$n | [.[] | select(.outcome==\"TARGET\")] | length as \$w | \"\(\$sym): \(\$n) closes, \(\$w) wins, WR=\(\$w/\$n*100|tostring|.[0:5])%\"" /var/log/paper-live/journal/${s^^}-2026-*.jsonl 2>/dev/null
-done'
+# Forward-paper status snapshot
+./scripts/forward_paper_status.sh
 
-# 3. Aggregate PnL across 11 engines
-./scripts/paper_live_trades.sh root@178.105.24.230
+# VPS journal validation
+ssh root@178.105.24.230 './bin/journal_validate /var/log/paper-live/journal/'
 ```
 
-Look for:
-- **Per-symbol trade count drift** — backtest predicts ~2-5 trades/day/symbol. If ETH fired 50 trades in a week and BTC fired 2, something is wrong.
-- **WR aberration** — any single-symbol rolling 7-day WR below 8% or above 28% is a flag (mean ~17%, but small sample noise is huge in 7 days; alarm only on extremes).
-- **Aggregate PnL within ±2σ of expectation** — see Day 30 section below for what 2σ looks like.
+**Drift detector exit codes that matter:**
+- `0` clean — continue
+- `1` investigation-grade firing — investigate; if a second firing follows ≥7 days later, **kill**
+- `2` insufficient data — keep waiting
+- `4` auto-kill candidate — already two firings 7+ days apart; halt the fleet
 
-### Day 30 — first real decision point (2026-06-04)
+### Monthly (Day 30, 60, 90 — 30 min)
 
-This is the first checkpoint where you decide anything. Three branches:
+Read `results/forward_paper_snapshots/<latest>.txt`. Apply the decision matrix in CLAUDE.md "Day 30" / "Day 60" sections. Don't make symbol-rotation decisions before Day 60.
 
-| 30-day live PnL | Interpretation | Action |
-|----|----|----|
-| **+$30k to +$120k** | In expected range (OOS extrapolation: ~$50k/month central, σ ~ $50k) | Continue. Schedule Day 60 review. |
-| **−$50k to +$30k** | Below expectation but within noise band | Continue. Schedule Day 60 — extended noise window is normal for trend strategies. |
-| **−$100k to −$50k** | Material underperformance | Run full reconciliation. Compare per-symbol live PnL vs backtest *for the same 30-day window*. If any single symbol is the dominant negative driver (e.g., −$60k from one), check for live-data bug. |
-| **Below −$100k** | Hit stopping rule. **Halt**. | `ssh root@178.105.24.230 'systemctl stop "paper-live@*.service"'`. Then investigate before resuming. |
-| **Above +$200k** | Suspiciously good | Verify it's not a single force-close win or an order-handling bug. Don't celebrate yet. |
+## Active operator work (does NOT violate "no tinkering")
 
-### Day 60 — second checkpoint (2026-07-04)
+These are the only **forward-motion** items permitted during forward-paper. Do them in order; each unblocks the next.
 
-By now you have 60 days of fresh OOS data — completely outside the 2020-2025 backtest window. This is when symbol-rotation decisions become defensible.
+### 1. Layer 2 testnet kickoff (this week)
 
-If 60-day cumulative PnL is positive and per-symbol WRs look healthy:
-- Consider dropping the 3 deployed non-OOS-validated names (XLMUSDT, TIAUSDT, ZILUSDT) if their 60-day WR is < 16%.
-- Consider adding HBARUSDT, BNBUSDT, IOTAUSDT, GRTUSDT, TRXUSDT (persistent winners not yet deployed). REST budget allows up to 16 engines; you have headroom.
-- **Do not rotate based on rank within the 60-day window** — that re-introduces selection bias. Use absolute thresholds instead (e.g., "drop any symbol with WR < 15% AND PnL < 0 over 60 days").
+Plumbing complete; needs operator action:
 
-### Day 90 — strategic checkpoint (2026-08-03)
+1. Generate testnet credentials at https://testnet.binancefuture.com (separate from mainnet keys).
+2. Set `BINANCE_API_KEY` / `BINANCE_API_SECRET` env vars.
+3. Run a single symbol via `--executor binance_live_testnet`. Confirm round-trip fills land in journal.
+4. Verify with the testnet integration tests in `pkg/execution/binance_live_test.go`.
 
-Three months of live OOS data. You can now meaningfully ask:
-- Does aggregate PnL match backtest extrapolation? (If yes, the strategy is real. If 30-50% off, there's drag — slippage, fees, regime drift.)
-- Is the win rate stable? Plot rolling 30-day WR. Stationary = good. Declining = regime change.
-- Are any symbols clear outliers in either direction?
+Why now: Layer 2 must precede Layer 3, and Layer 3 needs 7 days of observation. Don't be on the critical path when forward-paper resolves.
 
-If everything looks healthy, this is where you can start thinking about real-money — but only after a separate audit (see "real-money threshold" below).
+### 2. Layer 3 shadow parity (target start ~2026-08-25, before Day 127)
 
----
+Run TeeExecutor (stub primary + testnet shadow) for ≥7 days via `--layer3-binance-testnet-journal-dir DIR`, then:
 
-## What you should genuinely worry about
+```bash
+./scripts/layer3_verdict.sh --stub-dir <stub> --testnet-dir DIR
+```
 
-**1. Trend-following strategies fail in ranging markets.** 2020-2025 was extremely trendy in crypto. If 2026 is sideways, the strategy will print red consistently — and that is *expected behavior*, not a bug. Mentally separate "lost money this month from a bug" from "lost money this month from being a trend follower in a range." If you're not prepared to weather a 3-6 month drawdown without intervention, you're not running a trend-following strategy — you're running a slot machine and tinkering with it.
+Exit codes: 0 PASS / 1 THRESHOLD / 2 SIGNAL_DIV / 3 INPUT_ERROR / 4 INSUFFICIENT_DURATION. PASS is required to enter STAGE_1. Use `--skip-min-days` for a dry-run before the real 7-day window.
 
-**2. Win rate is the leading indicator, not PnL.** PnL is noisy at 30-day timescales (5R wins cluster temporally). Rolling WR is much more stable. **If WR drops from 17% to 15% and stays there for two weeks, the edge is gone.** Build a script that computes rolling WR weekly. Most informative monitoring you can write.
+### 3. Continued audit-fix sweep (ongoing)
 
-**3. The aggregate edge could decay.** Crypto trend-following has a natural lifecycle as markets mature and more participants run similar strategies. The 5y window we backtested is the past; the future may be different. After 90 days of OOS, you'll have signal on whether decay is happening.
+The 2026-05-10 session closed 9 fail-open / silent-failure fixes across 5 layers. Cumulative: 57 of this shape across 6 sessions. The "by the 3rd instance the lens is predictive" observation suggests more remain — but the critical-path audit is complete. Treat new findings as opportunistic, not scheduled.
 
-**4. Per-symbol selection might still be wrong.** OOS test showed XLMUSDT looked great in train (+$468k) and crashed in test (−$39k). Some currently-deployed symbols may behave the same way in the next 28 months. The decision to keep them is based on the principle of "diversification beats concentration in the presence of weak persistence." If the 11-symbol portfolio loses while individual non-deployed symbols win, that principle was wrong for this regime.
+## Things to NOT do (the deal with yourself)
 
----
+For the next ~120 days you do NOT:
 
-## Real-money threshold (much later — 90+ days minimum)
+- Change `target_rr`, `signal_tf`, `side-filter`, `max-hold-hours`, `fee-bps`, or `stop-slippage-bps`
+- Add or remove symbols from `configs/symbols.yaml:deployed` (currently 16; REST budget caps near 16-20 anyway at 10s aggTrade poll × 20 weight)
+- Modify code in `pkg/strategy/`, `pkg/execution/`, or `pkg/aggregator/`
+- Run additional sweeps "to check" something — every cell consumes statistical degrees of freedom already spent
+- Promote Strategy A pre-emptively from shadow data (A vs B is a forward-paper question; backtest difference was inside the noise floor)
+- Read into wins/losses inside the 60-day power floor (natural shorts-only WR is 20.6%, σ is enormous at low n)
 
-Paper trading is psychologically and practically much easier than real money. If you ever consider real money, requires another full audit pass on:
+You DO:
+- Watch logs for engine deaths or error spam
+- Run weekly reconciliation (auto via launchd)
+- Layer 2 → Layer 3 plumbing per above
+- Bug fixes (explicitly allowed — actual bugs only, not "could be better")
 
-- **Slippage** — paper engine assumes exact stop/target fills. Real orders gap through stops on volatile bars; actual loss can be 1.5-3× the stake. This alone can flip a thin edge.
-- **Funding rates** — Binance perp futures charge ~0.01-0.1% every 8 hours on held positions. For 5R targets sometimes held 1-3 days, this is a material drag.
-- **Fees (CORRECTED 2026-05-05 — was previously off by ~3000×).** 0.04% maker / 0.04% taker = 0.08% round-trip on Binance Futures, **applied to position notional, not stake**. Position notional = `stake / stop_dist`, which at p50 BTC stop_dist of 0.18% is `$1000 / 0.0018 = $555k`. Round-trip fee = `0.08% × $555k = $444 per trade`. Across 392k trades over 5y = **~$99M fee drag** at p50 BTC stop_dist; even higher across faster-moving alts. The fee/slippage code was added to the backtest on 2026-05-05 (`Stub.FeeBps`, `Stub.StopSlippageBps`) and the resulting net PnL on the same 57-symbol continuous sweep is −$143.76M. The earlier "$0.80 per trade × 392k = $31k drag" estimate that lived here was the load-bearing analytical error that allowed the strategy to look real.
-- **Order rejection / partial fills** — paper engine has 100% fill rate; real markets don't.
+## Stopping rules
 
-Conservative real-money plan when ready: **start at 10% of paper stake** ($100/trade), monitor for 30 days, then scale up if reconciliation matches paper performance.
+**Decision-grade (auto-kill):**
+- Drift detector exit code `4` (two firings ≥7 days apart) → `ssh root@178.105.24.230 'systemctl stop "paper-live@*.service"'`, then investigate
+- Drift detector exit code `1` + a separate threshold criterion firing concurrently → same
 
----
+**Investigation triggers (run drift detector to confirm before acting):**
+- First 60 days net-negative
+- Realized stop-side slippage > 25bp (note: A2 sweep 2026-05-07 puts the actual breakeven cliff at ~81bp, linear in between)
+- Realized WR < 14% over ≥150 trades (below breakeven; rarely fires under any scenario)
+- Single symbol > 40% of cumulative live PnL (calibration: fires in 41% of healthy windows — high false-positive)
+- Two consecutive 30-day windows underperform BTC-HODL benchmark by >$5k each
 
-## Operational gotcha — three lists must stay in sync
+The full operator scenarios — drift fires, kill protocol, recovery drift, real-money emergency kill — are in `docs/OPERATOR_HANDBOOK.md`. Use it, not this doc, when something is on fire.
 
-If/when you rotate symbols, **all three of these lists must be updated together** or the watchdog will spam Telegram with false alerts:
+## Pre-registered protocols (locked, mechanical application when forward-paper resolves)
 
-1. `deploy/redeploy.sh` — the `systemctl restart paper-live@<symbols>` line. Determines which engines actually run.
-2. `scripts/paper_live_watchdog.sh` line 11 — the `SYMBOLS=(...)` array. Determines which symbols the watchdog checks for liveness.
-3. `configs/<symbol>.yaml` — must exist and have `target_rr: 5.0`, `ema_mode: true`, `stake_usd: 1000` for any symbol you add to lists 1-2.
+- `results/real_money_protocol_decision_rule_2026-05-08.md` — STAGE_1→4 sizing
+- `results/real_money_executor_architecture_decision_rule_2026-05-08.md` — Layer 2/3 gate definitions
+- `results/auto_kill_execution_decision_rule_2026-05-08.md` — Path C close-all
+- `results/INDEX.md` — full pre-reg catalog (53 decision rules + verdicts + syntheses)
 
-A mismatch between (1) and (2) is what caused the false-alarm storm on 2026-05-05 — the watchdog had the original 8-symbol hardcoded list (`bnb/xrp/doge/ltc/...`) while `redeploy.sh` had been expanded to 12 (and then 11). It alerted every 10 min for ~5h overnight on the 4 "deployed-by-watchdog-not-by-redeploy" symbols. Future-you, save yourself the panic.
+When forward-paper resolves on ~2026-09-09: read the pre-reg files. Promotion or kill is a mechanical rule application, no design choices remaining.
 
-## Things on the roadmap but NOT urgent
+## Roadmap (NOT urgent — do not let these sneak into the quiet period)
 
-These don't need to happen in the 30-day quiet period. List them here so they're not forgotten.
+- **Regime detector** — cross-asset realized vol, BTC dominance, etc.; pause engines in ranging conditions. Aspirational.
+- **Per-symbol stopping rule built into the engine** — auto-halt a symbol if 30-day rolling PnL < threshold. Aspirational.
+- **Add a few more symbols** (HBARUSDT, BNBUSDT, IOTAUSDT — GRTUSDT already deployed; TRXUSDT excluded as persistent OOS loser per `configs/symbols.yaml:persistent_losers`) up to the REST cap of ~16-20, **only after Day 60 if performance looks healthy**. Use absolute thresholds for any rotation, never within-window rank.
 
-**From code review (none affect PnL):**
-- `pkg/strategy/entry.go` — `MinRR` filter is silently ignored in EMA mode. Apply it for consistency with absorption/breakout paths.
-- `pkg/aggregator/aggregator.go` — at 4H boundaries, 5m candle is processed before 4H bias updates (deflationary, not inflationary; minor).
+**Code hygiene (non-PnL):**
+- `pkg/strategy/entry.go` — `MinRR` filter silently ignored in EMA mode. Apply for consistency.
+- `pkg/aggregator/aggregator.go` — at 4H boundaries, 5m candle is processed before 4H bias updates (deflationary, minor).
 - `pkg/execution/stub.go:261` — journal close timestamp uses `time.Now()` instead of tick timestamp. Cosmetic for live; backtest unaffected.
-
-**From CLAUDE.md known issues:**
-- `go.mod` declares `go 1.26.2` (invalid). Fix to current stable when you're next in the file.
 - `CSVReplay` double-close (defer + main.go defer). Harmless but ugly.
-- `go mod tidy` to clean up indirect deps.
-
-**Strategic / future:**
-- Add 3-5 more symbols (HBARUSDT, BNBUSDT, IOTAUSDT, GRTUSDT, TRXUSDT) up to 16-engine REST limit, after Day 60 if live performance looks good.
-- Build a regime detector (cross-asset realized vol, BTC dominance, etc.) that pauses engines in ranging conditions.
-- Per-symbol stopping rule built into the engine itself (auto-halt a symbol if 30-day rolling PnL < threshold).
-
----
+- `go mod tidy`.
 
 ## The single most important sentence in this document
 
-**The session you just ran was the work. The next 30 days are a different skill: patience. Set a calendar reminder, write down your stopping rule, close the laptop, and don't open this repo until 2026-05-12 unless something is on fire.**
+**The work this period is patience and protocol adherence. The real test is not whether the strategy is profitable — it's whether you can leave a working hypothesis alone for ~120 days while the data accumulates. If you find yourself reading this doc looking for permission to tinker, the answer is no.**
