@@ -1,13 +1,13 @@
 # results/ index — decision rules, verdicts, and operational pre-registrations
 
-57 markdown artifacts (including INDEX) as of 2026-05-10, organized by lifecycle stage and category.
+58 markdown artifacts (including INDEX) as of 2026-05-10, organized by lifecycle stage and category.
 
 **Three artifact types:**
 - `*_decision_rule_*.md` — pre-registered: rule LOCKED before data is observed
 - `*_verdict_*.md` — mechanical: rule applied to data, produces ACCEPT/REJECT
 - Synthesis / state docs (no _rule / _verdict suffix) — narrative or operational
 
-The asymmetric ratio (rules → verdicts) reflects today's heavy pre-registration phase: 10 operational pre-regs locked on 2026-05-08 + 2 pre-regs locked on 2026-05-10 (LIMBO outcome resolution + milestone-2 launch runbook) await activation under future operational events.
+The asymmetric ratio (rules → verdicts) reflects today's heavy pre-registration phase: 10 operational pre-regs locked on 2026-05-08 + 3 pre-regs locked on 2026-05-10 (LIMBO outcome resolution + milestone-2 launch runbook + PROMOTE-closure template) await activation under future operational events.
 
 ---
 
@@ -93,6 +93,7 @@ The 4-stage protocol: $100 → $300 → $500 → $1000. Each promotion is a high
 - **`real_money_protocol_decision_rule_2026-05-08.md`** — stage criteria (the master rule); locked kill criteria (drift firing, slip>30bp, 3-consecutive-net-loss-days, single-sym>50%, 20% drawdown, unrecoverable error)
 - **`real_money_executor_architecture_decision_rule_2026-05-08.md`** — design for the executor that replaces Stub at STAGE_1; 5-component decomposition (BinanceLive / OrderRouter / PositionReconciler / SafetyGates / KillSwitch); F1-F5 failure-mode taxonomy; three-layer testing strategy
 - **`stage_promotion_runbook_decision_rule_2026-05-08.md`** — six-phase execution sequence per promotion; per-stage parameter table; rollback path
+- **`promote_closure_template_decision_rule_2026-05-10.md`** — 11-section closure artifact written at each PROMOTE moment (paper→STAGE_1 + each intra-real-money stage transition); symmetric to `postmortem_template` on the KILL side; section 5 forces explicit counterfactual / non-promote-evidence audit to defeat success-bias; section 6 risk-acceptance ledger requires operator's explicit accept of each known unmodeled risk at the new stake size; 7-day completion window
 
 ### Stage 4 — Kill / pause / postmortem
 
@@ -114,7 +115,7 @@ Pre-registered now; activates when current milestone closes.
 ## Index by category (alternative view)
 
 ### Locked decision rules (rule pre-registered, awaits data)
-29 files. The pre-registration backbone of the project. (+1 telegram_alert_design 2026-05-08 + 1 forward_paper_outcome_resolution 2026-05-10 + 1 milestone2_runbook 2026-05-10 since the 2026-05-08 snapshot.)
+30 files. The pre-registration backbone of the project. (+1 telegram_alert_design 2026-05-08 + 1 forward_paper_outcome_resolution 2026-05-10 + 1 milestone2_runbook 2026-05-10 + 1 promote_closure_template 2026-05-10 since the 2026-05-08 snapshot.)
 
 ### Verdicts (rule applied to data)
 22 files. Each verdict mechanically applies its corresponding decision rule to specific data.
@@ -136,11 +137,12 @@ Pre-registered now; activates when current milestone closes.
 - **HOW to learn (after kill):** postmortem_template
 - **WHAT to research (next):** strategy_backlog_milestone2
 
-### Locked 2026-05-10 (LIMBO resolution + milestone-2 launch prep)
-2 pre-regs locked, both filling rule→tool gaps before the events they govern:
+### Locked 2026-05-10 (LIMBO resolution + milestone-2 launch prep + PROMOTE-closure)
+3 pre-regs locked, all filling rule→tool gaps before the events they govern:
 
 - **HOW to resolve (calendar gate met, trade gate not):** forward_paper_outcome_resolution — five-verdict tree (CONTINUE / WATCH / PROMOTE / KILL / OPERATOR_REVIEW) implemented mechanically by `scripts/forward_paper_resolution.py`, wired into `weekly_audit.sh` stage 6
 - **HOW to execute (milestone-2 candidate sweep):** milestone2_runbook — locked A2 → A1 → C1 → B2 → D1 sequence with family-wise α=0.01, per-phase verdict template, mid-sequence rollback paths. Implemented mechanically by `scripts/milestone2_launch.sh` with trigger gate (refuses to run until paper→STAGE_1 promotion or kill artifact present)
+- **HOW to document (PROMOTE moment):** promote_closure_template — 11-section closure artifact for every stage promotion (paper→STAGE_1 + each intra-real-money transition). Symmetric to postmortem_template on the kill side. The 6th section (risk-acceptance ledger) makes the operator explicitly sign for each known unmodeled risk at the new stake size; the 5th (counterfactual) forces explicit "evidence against promotion" review to defeat success-bias.
 
 ---
 
