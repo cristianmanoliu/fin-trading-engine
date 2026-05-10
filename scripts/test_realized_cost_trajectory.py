@@ -248,6 +248,27 @@ class RealizedCostCLITest(unittest.TestCase):
         self.assertEqual(code, 3,
             f"expected exit 3 (input error), got {code}\n{out}")
 
+    def test_cohort_filter_no_match_exits_2(self):
+        # Operator typo'd --cohort to a non-existent label. Previously the
+        # main exit-code check ran against the UNFILTERED trades list, so
+        # the script printed "(no qualifying trades)" but exited 0 = PASS.
+        # The fix moves filtering to main so exit 2 reflects the filtered
+        # state.
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            write_journal(d, "BTCUSDT", "2026-05", [
+                {"outcome": "STOP", "pnl_usd": -1000, "fee_usd": 100,
+                 "slip_usd": 50, "notional_usd": 100000},
+            ])
+            code, out = run_cli([
+                "--live-source", "local", "--live-dir", str(d),
+                "--cohort", "shadow/typoed-name",
+            ])
+            self.assertEqual(code, 2,
+                f"expected exit 2 (filter excluded all trades), got {code}\n{out}")
+            self.assertIn("matched 0", out)
+            self.assertIn("available cohorts", out)
+
     def test_valid_local_dir_exits_0(self):
         with tempfile.TemporaryDirectory() as tmp:
             d = Path(tmp)

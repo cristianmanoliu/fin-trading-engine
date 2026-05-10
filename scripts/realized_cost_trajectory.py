@@ -274,8 +274,23 @@ def main() -> int:
         # Still print a minimal summary block so the operator sees the
         # script ran; the stderr warning routes Telegram tier separately.
 
-    print(render(trades, args.cohort), end="")
-    return 0 if trades else 2
+    # Cohort filter is applied here (not just inside render) so the exit
+    # code reflects whether the FILTERED set has data. Previously a typo'd
+    # --cohort exited 0 because main checked the unfiltered list — silent
+    # PASS on operator misconfiguration.
+    filtered = trades
+    if args.cohort:
+        filtered = [t for t in trades if t.cohort == args.cohort]
+        if not filtered and trades:
+            cohorts_seen = sorted({t.cohort for t in trades})
+            print(
+                f"cohort {args.cohort!r} matched 0 of {len(trades)} "
+                f"qualifying trades; available cohorts: "
+                f"{', '.join(cohorts_seen)}",
+                file=sys.stderr)
+
+    print(render(filtered, args.cohort), end="")
+    return 0 if filtered else 2
 
 
 if __name__ == "__main__":
