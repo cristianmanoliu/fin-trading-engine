@@ -53,11 +53,13 @@ If you receive **NO Telegram alerts** Sunday 09:00–10:00, the system is health
 If you want the Sunday read anyway:
 
 ```bash
-cat results/forward_paper_snapshots/$(date -u +%Y-%m-%d).txt             # forward_paper_status snapshot
-cat results/forward_paper_snapshots/$(date -u +%Y-%m-%d)-resolution.txt  # LIMBO verdict
+cat results/forward_paper_snapshots/$(date -u +%Y-%m-%d).txt        # forward_paper_status snapshot (stage 2)
+cat results/decision_snapshots/$(date -u +%Y-%m-%d)-resolution.txt  # LIMBO verdict (stage 6)
+cat results/decision_snapshots/$(date -u +%Y-%m-%d)-kill.txt        # kill_protocol_check (stage 4)
+cat results/decision_snapshots/$(date -u +%Y-%m-%d)-promote.txt     # stage_promotion_check (stage 5)
 ```
 
-The first is the operator dashboard; the second is the mechanical 5-verdict resolution. Both are sibling-paired by `weekly_audit.sh` so a fresh-deploy week without resolution.txt = stage 6 didn't run.
+The first is the operator dashboard; the next three are decision-grade verdicts written by the cron's stages 4–6. A weekly fire that produces `-kill.txt` + `-promote.txt` but **no `-resolution.txt`** means stage 6 (LIMBO) did NOT run — investigate.
 
 For trends across snapshots:
 
