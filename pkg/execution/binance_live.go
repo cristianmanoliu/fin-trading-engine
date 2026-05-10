@@ -1628,7 +1628,26 @@ func (g *SafetyGates) CheckOrder(c GateContext) error {
 // should happen).
 type KillSwitch struct {
 	Router *OrderRouter
+
+	// RateLimitBackoff is the per-position retry delay when SendOrder
+	// returns RejectCode=RATE_LIMIT (HTTP 418/429). Without retry, a 16-
+	// position kill batch that hits the rate limit on position 5 would
+	// cascade to all remaining 12 positions failing as the rate-limit
+	// window persists — a partial close in a panic kill is worst-case
+	// dangerous. With one retry per position, each gets up to 60s of
+	// natural rate-limit window recovery before recording FAILED.
+	//
+	// Zero falls back to defaultKillRateLimitBackoff (60s). Tests
+	// override to a sub-second value to keep fast.
+	RateLimitBackoff time.Duration
 }
+
+// defaultKillRateLimitBackoff is the production-default per-position retry
+// delay on RATE_LIMIT. 60s aligns with Binance USDT-M Futures' 1-minute
+// rate-limit window — long enough that the second attempt has a fresh
+// budget, short enough that a 16-symbol kill completes in worst-case 16m
+// rather than failing 12 positions instantly.
+const defaultKillRateLimitBackoff = 60 * time.Second
 
 // ClosePosition describes a position that KillAll needs to close. Decoupled
 // from PositionReconciler's internal type so KillAll is testable without a
@@ -1673,6 +1692,11 @@ func (k *KillSwitch) KillAll(ctx context.Context, positions []ClosePosition, rea
 		return result, fmt.Errorf("KillSwitch not configured: Router nil")
 	}
 
+	backoff := k.RateLimitBackoff
+	if backoff == 0 {
+		backoff = defaultKillRateLimitBackoff
+	}
+
 	failureCount := 0
 	for _, pos := range positions {
 		intent := OrderIntent{
@@ -1683,6 +1707,32 @@ func (k *KillSwitch) KillAll(ctx context.Context, positions []ClosePosition, rea
 			ReduceOnly: true, // CLOSE — mapToExchangeSide flips the direction
 		}
 		orderResult, err := k.Router.SendOrder(ctx, intent)
+		// Single retry on RATE_LIMIT. Without this, a 16-symbol kill batch
+		// that hits 418/429 on position 5 cascades to all 12 remaining
+		// positions failing as the rate-limit window persists — partial
+		// close in a panic kill is worst-case dangerous. The retry adds
+		// up to backoff per affected position; the operator's idempotent
+		// re-run path is preserved as a backstop for true outages.
+		if err != nil && orderResult.RejectCode == "RATE_LIMIT" {
+			slog.Warn("kill-switch rate-limited, sleeping before retry",
+				"symbol", pos.Symbol, "backoff", backoff)
+			select {
+			case <-ctx.Done():
+				// Operator canceled (e.g., timeout on the kill_switch CLI).
+				// Record the in-progress backoff state so the operator sees
+				// what happened rather than treating it as a generic FAILED.
+				result.Outcomes = append(result.Outcomes, KillOutcome{
+					Symbol:    pos.Symbol,
+					Status:    "FAILED",
+					Requested: pos.Quantity,
+					Error:     fmt.Sprintf("rate-limited; ctx canceled during %v backoff", backoff),
+				})
+				failureCount++
+				continue
+			case <-time.After(backoff):
+			}
+			orderResult, err = k.Router.SendOrder(ctx, intent)
+		}
 		outcome := KillOutcome{
 			Symbol:    pos.Symbol,
 			Requested: pos.Quantity,

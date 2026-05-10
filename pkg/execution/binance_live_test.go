@@ -1998,6 +1998,109 @@ func TestKillSwitch_KillAll_FailureContinues_AggregatesErrors(t *testing.T) {
 	}
 }
 
+func TestKillSwitch_KillAll_RateLimitRetriesOnceAndSucceeds(t *testing.T) {
+	// Audit-pattern regression: previously a 418/429 mid-batch cascaded
+	// because the rate-limit window persists for ~60s while subsequent
+	// SendOrder calls fired immediately. With the retry, a single 429
+	// followed by a 200 records the position as CLOSED rather than FAILED.
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if calls == 1 {
+			w.WriteHeader(429)
+			w.Write([]byte(`{"code":-1003,"msg":"too many requests"}`))
+			return
+		}
+		w.Write([]byte(`{"orderId":2,"status":"FILLED","executedQty":"0.5","avgPrice":"50000"}`))
+	}))
+	defer srv.Close()
+	r := &OrderRouter{APIBaseURL: srv.URL, APIKey: "k", APISecret: "s", HTTPClient: srv.Client()}
+	// Test backoff to 1ms so the test stays fast; production default is 60s.
+	k := &KillSwitch{Router: r, RateLimitBackoff: time.Millisecond}
+
+	res, err := k.KillAll(context.Background(),
+		[]ClosePosition{{Symbol: "BTCUSDT", Side: models.Long, Quantity: 0.5}},
+		"rate-limit-retry test")
+	if err != nil {
+		t.Fatalf("expected nil err after successful retry; got %v", err)
+	}
+	if calls != 2 {
+		t.Errorf("expected 2 SendOrder calls (1 rate-limited + 1 retry), got %d", calls)
+	}
+	if len(res.Outcomes) != 1 || res.Outcomes[0].Status != "CLOSED" {
+		t.Errorf("expected CLOSED after retry; got %+v", res.Outcomes)
+	}
+}
+
+func TestKillSwitch_KillAll_RateLimitRetryStillFails_RecordsAsFAILED(t *testing.T) {
+	// Sustained rate limit: both attempts return 429. Single retry, then
+	// FAILED — operator's idempotent re-run path is the backstop.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(429)
+		w.Write([]byte(`{"code":-1003,"msg":"too many requests"}`))
+	}))
+	defer srv.Close()
+	r := &OrderRouter{APIBaseURL: srv.URL, APIKey: "k", APISecret: "s", HTTPClient: srv.Client()}
+	k := &KillSwitch{Router: r, RateLimitBackoff: time.Millisecond}
+
+	res, err := k.KillAll(context.Background(),
+		[]ClosePosition{{Symbol: "BTCUSDT", Side: models.Long, Quantity: 0.5}},
+		"rate-limit-sustained test")
+	if err == nil {
+		t.Fatal("expected aggregated err on sustained rate limit")
+	}
+	if len(res.Outcomes) != 1 || res.Outcomes[0].Status != "FAILED" {
+		t.Errorf("expected FAILED after retry-still-fails; got %+v", res.Outcomes)
+	}
+	if !strings.Contains(strings.ToLower(res.Outcomes[0].Error), "rate") {
+		t.Errorf("FAILED outcome should preserve rate-limit error message; got %q",
+			res.Outcomes[0].Error)
+	}
+}
+
+func TestKillSwitch_KillAll_RateLimit_DoesNotCascadeToOtherPositions(t *testing.T) {
+	// The original bug: rate-limit on position 1 used to fail position 2
+	// as well because the retry window persisted. With the per-position
+	// retry, position 1 retries (succeeds on second call) and position 2
+	// gets a clean attempt afterwards.
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		// Call 1: rate-limited (BTC's first attempt).
+		// Call 2+: 200 OK.
+		if calls == 1 {
+			w.WriteHeader(429)
+			w.Write([]byte(`{"code":-1003,"msg":"too many requests"}`))
+			return
+		}
+		w.Write([]byte(`{"orderId":1,"status":"FILLED","executedQty":"0.5","avgPrice":"50000"}`))
+	}))
+	defer srv.Close()
+	r := &OrderRouter{APIBaseURL: srv.URL, APIKey: "k", APISecret: "s", HTTPClient: srv.Client()}
+	k := &KillSwitch{Router: r, RateLimitBackoff: time.Millisecond}
+
+	// Both positions request 0.5 so the mock's fixed executedQty=0.5 fills
+	// each completely (PARTIAL would be a noisy false-positive for this
+	// test's purpose, which is "rate-limit doesn't cascade").
+	res, err := k.KillAll(context.Background(),
+		[]ClosePosition{
+			{Symbol: "BTCUSDT", Side: models.Long, Quantity: 0.5},
+			{Symbol: "ETHUSDT", Side: models.Long, Quantity: 0.5},
+		}, "no-cascade test")
+	if err != nil {
+		t.Fatalf("expected nil err — both positions should succeed; got %v", err)
+	}
+	if len(res.Outcomes) != 2 {
+		t.Fatalf("outcomes = %d, want 2", len(res.Outcomes))
+	}
+	for i, o := range res.Outcomes {
+		if o.Status != "CLOSED" {
+			t.Errorf("outcome[%d] status = %q, want CLOSED (rate-limit must " +
+				"NOT cascade to subsequent positions)", i, o.Status)
+		}
+	}
+}
+
 func TestKillSwitch_KillAll_PartialFill_ReportedAsPARTIAL(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{"orderId":1,"status":"PARTIALLY_FILLED","executedQty":"0.3","avgPrice":"50000"}`))
