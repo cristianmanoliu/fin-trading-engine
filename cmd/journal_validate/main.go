@@ -51,6 +51,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"sort"
 	"strings"
 )
@@ -87,7 +88,22 @@ type issue struct {
 	Msg      string
 }
 
+// recoverPanic converts an unrecovered Go panic to exit code 4 with a
+// clear "PANIC" stderr message, distinct from the documented ERROR exit
+// code (2). Without this, a panic would exit 2 (Go's default) and
+// collide with weekly_audit's CRITICAL "journal_validate found errors"
+// classifier — Telegram-tier dual sense. Exit 4 routes through the
+// classifier's UNEXPECTED branch (WARN) with correct text.
+func recoverPanic() {
+	if r := recover(); r != nil {
+		fmt.Fprintf(os.Stderr, "PANIC: %v\n%s\n", r, debug.Stack())
+		os.Exit(4)
+	}
+}
+
 func main() {
+	defer recoverPanic()
+
 	dir := flag.String("dir", "", "journal directory (recursively walked for *.jsonl files)")
 	exclude := flag.String("exclude", "", "comma-separated path substrings to skip (e.g., 'archive,old_runs'); useful for frozen historical journals whose pre-fix issues are known and immutable")
 	strict := flag.Bool("strict", false, "treat warnings as errors (exit 2 instead of 1)")

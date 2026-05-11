@@ -36,6 +36,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"sort"
 	"strings"
 )
@@ -270,7 +271,21 @@ func pnlDiffPct(a, b float64) float64 {
 	return math.Abs(a-b) / denom * 100
 }
 
+// recoverPanic converts an unrecovered Go panic to exit code 4 with a
+// clear "PANIC" stderr message, distinct from the documented contract
+// (0=PASS / 1=THRESHOLD / 2=SIGNAL_DIV / 3=INPUT_ERROR). Without this,
+// a panic would exit 2 (Go's default) and silently masquerade as
+// SIGNAL_DIVERGENCE — wrongly blocking promotion under a code defect.
+func recoverPanic() {
+	if r := recover(); r != nil {
+		fmt.Fprintf(os.Stderr, "PANIC: %v\n%s\n", r, debug.Stack())
+		os.Exit(4)
+	}
+}
+
 func main() {
+	defer recoverPanic()
+
 	var (
 		dirA         = flag.String("dir-a", "", "first journal directory (typically Stub paper-money)")
 		dirB         = flag.String("dir-b", "", "second journal directory (typically BinanceLive testnet)")

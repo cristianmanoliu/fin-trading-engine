@@ -17,6 +17,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime/debug"
 	"sort"
 	"strings"
 	"time"
@@ -42,7 +43,20 @@ type symbolStats struct {
 	maxTS  time.Time
 }
 
+// recoverPanic converts an unrecovered Go panic to exit code 4. Without
+// this, a panic exits 2 (Go's default) which is INDISTINGUISHABLE from
+// the existing exit codes (1=load error, 3=no data). cron consumers
+// can't tell "report ran cleanly" from "report crashed mid-walk."
+func recoverPanic() {
+	if r := recover(); r != nil {
+		fmt.Fprintf(os.Stderr, "PANIC: %v\n%s\n", r, debug.Stack())
+		os.Exit(4)
+	}
+}
+
 func main() {
+	defer recoverPanic()
+
 	journalDir := flag.String("journal-dir", "./logs/journal", "directory containing JSONL journals")
 	configDir := flag.String("config-dir", "./configs", "directory containing per-symbol configs")
 	binPath := flag.String("backtest-bin", "./bin/backtest", "path to compiled backtest binary")
