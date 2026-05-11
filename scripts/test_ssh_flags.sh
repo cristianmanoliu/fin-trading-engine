@@ -68,14 +68,23 @@ for file in "${OPERATIONAL_FILES[@]}"; do
         #    Telegram alert bodies / printf strings.
         [[ "$line" =~ ^[[:space:]]*(Run|Execute|Try|See|To)[[:space:]]*:[[:space:]]+ssh ]] && continue
 
-        # 2) "ssh exit=$VAR" — string-interpolation inside multi-line alert body.
-        [[ "$line" =~ ^[[:space:]]*ssh[[:space:]]+(exit|failed|succeeded|to)[[:space:]] ]] && continue
-        [[ "$line" =~ ^[[:space:]]*ssh[[:space:]]+(exit|failed|succeeded|to)= ]] && continue
+        # 2) "ssh exit=$VAR" / "ssh to VPS failed" — string-interpolation inside
+        #    multi-line alert body. Optional leading quote tolerates lines like
+        #    `"ssh to VPS failed (rc=$ssh_rc)"` passed as a function arg.
+        [[ "$line" =~ ^[[:space:]]*\"?ssh[[:space:]]+(exit|failed|succeeded|to)[[:space:]] ]] && continue
+        [[ "$line" =~ ^[[:space:]]*\"?ssh[[:space:]]+(exit|failed|succeeded|to)= ]] && continue
 
         # 3) Indented "  ssh root@... <command>" inside a notify_telegram body.
         #    Real invocations have command-position context (preceded by `$(`,
         #    `if `, `||`, `&&`, `!`, `;`, `|`); string-literal lines have only
-        #    leading whitespace.
+        #    leading whitespace. Hardcoded `root@` only — extending to
+        #    variable-host shape (`ssh $VAR ...`) was tried and reverted
+        #    because it would skip real bad invocations inside multi-line
+        #    $(...) blocks where the inner line lacks command-position
+        #    context. Operator-instruction alert text using `ssh $VAR ...`
+        #    should use the `Run: ssh ...` prefix instead, triggering
+        #    filter #1 above (safer to require explicit prefix than to
+        #    extend filter #3's regex).
         if [[ "$line" =~ ^[[:space:]]+ssh[[:space:]]+root@ ]]; then
             # Skip unless this line ALSO has command-position context on it.
             if [[ ! "$line" =~ (\$\(|^[[:space:]]*if[[:space:]]|^[[:space:]]*!|\|\||&&|\;) ]]; then

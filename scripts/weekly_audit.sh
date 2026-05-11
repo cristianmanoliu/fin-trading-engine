@@ -180,8 +180,8 @@ Run: ssh $WEEKLY_AUDIT_VPS /opt/trading-engine/bin/journal_validate --dir /var/l
 "ssh/remote-command failure during journal_validate (NOT a corruption finding)
 ssh exit=$VALIDATE_EXIT
 output: $(echo "$VALIDATE_OUTPUT" | tail -3)
-Investigate VPS connectivity, then re-run manually:
-  ssh $WEEKLY_AUDIT_VPS /opt/trading-engine/bin/journal_validate --dir /var/log/paper-live/journal --exclude archive"
+Investigate VPS connectivity, then re-run manually.
+Run: ssh $WEEKLY_AUDIT_VPS /opt/trading-engine/bin/journal_validate --dir /var/log/paper-live/journal --exclude archive"
         ;;
     UNEXPECTED|*)
         # Unexpected exit — fall-open guard. Don't silently swallow.
