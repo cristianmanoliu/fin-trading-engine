@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -38,12 +39,27 @@ def run_smoke(*args: str, env_extra: dict[str, str] | None = None) -> tuple[int,
     for k in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID",
               "BINANCE_API_KEY", "BINANCE_API_SECRET",
               "LAYER2_SMOKE_ACKNOWLEDGE_TESTNET",
-              "LAYER2_SMOKE_DRY_RUN"):
+              "LAYER2_SMOKE_DRY_RUN",
+              "LAYER2_SMOKE_INJECT_LOG"):
         env.pop(k, None)
     if env_extra:
         env.update(env_extra)
     result = subprocess.run(cmd, capture_output=True, text=True, env=env)
     return result.returncode, result.stdout, result.stderr
+
+
+def _inject_env(log_content: str, tmpdir: Path) -> dict[str, str]:
+    """Write log_content to a fixture file inside tmpdir and return the
+    env extras needed to feed it into the smoke as the injected log."""
+    fixture = tmpdir / "injected.log"
+    fixture.write_text(log_content)
+    return {
+        "BINANCE_API_KEY": "fake",
+        "BINANCE_API_SECRET": "fake",
+        "LAYER2_SMOKE_ACKNOWLEDGE_TESTNET": "YES",
+        "LAYER2_SMOKE_DRY_RUN": "1",
+        "LAYER2_SMOKE_INJECT_LOG": str(fixture),
+    }
 
 
 # ── Tests ────────────────────────────────────────────────────────────────────
@@ -105,21 +121,100 @@ class DryRunHappyPathTest(unittest.TestCase):
 
 
 class LogAnalysisFailureModeTest(unittest.TestCase):
-    """Inject log content to exercise the analysis-phase failure shapes.
+    """Exercise the analysis-phase failure shapes via LAYER2_SMOKE_INJECT_LOG.
 
-    These rebuild the smoke's log-analysis logic by writing a fake log file
-    that the script's grep-based analysis would otherwise read, then
-    invoking with DRY_RUN so the engine-run phase is skipped. The test
-    verifies that the script REACHES the analysis and that the analysis
-    correctly classifies each shape.
-
-    Note: DRY_RUN mode overwrites the log with the clean synthetic content,
-    so these tests must use a custom temp ROOT and patch the script. Since
-    that requires more setup than the value of the failure-mode coverage
-    here (the manual smoke at commit time already exercised the branches),
-    we leave these as a documented gap. The grep patterns themselves are
-    pinned by the script's inline definitions.
+    Each test injects a canned log fixture that the smoke's grep-based
+    analysis reads, then verifies the correct exit code + die() subject
+    line. Closes the documented gap where the script's 4 analysis-phase
+    failure branches (auth, error-line, no-heartbeat, no-backfill) were
+    pattern-pinned only by manual smoke at commit time.
     """
+
+    def _run_with_log(self, log_content: str) -> tuple[int, str, str]:
+        # Use tempfile + cleanup pattern. Each test owns its own fixture
+        # so they can run in any order (and in parallel under pytest -n).
+        with tempfile.TemporaryDirectory() as td:
+            env = _inject_env(log_content, Path(td))
+            return run_smoke("BTCUSDT", env_extra=env)
+
+    def test_auth_failure_binance_code_2014_exits_2(self):
+        """Binance's -2014 (bad key format) doesn't emit HTTP 401/403 —
+        L2-3 added explicit code-pattern matching so this lands at exit 2
+        not the catch-all exit 6 (which would misroute to Telegram tier
+        'engine error' instead of 'credential rejected')."""
+        log = (
+            '{"level":"INFO","msg":"backfill complete","symbol":"BTCUSDT"}\n'
+            '{"level":"INFO","msg":"heartbeat","symbol":"BTCUSDT"}\n'
+            '{"level":"ERROR","msg":"binance reject","code":-2014,'
+            '"reason":"API-key format invalid"}\n'
+        )
+        code, _, err = self._run_with_log(log)
+        self.assertEqual(code, 2, err)
+        self.assertIn("credential-rejected", err)
+
+    def test_auth_failure_http_403_exits_2(self):
+        """Generic HTTP 403 in log → auth tier."""
+        log = (
+            '{"level":"INFO","msg":"backfill complete","symbol":"BTCUSDT"}\n'
+            '{"level":"INFO","msg":"heartbeat","symbol":"BTCUSDT"}\n'
+            '{"level":"WARN","msg":"order rejected","status":403}\n'
+        )
+        code, _, err = self._run_with_log(log)
+        self.assertEqual(code, 2, err)
+        self.assertIn("credential-rejected", err)
+
+    def test_generic_error_line_exits_6(self):
+        """Non-auth ERROR-level line → exit 6 (engine-error-during-smoke).
+        Verifies the auth check runs BEFORE the generic-error check, so an
+        auth failure with the literal token 'ERROR' in it doesn't land in
+        the wrong bucket. Here we use a non-auth shape."""
+        log = (
+            '{"level":"INFO","msg":"backfill complete","symbol":"BTCUSDT"}\n'
+            '{"level":"INFO","msg":"heartbeat","symbol":"BTCUSDT"}\n'
+            '{"level":"ERROR","msg":"unexpected nil pointer in tick handler"}\n'
+        )
+        code, _, err = self._run_with_log(log)
+        self.assertEqual(code, 6, err)
+        self.assertIn("engine-error-during-smoke", err)
+
+    def test_no_heartbeat_exits_1(self):
+        """Backfill landed but no heartbeat fired → exit 1 (no-heartbeat).
+        This is the 'engine startup got stuck' shape; distinct from a
+        crash (exit 6) and from auth failure (exit 2)."""
+        log = (
+            '{"level":"INFO","msg":"backfill complete","symbol":"BTCUSDT"}\n'
+        )
+        code, _, err = self._run_with_log(log)
+        self.assertEqual(code, 1, err)
+        self.assertIn("no-heartbeat", err)
+
+    def test_no_backfill_exits_6(self):
+        """Heartbeat fired but no backfill-complete log → exit 6
+        (backfill-incomplete). L2-4 added this gate: a warming-up
+        heartbeat ('no ticks yet') matches the heartbeat substring,
+        so without the backfill gate an unprimed engine would PASS."""
+        log = (
+            '{"level":"INFO","msg":"heartbeat","symbol":"BTCUSDT",'
+            '"warning":"warming up (no ticks yet)"}\n'
+        )
+        code, _, err = self._run_with_log(log)
+        self.assertEqual(code, 6, err)
+        self.assertIn("backfill-incomplete", err)
+
+    def test_missing_inject_fixture_exits_3(self):
+        """If the test harness points LAYER2_SMOKE_INJECT_LOG at a path
+        that doesn't exist, the smoke fails loudly (env tier) rather
+        than producing a misleading PASS from an empty/missing fixture."""
+        env = {
+            "BINANCE_API_KEY": "fake",
+            "BINANCE_API_SECRET": "fake",
+            "LAYER2_SMOKE_ACKNOWLEDGE_TESTNET": "YES",
+            "LAYER2_SMOKE_DRY_RUN": "1",
+            "LAYER2_SMOKE_INJECT_LOG": "/tmp/does-not-exist-2026-05-11.log",
+        }
+        code, _, err = run_smoke("BTCUSDT", env_extra=env)
+        self.assertEqual(code, 3, err)
+        self.assertIn("inject-log-missing", err)
 
 
 if __name__ == "__main__":

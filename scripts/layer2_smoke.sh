@@ -40,6 +40,13 @@
 #   LAYER2_SMOKE_DRY_RUN=1 bash scripts/layer2_smoke.sh   # plumbing test
 #                                                          # without invoking
 #                                                          # cmd/engine
+#   LAYER2_SMOKE_DRY_RUN=1 \
+#     LAYER2_SMOKE_INJECT_LOG=/tmp/fixture.log \
+#     bash scripts/layer2_smoke.sh                        # test-only: inject
+#                                                          # a canned log to
+#                                                          # exercise the
+#                                                          # analysis-phase
+#                                                          # failure branches
 #
 # Exit codes:
 #   0 SMOKE_PASS             — all checks passed; Layer 2 plumbing verified
@@ -197,12 +204,26 @@ echo "    duration: ${DURATION_SEC}s"
 
 if [[ "${LAYER2_SMOKE_DRY_RUN:-0}" == "1" ]]; then
     echo "  (DRY_RUN — would invoke: $ENGINE_BIN --config configs/default.yaml --symbol $SYMBOL --executor binance_live_testnet)"
-    # Simulate a clean log for the analysis phase below
-    cat > "$LOG_FILE" <<EOF
+    # LAYER2_SMOKE_INJECT_LOG: when set under DRY_RUN, copy that file's
+    # contents into the analysis target instead of writing the clean
+    # synthetic log. Lets the test suite exercise the analysis-phase
+    # failure shapes (auth-fail, no-heartbeat, error-line, no-backfill)
+    # without invoking cmd/engine. Without this hook, those branches
+    # are documented-untested per LogAnalysisFailureModeTest's note.
+    if [[ -n "${LAYER2_SMOKE_INJECT_LOG:-}" ]]; then
+        if [[ ! -f "${LAYER2_SMOKE_INJECT_LOG}" ]]; then
+            die "$EXIT_SMOKE_FAIL_ENV" "inject-log-missing" \
+                "LAYER2_SMOKE_INJECT_LOG=${LAYER2_SMOKE_INJECT_LOG} but file does not exist. The harness env-var points at a path that cannot be read; fix the test fixture path."
+        fi
+        cp "${LAYER2_SMOKE_INJECT_LOG}" "$LOG_FILE"
+    else
+        # Simulate a clean log for the analysis phase below
+        cat > "$LOG_FILE" <<EOF
 {"level":"INFO","msg":"backfill complete","symbol":"$SYMBOL"}
 {"level":"INFO","msg":"heartbeat","symbol":"$SYMBOL","ticks_since_last":3,"last_tick_age":5000000000}
 {"level":"INFO","msg":"TESTNET EXECUTOR ACTIVE — orders will be sent to Binance TESTNET (no real capital)"}
 EOF
+    fi
 else
     # `timeout` sends SIGTERM after DURATION_SEC; engine drains and exits cleanly.
     # Exit status 124 from timeout = killed by timeout = expected. Any other
@@ -274,8 +295,16 @@ This means the engine either did not start cleanly or got stuck before first hea
 fi
 
 # Optional: count tick-source health indicators
-N_HEARTBEATS=$(grep -cE '"msg":"heartbeat"' "$LOG_FILE" || echo 0)
-HAS_BACKFILL=$(grep -cE '"msg":"backfill complete' "$LOG_FILE" || echo 0)
+# Use `|| true` not `|| echo 0`: `grep -c` ALWAYS writes the count to
+# stdout (including "0" for no matches) — when it does, `|| echo 0` adds
+# a SECOND "0", producing the string "0\n0". That breaks the integer
+# comparison below (`[[ "0\n0" -eq 0 ]]` errors with "syntax error in
+# expression"), but because it's inside `if`, `set -e` doesn't fire —
+# the gate silently no-ops and the backfill-incomplete branch never
+# runs. Same family as the locked silent-on-corrupt-input pattern.
+# Pinned by `test_no_backfill_exits_6` in test_layer2_smoke.py.
+N_HEARTBEATS=$(grep -cE '"msg":"heartbeat"' "$LOG_FILE" || true)
+HAS_BACKFILL=$(grep -cE '"msg":"backfill complete' "$LOG_FILE" || true)
 
 # L2-4: gate PASS on backfill-complete, not just heartbeat. A failing
 # backfill still allows the engine to emit a "warming up (no ticks yet)"
