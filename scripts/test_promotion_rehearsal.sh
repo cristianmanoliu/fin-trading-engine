@@ -163,6 +163,34 @@ touch "$TMPDIR/testnet_stale/.last_layer3_pass"
 touch -t "$old_date" "$TMPDIR/testnet_stale/.last_layer3_pass"
 assert_eq "$(layer3_tier "$TMPDIR/testnet_stale")" "WAITING" "10d-old layer3 marker → WAITING (stale)"
 
+# ── stat fallback (regression for the BSD-vs-GNU stat-order bug) ───────────
+# Pre-fix, layer2_tier/layer3_tier used `stat -f %m` (BSD) FIRST then GNU
+# `stat -c %Y` as fallback. On Linux CI, `stat -f` is interpreted as
+# "display filesystem status" — GNU stat accepts the invocation and prints
+# the format string "%m" LITERALLY instead of erroring, so the fallback
+# never runs. Non-numeric mtime → bash arithmetic error under set -e →
+# function aborts mid-execution → empty stdout → tests see got=[].
+#
+# Fix landed: (1) reverse stat order so GNU is primary, BSD is fallback;
+# (2) add defensive `[[ "$mtime" =~ ^[0-9]+$ ]] || mtime=0` so even if
+# both stat invocations produce garbage, the function returns a valid
+# tier (WAITING, the safe stale default).
+#
+# This case simulates the garbage-mtime path by overriding `stat` with a
+# function that always prints a non-numeric string. layer2_tier should
+# still return a valid tier (WAITING), NOT empty stdout.
+echo
+echo "── stat fallback regression (pre-fix would return empty under set -e) ──"
+mkdir -p "$TMPDIR/smoke_stat_garbage"
+touch "$TMPDIR/smoke_stat_garbage/.last_pass"
+# Override `stat` for this assertion's subshell. The function under test
+# runs inside command substitution → subshell → inherits this override.
+# (Then the override goes out of scope, leaving the rest of the test
+# suite unaffected.)
+result=$(stat() { echo "%m"; return 0; }; export -f stat; layer2_tier "$TMPDIR/smoke_stat_garbage" 7)
+assert_eq "$result" "WAITING" \
+    "non-numeric mtime → WAITING (defensive fallback, never empty)"
+
 # ── CLI parsing ─────────────────────────────────────────────────────────────
 echo
 echo "── CLI flag parsing ──"

@@ -196,7 +196,23 @@ layer2_tier() {
     # Priority 1: operator-attested PASS marker.
     if [[ -f "${smoke_dir}/.last_pass" ]]; then
         local mtime
-        mtime=$(stat -f %m "${smoke_dir}/.last_pass" 2>/dev/null || stat -c %Y "${smoke_dir}/.last_pass" 2>/dev/null || echo 0)
+        # GNU stat (Linux) FIRST, then BSD (macOS). Pre-fix the order was
+        # reversed: `stat -f %m file` on Linux is interpreted as "display
+        # filesystem status" (not file status) — GNU stat ACCEPTS the
+        # invocation and prints the format string literally ("%m") instead
+        # of erroring, so the `||` fallback to `stat -c %Y` never fires.
+        # Non-numeric mtime then triggered a bash arithmetic error under
+        # set -e → function aborted with empty stdout → tests on Linux CI
+        # showed `got=[]` instead of READY/WAITING. macOS test runs were
+        # green because BSD `stat -f %m` works correctly there. Reordering
+        # makes GNU the primary (Linux is the CI runtime + production VPS
+        # runtime) and BSD the fallback (macOS developer runtime).
+        mtime=$(stat -c %Y "${smoke_dir}/.last_pass" 2>/dev/null || stat -f %m "${smoke_dir}/.last_pass" 2>/dev/null || echo 0)
+        # Defensive: if mtime is empty or non-numeric for any reason (both
+        # stat invocations produced unexpected output), fall back to 0.
+        # 0 → age_days = now/86400 = huge → !-le window_days → WAITING tier
+        # (the safe-stale default), NOT silent function abort.
+        [[ "$mtime" =~ ^[0-9]+$ ]] || mtime=0
         local age_days=$(( (now - mtime) / 86400 ))
         if [[ "$age_days" -le "$window_days" ]]; then
             echo "$TIER_READY"
@@ -247,7 +263,10 @@ layer3_tier() {
     # Priority 1: operator-attested PASS marker.
     if [[ -f "${testnet_dir}/.last_layer3_pass" ]]; then
         local mtime
-        mtime=$(stat -f %m "${testnet_dir}/.last_layer3_pass" 2>/dev/null || stat -c %Y "${testnet_dir}/.last_layer3_pass" 2>/dev/null || echo 0)
+        # See layer2_tier above for the stat-order rationale. GNU first
+        # (Linux CI + production VPS), BSD fallback (macOS dev).
+        mtime=$(stat -c %Y "${testnet_dir}/.last_layer3_pass" 2>/dev/null || stat -f %m "${testnet_dir}/.last_layer3_pass" 2>/dev/null || echo 0)
+        [[ "$mtime" =~ ^[0-9]+$ ]] || mtime=0
         local age_days=$(( (now - mtime) / 86400 ))
         if [[ "$age_days" -le 7 ]]; then
             echo "$TIER_READY"
