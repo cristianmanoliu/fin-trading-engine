@@ -6,9 +6,10 @@
 #   2. forward_paper_status.sh — operational snapshot, dated under
 #      results/forward_paper_snapshots/<YYYY-MM-DD>.txt for longitudinal
 #      diffing
-# Additional stages 3-7 layer in journal validation, kill_protocol_check,
+# Additional stages 3-8 layer in journal validation, kill_protocol_check,
 # stage_promotion_check, forward_paper_resolution (LIMBO rule synthesis),
-# and lag_summary (REST-poll-lag aggregator added 2026-05-11).
+# lag_summary (REST-poll-lag aggregator added 2026-05-11), and
+# promotion_rehearsal (end-to-end STAGE_1 readiness composer added 2026-05-11 PM).
 #
 # Drift check exits with the decision-grade severity; this wrapper
 # preserves that as its OWN exit code so launchd's last-exit-code column
@@ -461,6 +462,88 @@ $(echo "$LAG_OUTPUT" | tail -3)"
         ;;
 esac
 
+# --- 8. End-to-end promotion-readiness rehearsal ---
+# promotion_rehearsal.sh walks all 5 phases of the locked STAGE_0→STAGE_1
+# promotion path (LIMBO + STAGE_0→1 gates + kill criteria + Layer 2
+# attestation + Layer 3 attestation). Phases 1-3 invoke the same Python
+# decision-grade tools as stages 4-6 above — redundant ~5s of Python work,
+# acceptable for the weekly cron.
+#
+# The value-add over stages 4-6 alone: phases 4-5 inspect the operator-
+# touched `.last_pass` / `.last_layer3_pass` attestation markers. Without
+# this stage, weekly_audit could fire PROMOTE_READY (stage 5) while Layer
+# 2 / Layer 3 attestation was stale or missing — the operator would only
+# discover this when invoking promotion_rehearsal manually.
+#
+# Tier mapping per the script's contract (0 READY / 1 BLOCKED / 2 WAITING / 3 INPUT_ERR):
+#   READY     → INFO (paired with PROMOTE_READY above, but covers attestation)
+#   BLOCKED   → CRITICAL (real blocker; could be Layer 2/3 attestation gone stale)
+#   WAITING   → silent (status quo while data accumulates)
+#   INPUT_ERR → WARN (helper missing / config error)
+REHEARSAL_OUTPUT=$("${REPO_ROOT}/scripts/promotion_rehearsal.sh" --quiet 2>&1)
+REHEARSAL_EXIT=$?
+REHEARSAL_CLASS=$(_classify_python_exit "$REHEARSAL_EXIT" \
+    "0:READY,1:BLOCKED,3:INPUT_ERR" "2")
+echo "rehearsal: exit=$REHEARSAL_EXIT class=$REHEARSAL_CLASS"
+case "$REHEARSAL_CLASS" in
+    CONTINUE)
+        # 2 WAITING — phases incomplete, data still accumulating. Silent.
+        :
+        ;;
+    READY)
+        # READY: all 5 phases green, INCLUDING Layer 2 + Layer 3 attestation
+        # markers fresh. INFO tier — pairs with the PROMOTE_READY CRITICAL
+        # from stage 5, but ADDS the attestation verification stages 4-6
+        # don't cover. A bare PROMOTE_READY without rehearsal-READY means
+        # operator must still verify Layer 2 + Layer 3 attestations before
+        # flipping the executor.
+        notify_telegram INFO "weekly_audit rehearsal: READY on $(hostname)" \
+"promotion_rehearsal returned exit 0 — ALL 5 phases green, including the
+operator-touched Layer 2 + Layer 3 attestation markers. Combined with the
+PROMOTE_READY CRITICAL above (stage 5), the operator may execute
+stage_promotion.sh now.
+
+If stage 5 fired but rehearsal did NOT, the Layer 2 + Layer 3 attestations
+have aged out — re-run layer2_smoke.sh + layer3_verdict.sh and touch
+.last_pass + .last_layer3_pass before promoting.
+
+Run: scripts/promotion_rehearsal.sh
+Snapshot: results/decision_snapshots/$(date -u +%Y-%m-%d)-rehearsal.txt
+$REHEARSAL_OUTPUT"
+        ;;
+    BLOCKED)
+        # BLOCKED: ≥1 phase has a real problem. The kill_check above
+        # likely already fired CRITICAL on the same root cause, but
+        # rehearsal-BLOCKED also captures Layer 2/3 attestation going
+        # stale — which would not appear in stage 4 or stage 5.
+        notify_telegram CRITICAL "weekly_audit rehearsal: BLOCKED on $(hostname)" \
+"promotion_rehearsal returned exit 1 — ≥1 phase has a real problem.
+Most likely paired with the kill_check / kill_protocol CRITICAL above
+(LIMBO=KILL or kill_protocol_check fires). BUT if no kill alert fired
+and rehearsal still BLOCKED, the cause is Layer 2 or Layer 3
+attestation state.
+
+Run: scripts/promotion_rehearsal.sh
+Snapshot: results/decision_snapshots/$(date -u +%Y-%m-%d)-rehearsal.txt
+$REHEARSAL_OUTPUT"
+        ;;
+    INPUT_ERR)
+        notify_telegram WARN "weekly_audit rehearsal: INPUT_ERR" \
+"promotion_rehearsal returned exit 3 — config or helper issue.
+Likely a missing sibling helper (forward_paper_resolution.py,
+stage_promotion_check.py, kill_protocol_check.py) or environment
+problem. Investigate before next cron firing.
+$REHEARSAL_OUTPUT"
+        ;;
+    UNEXPECTED|*)
+        # Crash / OOM / env corruption — outside documented contract 0-3.
+        notify_telegram WARN "weekly_audit rehearsal: UNEXPECTED EXIT" \
+"promotion_rehearsal returned exit $REHEARSAL_EXIT (outside documented contract 0-3).
+Likely script crash, OOM, or env failure. Investigate before next cron firing.
+$REHEARSAL_OUTPUT"
+        ;;
+esac
+
 # --- Persist decision snapshots for longitudinal review ---
 SNAP_DIR="${REPO_ROOT}/results/decision_snapshots"
 mkdir -p "$SNAP_DIR"
@@ -469,6 +552,7 @@ echo "$KILL_OUTPUT" > "${SNAP_DIR}/${TODAY}-kill.txt"
 echo "$PROMOTE_OUTPUT" > "${SNAP_DIR}/${TODAY}-promote.txt"
 echo "$RESOLUTION_OUTPUT" > "${SNAP_DIR}/${TODAY}-resolution.txt"
 echo "$LAG_OUTPUT" > "${SNAP_DIR}/${TODAY}-lag.txt"
+echo "$REHEARSAL_OUTPUT" > "${SNAP_DIR}/${TODAY}-rehearsal.txt"
 
 # --- exit with the drift wrapper's code so launchd surfaces the right thing ---
 # Rationale: drift is the decision-grade KILL signal calibrated against null;

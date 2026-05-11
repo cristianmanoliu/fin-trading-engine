@@ -114,6 +114,23 @@ assert_eq "resolution exit 5 → INPUT_ERROR"     "$(_classify_python_exit 5 "$R
 # REGRESSION: exit 6+ (e.g. python crash) → UNEXPECTED, not silent
 assert_eq "resolution exit 6 → UNEXPECTED"      "$(_classify_python_exit 6 "$RESOLUTION_MODES" "$RESOLUTION_CONTINUE")" "UNEXPECTED"
 
+echo
+echo "Stage 8: _classify_python_exit (promotion_rehearsal contract)"
+# Stage 8 added 2026-05-11 PM wires promotion_rehearsal.sh into the
+# weekly cron so Layer 2 + Layer 3 attestation markers get monitored
+# alongside the other 6 decision-grade evaluators. The rehearsal exit
+# contract: 0 READY / 1 BLOCKED / 2 WAITING / 3 INPUT_ERR.
+REHEARSAL_MODES="0:READY,1:BLOCKED,3:INPUT_ERR"
+REHEARSAL_CONTINUE="2"
+assert_eq "rehearsal exit 0 → READY"      "$(_classify_python_exit 0 "$REHEARSAL_MODES" "$REHEARSAL_CONTINUE")" "READY"
+assert_eq "rehearsal exit 1 → BLOCKED"    "$(_classify_python_exit 1 "$REHEARSAL_MODES" "$REHEARSAL_CONTINUE")" "BLOCKED"
+assert_eq "rehearsal exit 2 → CONTINUE"   "$(_classify_python_exit 2 "$REHEARSAL_MODES" "$REHEARSAL_CONTINUE")" "CONTINUE"
+assert_eq "rehearsal exit 3 → INPUT_ERR"  "$(_classify_python_exit 3 "$REHEARSAL_MODES" "$REHEARSAL_CONTINUE")" "INPUT_ERR"
+# REGRESSION: crash / OOM / future contract additions → UNEXPECTED, never silent.
+# Same shape as the F3-F5 fail-open pattern the classifier was designed to close.
+assert_eq "rehearsal exit 4 → UNEXPECTED" "$(_classify_python_exit 4 "$REHEARSAL_MODES" "$REHEARSAL_CONTINUE")" "UNEXPECTED"
+assert_eq "rehearsal exit 137 (SIGKILL) → UNEXPECTED" "$(_classify_python_exit 137 "$REHEARSAL_MODES" "$REHEARSAL_CONTINUE")" "UNEXPECTED"
+
 # --- summary ---
 echo
 TOTAL=$((PASS + FAIL))
