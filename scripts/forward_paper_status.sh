@@ -32,8 +32,21 @@ MIN_WR_PCT=14        # Realized WR ≥ 14% (breakeven ≈ 14.3% at 6:1 RR)
 MAX_SYM_PCT=40       # No single symbol > 40% of cumulative PnL
 
 # --- kill criteria ---
-KILL_MAX_FEE_BP=12   # Realized round-trip fee ≤ 12bp (vs 10bp modeled — 20% slack)
-KILL_MAX_SLIP_BP=25  # Realized stop-side slip ≤ 25bp on losing-trade subsample (cliff edge)
+# Deploy-readiness thresholds (CLAUDE.md "Deploy real money..." criteria 2-3).
+# These MUST stay aligned with stage_promotion_check.py MAX_FEE_BPS /
+# MAX_SLIP_BPS so the operator's dashboard and the formal promotion gate
+# agree on PASS/FAIL — pre-fix the dashboard used the KILL slip threshold
+# (25bp) for its overall verdict, which masked deploy-gate FAILs in the
+# 20-25bp band (operator-misleading; slip=22bp showed PASS here but FAIL
+# in the formal gate).
+MAX_FEE_BPS=12   # Realized round-trip fee ≤ 12bp (vs 10bp modeled — 20% slack)
+MAX_SLIP_BPS=20  # Realized stop-side slip ≤ 20bp on losing-trade subsample (DEPLOY)
+# Kill thresholds (CLAUDE.md "Kill the strategy..." advisory triggers — these
+# fire as investigation prompts only; decision-grade kill is the drift
+# detector). 25bp slip is the historical-rule cliff edge; A2 sweep showed
+# the actual cost-breakeven is ~81bp. NOT used for deploy-readiness PASS;
+# kept here for future advisory display.
+KILL_MAX_SLIP_BP=25
 # BTC-HODL benchmark notional: CLAUDE.md specifies $32k from the deployed-32
 # era. Current deployed is 16 engines × $1k stake = $16k. Override via env if
 # you want to reconcile with current notional. Kill-window threshold $5k absolute.
@@ -401,14 +414,19 @@ echo "$DATA" | grep "^STRATEGY|" | while IFS='|' read -r _ label first_ts last_t
     # trade had StakeUSDT=0 — display "n/a" rather than dividing by zero.
     if (( $(awk "BEGIN{print ($notional > 0)}") )); then
         fee_bps_val=$(awk "BEGIN{printf \"%.2f\", $fee_usd / $notional * 10000}")
-        s_fee=$(pass_or_fail "$fee_bps_val" "$KILL_MAX_FEE_BP" le)
+        s_fee=$(pass_or_fail "$fee_bps_val" "$MAX_FEE_BPS" le)
     else
         fee_bps_val="n/a"
         s_fee="PENDING"
     fi
     if (( $(awk "BEGIN{print ($notional_losers > 0)}") )); then
         slip_bps_val=$(awk "BEGIN{printf \"%.2f\", $slip_usd_losers / $notional_losers * 10000}")
-        s_slip=$(pass_or_fail "$slip_bps_val" "$KILL_MAX_SLIP_BP" le)
+        # Use DEPLOY threshold (20bp) not KILL threshold (25bp) so the
+        # dashboard's overall verdict aligns with the formal gate. Pre-fix
+        # this used KILL_MAX_SLIP_BP=25 → operator saw PASS at 22bp slip
+        # while the formal stage_promotion_check.py gate would FAIL at
+        # the same value (deploy criterion ≤20bp per CLAUDE.md).
+        s_slip=$(pass_or_fail "$slip_bps_val" "$MAX_SLIP_BPS" le)
     else
         slip_bps_val="n/a"
         s_slip="PENDING"
@@ -512,8 +530,8 @@ echo "$DATA" | grep "^STRATEGY|" | while IFS='|' read -r _ label first_ts last_t
     printf "    Trades closed:       %4d / %d              [%s]\n" "$trades" "$MIN_TRADES" "$s_trades"
     printf "    Wins / WR:           %4d / %s%%             [%s]\n" "$wins" "$wr_pct" "$s_wr"
     printf "    Net PnL:             \$%-12s              [%s]\n" "$pnl_int" "$s_pnl"
-    printf "    Realized fee bps:    %-6s  / ≤%dbp                [%s]\n" "$fee_bps_val" "$KILL_MAX_FEE_BP" "$s_fee"
-    printf "    Realized slip bps:   %-6s  / ≤%dbp (losers)       [%s]\n" "$slip_bps_val" "$KILL_MAX_SLIP_BP" "$s_slip"
+    printf "    Realized fee bps:    %-6s  / ≤%dbp                [%s]\n" "$fee_bps_val" "$MAX_FEE_BPS" "$s_fee"
+    printf "    Realized slip bps:   %-6s  / ≤%dbp (losers)       [%s]\n" "$slip_bps_val" "$MAX_SLIP_BPS" "$s_slip"
     hodl_delta_int=$(awk -v d="$hodl_delta_usd" 'BEGIN{printf "%+d", d}')
     hodl_total_int=$(awk -v h="$hodl_total_usd" 'BEGIN{printf "%+d", h}')
     if [[ "$helper_failed" == "1" ]]; then

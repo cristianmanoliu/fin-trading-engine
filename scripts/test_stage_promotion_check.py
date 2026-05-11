@@ -157,6 +157,52 @@ class CriterionUnitTest(unittest.TestCase):
             f"If operator resolved the spec-vs-reality question, update both "
             f"the docstring above the constant AND this test.")
 
+    def test_dashboard_slip_threshold_matches_gate_deploy_threshold(self):
+        """DRIFT pin: scripts/forward_paper_status.sh's slip gate must use
+        the DEPLOY threshold (≤20bp per CLAUDE.md), not the KILL threshold
+        (>25bp advisory). Pre-fix the dashboard used KILL_MAX_SLIP_BP=25
+        for its overall PASS verdict → operator saw PASS at 22bp while
+        the formal gate would FAIL. Pin by string-scanning the dashboard
+        source: the s_slip computation must reference MAX_SLIP_BPS (not
+        KILL_MAX_SLIP_BP), AND MAX_SLIP_BPS must match
+        stage_promotion_check.py's MAX_SLIP_BPS constant value."""
+        dashboard = (REPO / "scripts" / "forward_paper_status.sh").read_text()
+        self.assertIn('s_slip=$(pass_or_fail "$slip_bps_val" "$MAX_SLIP_BPS" le)',
+            dashboard,
+            "dashboard slip gate must evaluate against MAX_SLIP_BPS "
+            "(deploy threshold), not KILL_MAX_SLIP_BP — drift to kill "
+            "threshold would mask deploy-gate FAILs in the 20-25bp band.")
+        # Extract the dashboard's constant value via a simple line scan.
+        for ln in dashboard.splitlines():
+            if ln.startswith("MAX_SLIP_BPS="):
+                # e.g. "MAX_SLIP_BPS=20  # comment..."
+                val = float(ln.split("=", 1)[1].split()[0])
+                self.assertEqual(val, sp.MAX_SLIP_BPS,
+                    f"dashboard MAX_SLIP_BPS={val} ≠ gate {sp.MAX_SLIP_BPS}; "
+                    f"these must match so operator's dashboard PASS aligns "
+                    f"with formal gate PASS")
+                break
+        else:
+            self.fail("dashboard does not define MAX_SLIP_BPS — drift risk")
+
+    def test_dashboard_fee_threshold_matches_gate_deploy_threshold(self):
+        """Sibling pin for fee threshold. Same constraint, lower magnitude
+        risk (current dashboard + gate both use 12bp; rename was for
+        naming consistency only)."""
+        dashboard = (REPO / "scripts" / "forward_paper_status.sh").read_text()
+        self.assertIn('s_fee=$(pass_or_fail "$fee_bps_val" "$MAX_FEE_BPS" le)',
+            dashboard,
+            "dashboard fee gate must evaluate against MAX_FEE_BPS "
+            "consistent with the formal gate's MAX_FEE_BPS constant")
+        for ln in dashboard.splitlines():
+            if ln.startswith("MAX_FEE_BPS="):
+                val = float(ln.split("=", 1)[1].split()[0])
+                self.assertEqual(val, sp.MAX_FEE_BPS,
+                    f"dashboard MAX_FEE_BPS={val} ≠ gate {sp.MAX_FEE_BPS}")
+                break
+        else:
+            self.fail("dashboard does not define MAX_FEE_BPS — drift risk")
+
     def test_benchmark_notional_env_override_propagates_to_subprocess(self):
         """The constant is loaded at module-import time from
         BENCHMARK_NOTIONAL env var. The gate evaluator now mirrors the
