@@ -37,6 +37,12 @@
 #     scripts/layer3_verdict.sh --testnet-start 2026-05-15T00:00:00Z   # explicit start
 #     scripts/layer3_verdict.sh --skip-min-days                       # dry-run before 7d
 #     scripts/layer3_verdict.sh --verbose                             # journal_diff verbose
+#
+# Test env-vars (NOT for production use):
+#     LAYER3_VERDICT_DIFF_OVERRIDE=PATH — use this binary as journal_diff
+#         instead of building from source. Lets the test suite inject canned
+#         exit codes (panic=4, segfault=139, future contract additions) to
+#         exercise the wrapper's exit-code dispatch without rebuilding Go.
 set -euo pipefail
 
 # --- defaults (locked rule) ---
@@ -151,6 +157,20 @@ if [[ "$start_epoch" == "INVALID" ]]; then
 fi
 
 elapsed_seconds=$(( NOW_EPOCH - start_epoch ))
+# Future-timestamp guard: a clock-skewed operator host or a typo'd
+# --testnet-start (e.g. tomorrow's date) yields elapsed_seconds < 0,
+# which pre-fix routed to INSUFFICIENT_DURATION (exit 4) and told the
+# operator to "keep running and re-check" — terrible advice for what
+# is fundamentally an input error. Surface as exit 3 (INPUT_ERROR)
+# instead so the operator fixes the clock / overrides, not waits.
+if [[ "$elapsed_seconds" -lt 0 ]]; then
+    echo "ERROR: testnet start_ts is in the future (${start_ts})" >&2
+    echo "  Source: $start_source" >&2
+    echo "  elapsed_seconds=${elapsed_seconds} < 0 — either operator clock skew" >&2
+    echo "  or a typo'd --testnet-start. Cannot evaluate Layer 3 against a" >&2
+    echo "  future window. Fix the source and re-run." >&2
+    exit 3
+fi
 elapsed_days=$(( elapsed_seconds / 86400 ))
 elapsed_hours=$(( elapsed_seconds / 3600 ))
 
@@ -158,16 +178,30 @@ elapsed_hours=$(( elapsed_seconds / 3600 ))
 # Build to a temp binary rather than `go run` because `go run` collapses
 # the inner program's exit code to 1 (it does NOT propagate exit-2 for
 # signal divergence or exit-3 for input error). The wrapper relies on the
-# precise 0/1/2/3 taxonomy to compose its own Layer 3 verdict — collapsing
+# precise 0/1/2/3/4 taxonomy to compose its own Layer 3 verdict — collapsing
 # to "1" would route signal divergence to the THRESHOLD branch.
 SCRIPT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TMP_BIN_DIR=$(mktemp -d)
 trap 'rm -rf "$TMP_BIN_DIR"' EXIT
-if ! (cd "$SCRIPT_ROOT" && go build -o "$TMP_BIN_DIR/journal_diff" \
-        ./cmd/journal_diff) 2>"$TMP_BIN_DIR/build.err"; then
-    echo "ERROR: failed to build cmd/journal_diff:" >&2
-    cat "$TMP_BIN_DIR/build.err" >&2
-    exit 3
+DIFF_BIN="$TMP_BIN_DIR/journal_diff"
+
+# Test-only override: skip the build and use the supplied binary path
+# instead. Used by test_layer3_verdict.py to inject canned exit codes
+# (panic=4, segfault=139, hypothetical future code) without rebuilding
+# Go. Same pattern shape as LAYER2_SMOKE_INJECT_LOG.
+if [[ -n "${LAYER3_VERDICT_DIFF_OVERRIDE:-}" ]]; then
+    if [[ ! -x "${LAYER3_VERDICT_DIFF_OVERRIDE}" ]]; then
+        echo "ERROR: LAYER3_VERDICT_DIFF_OVERRIDE=${LAYER3_VERDICT_DIFF_OVERRIDE} is not executable" >&2
+        exit 3
+    fi
+    DIFF_BIN="${LAYER3_VERDICT_DIFF_OVERRIDE}"
+else
+    if ! (cd "$SCRIPT_ROOT" && go build -o "$DIFF_BIN" \
+            ./cmd/journal_diff) 2>"$TMP_BIN_DIR/build.err"; then
+        echo "ERROR: failed to build cmd/journal_diff:" >&2
+        cat "$TMP_BIN_DIR/build.err" >&2
+        exit 3
+    fi
 fi
 
 DIFF_ARGS=(
@@ -180,7 +214,7 @@ DIFF_ARGS=(
 [[ "$VERBOSE" == "1" ]] && DIFF_ARGS+=(--verbose)
 
 set +e
-diff_out=$("$TMP_BIN_DIR/journal_diff" "${DIFF_ARGS[@]}" 2>&1)
+diff_out=$("$DIFF_BIN" "${DIFF_ARGS[@]}" 2>&1)
 diff_exit=$?
 set -e
 
@@ -215,11 +249,25 @@ fi
 #   journal_diff exit 1 → THRESHOLD — overrides everything else
 #   journal_diff exit 2 → SIGNAL_DIV — overrides duration shortfall
 #   journal_diff exit 3 → INPUT_ERROR — passes through (binary couldn't run)
+#   journal_diff exit 4 → PANIC (binary defect) — route to INPUT_ERROR
+#   journal_diff other  → UNEXPECTED — route to INPUT_ERROR (NEVER fall
+#                         through to PASS — pre-fix, any non-0/1/2/3 exit
+#                         silently routed to the duration-then-PASS branch,
+#                         which is a fail-open: a panic'd diff binary
+#                         would promote a broken Layer 3 to STAGE_1)
 #   duration < min     → INSUFFICIENT_DURATION (only if parity OK)
 #   else               → PASS
 if [[ "$diff_exit" == "3" ]]; then
     echo "  >>> VERDICT: INPUT_ERROR — journal_diff binary could not run"
     echo "      Layer 3 STOP — fix the input issue and re-run."
+    echo "$SEP"
+    exit 3
+fi
+if [[ "$diff_exit" == "4" ]]; then
+    echo "  >>> VERDICT: INPUT_ERROR — journal_diff panicked (exit 4)"
+    echo "      Binary defect, not a strategy failure. See PANIC stderr"
+    echo "      above for the stack trace. Layer 3 STOP — fix the binary"
+    echo "      and re-run (do NOT promote to STAGE_1)."
     echo "$SEP"
     exit 3
 fi
@@ -239,6 +287,21 @@ if [[ "$diff_exit" == "1" ]]; then
     echo "      fee/slip parity, fill-price divergence, partial-take logic."
     echo "$SEP"
     exit 1
+fi
+# Anything outside the documented {0,1,2,3,4} taxonomy = unexpected.
+# Common causes: SIGSEGV (139), SIGKILL by OOM (137), signal contract
+# additions in a future journal_diff version we don't yet recognise.
+# All route to INPUT_ERROR — explicit refusal to PASS on an unknown
+# verdict. Same silent-on-corrupt-input pattern applied to subprocess
+# exit codes; family lock with layer2_smoke fix from commit 7faa7fe.
+if [[ "$diff_exit" != "0" ]]; then
+    echo "  >>> VERDICT: INPUT_ERROR — journal_diff exited unexpectedly (${diff_exit})"
+    echo "      Not in the documented 0/1/2/3/4 taxonomy. Common causes:"
+    echo "      SIGSEGV (139), OOM-killed (137), signal contract addition."
+    echo "      Inspect diff binary output above. Layer 3 STOP — investigate"
+    echo "      before re-running (do NOT promote to STAGE_1)."
+    echo "$SEP"
+    exit 3
 fi
 if [[ "$duration_ok" == "0" ]] && [[ "$SKIP_MIN_DAYS" != "1" ]]; then
     echo "  >>> VERDICT: INSUFFICIENT_DURATION — Layer 3 NOT YET EVALUABLE"

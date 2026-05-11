@@ -230,5 +230,253 @@ class ParityGateTest(unittest.TestCase):
                 f"within-threshold diff must PASS, got {code}\n{out}")
 
 
+# ── Lens-applied audit gaps ──────────────────────────────────────────────────
+
+
+def _make_fake_diff_binary(tmpdir: Path, exit_code: int,
+                           stdout: str = "fake journal_diff output\n") -> Path:
+    """Write a 3-line shell script as a journal_diff stand-in. Tests use this
+    via LAYER3_VERDICT_DIFF_OVERRIDE to inject canned exit codes that exercise
+    the wrapper's dispatch logic without rebuilding Go."""
+    fixture = tmpdir / "fake_journal_diff.sh"
+    fixture.write_text(
+        f"#!/usr/bin/env bash\n"
+        f"echo {shlex_quote(stdout)}\n"
+        f"exit {exit_code}\n"
+    )
+    fixture.chmod(0o755)
+    return fixture
+
+
+def shlex_quote(s: str) -> str:
+    import shlex
+    return shlex.quote(s)
+
+
+class UnexpectedDiffExitTest(unittest.TestCase):
+    """Closes F1 — the silent-on-corrupt-input pattern applied to subprocess
+    exit codes. Pre-fix, journal_diff returning any code outside {0,1,2,3}
+    fell through to the duration-then-PASS branch, which is a fail-open: a
+    panic'd diff binary (exit 4) or a SIGSEGV (139) would promote a
+    fundamentally-broken Layer 3 to STAGE_1.
+
+    All these tests use LAYER3_VERDICT_DIFF_OVERRIDE to inject the desired
+    exit code without rebuilding Go (faster + tests the contract directly).
+    """
+
+    def _setup_journals(self, stub: Path, tn: Path) -> None:
+        """Both journals must contain trades for the duration check to run
+        and the dispatch to reach the diff invocation."""
+        base = dt.datetime.now(dt.timezone.utc).replace(tzinfo=None) \
+               - dt.timedelta(days=10)
+        write_pair(stub, "BTCUSDT", base, +5000.0)
+        write_pair(tn,   "BTCUSDT", base, +5000.0)
+
+    def test_diff_exit_4_panic_routes_to_input_error(self):
+        """journal_diff exits 4 on Go panic (recoverPanic in main.go).
+        Pre-fix, this fell through to PASS. Post-fix → exit 3."""
+        with tempfile.TemporaryDirectory() as tmp_a, \
+             tempfile.TemporaryDirectory() as tmp_b, \
+             tempfile.TemporaryDirectory() as tmp_bin:
+            stub, tn = Path(tmp_a), Path(tmp_b)
+            self._setup_journals(stub, tn)
+            fake = _make_fake_diff_binary(Path(tmp_bin), 4,
+                                          stdout="PANIC: nil pointer\n")
+            code, out, err = run_wrapper(
+                "--stub-dir", str(stub), "--testnet-dir", str(tn),
+                env_extra={"LAYER3_VERDICT_DIFF_OVERRIDE": str(fake)},
+            )
+            self.assertEqual(code, 3,
+                f"diff_exit=4 (PANIC) must route to exit 3 not silently PASS, "
+                f"got {code}\n{out}")
+            self.assertIn("panicked", out)
+            self.assertNotIn("PASS — Layer 3 criterion met", out)
+
+    def test_diff_exit_139_segfault_routes_to_input_error(self):
+        """SIGSEGV → exit 139. Pre-fix, fell through to PASS."""
+        with tempfile.TemporaryDirectory() as tmp_a, \
+             tempfile.TemporaryDirectory() as tmp_b, \
+             tempfile.TemporaryDirectory() as tmp_bin:
+            stub, tn = Path(tmp_a), Path(tmp_b)
+            self._setup_journals(stub, tn)
+            fake = _make_fake_diff_binary(Path(tmp_bin), 139)
+            code, out, _ = run_wrapper(
+                "--stub-dir", str(stub), "--testnet-dir", str(tn),
+                env_extra={"LAYER3_VERDICT_DIFF_OVERRIDE": str(fake)},
+            )
+            self.assertEqual(code, 3,
+                f"SIGSEGV-shape exit must route to exit 3, got {code}\n{out}")
+            self.assertIn("unexpectedly", out)
+            self.assertIn("139", out)
+
+    def test_diff_exit_99_unknown_code_routes_to_input_error(self):
+        """Any future exit code we don't yet recognise — refuse to PASS."""
+        with tempfile.TemporaryDirectory() as tmp_a, \
+             tempfile.TemporaryDirectory() as tmp_b, \
+             tempfile.TemporaryDirectory() as tmp_bin:
+            stub, tn = Path(tmp_a), Path(tmp_b)
+            self._setup_journals(stub, tn)
+            fake = _make_fake_diff_binary(Path(tmp_bin), 99)
+            code, out, _ = run_wrapper(
+                "--stub-dir", str(stub), "--testnet-dir", str(tn),
+                env_extra={"LAYER3_VERDICT_DIFF_OVERRIDE": str(fake)},
+            )
+            self.assertEqual(code, 3,
+                f"unknown diff_exit must route to exit 3, got {code}\n{out}")
+            self.assertIn("99", out)
+
+    def test_override_missing_binary_exits_3(self):
+        """If the test harness points the override at a non-executable
+        path, the script fails loudly rather than silently using the
+        built binary or producing a misleading verdict."""
+        with tempfile.TemporaryDirectory() as tmp_a, \
+             tempfile.TemporaryDirectory() as tmp_b:
+            stub, tn = Path(tmp_a), Path(tmp_b)
+            self._setup_journals(stub, tn)
+            code, _, err = run_wrapper(
+                "--stub-dir", str(stub), "--testnet-dir", str(tn),
+                env_extra={"LAYER3_VERDICT_DIFF_OVERRIDE":
+                           "/tmp/does-not-exist-layer3-test"},
+            )
+            self.assertEqual(code, 3, err)
+            self.assertIn("not executable", err)
+
+    def test_override_diff_exit_0_still_passes(self):
+        """Sanity check: the override doesn't break the happy path.
+        Verifies the env-hook is wiring up correctly under the override
+        path AND the normal-path build."""
+        with tempfile.TemporaryDirectory() as tmp_a, \
+             tempfile.TemporaryDirectory() as tmp_b, \
+             tempfile.TemporaryDirectory() as tmp_bin:
+            stub, tn = Path(tmp_a), Path(tmp_b)
+            self._setup_journals(stub, tn)
+            fake = _make_fake_diff_binary(Path(tmp_bin), 0)
+            code, out, _ = run_wrapper(
+                "--stub-dir", str(stub), "--testnet-dir", str(tn),
+                env_extra={"LAYER3_VERDICT_DIFF_OVERRIDE": str(fake)},
+            )
+            self.assertEqual(code, 0,
+                f"override with exit 0 must PASS, got {code}\n{out}")
+            self.assertIn("PASS — Layer 3 criterion met", out)
+
+
+class FutureTimestampGuardTest(unittest.TestCase):
+    """Closes F2 — a future testnet-start (clock skew or operator typo)
+    pre-fix produced elapsed_days < 0, which routes to INSUFFICIENT_DURATION
+    (exit 4, "keep running, re-check") instead of INPUT_ERROR (exit 3, "fix
+    the clock now"). The wrong advice would have a real operator silently
+    accumulating noise instead of fixing the actual problem."""
+
+    def test_future_testnet_start_exits_3(self):
+        """--testnet-start one day in the future → exit 3, not exit 4."""
+        with tempfile.TemporaryDirectory() as tmp_a, \
+             tempfile.TemporaryDirectory() as tmp_b:
+            stub, tn = Path(tmp_a), Path(tmp_b)
+            base = dt.datetime.now(dt.timezone.utc).replace(tzinfo=None) \
+                   - dt.timedelta(days=10)
+            write_pair(stub, "BTCUSDT", base, +5000.0)
+            write_pair(tn,   "BTCUSDT", base, +5000.0)
+            future = (dt.datetime.now(dt.timezone.utc).replace(tzinfo=None)
+                      + dt.timedelta(days=1)
+                      ).strftime("%Y-%m-%dT%H:%M:%SZ")
+            code, _, err = run_wrapper(
+                "--stub-dir", str(stub), "--testnet-dir", str(tn),
+                "--testnet-start", future,
+            )
+            self.assertEqual(code, 3, f"future start must exit 3, got {code}\n{err}")
+            self.assertIn("future", err)
+            # Verify it's NOT routing to the "keep running" branch.
+            self.assertNotIn("NOT YET EVALUABLE", err)
+
+
+class ExitCodePrecedenceTest(unittest.TestCase):
+    """The wrapper's precedence comment claims: THRESHOLD > SIGNAL_DIV >
+    INPUT_ERROR > duration > PASS. Pin each precedence pair with a test
+    so a future refactor that moves the if-branches can't silently break
+    the contract."""
+
+    def _setup_journals_short_window(self, stub: Path, tn: Path) -> None:
+        """Trades within the last 2 days — duration gate would fire."""
+        recent = dt.datetime.now(dt.timezone.utc).replace(tzinfo=None) \
+                 - dt.timedelta(days=2)
+        write_pair(stub, "BTCUSDT", recent, +5000.0)
+        write_pair(tn,   "BTCUSDT", recent, +5000.0)
+
+    def test_threshold_violation_overrides_short_window(self):
+        """diff_exit=1 (THRESHOLD) wins over duration < 7d."""
+        with tempfile.TemporaryDirectory() as tmp_a, \
+             tempfile.TemporaryDirectory() as tmp_b, \
+             tempfile.TemporaryDirectory() as tmp_bin:
+            stub, tn = Path(tmp_a), Path(tmp_b)
+            self._setup_journals_short_window(stub, tn)
+            fake = _make_fake_diff_binary(Path(tmp_bin), 1)
+            code, out, _ = run_wrapper(
+                "--stub-dir", str(stub), "--testnet-dir", str(tn),
+                env_extra={"LAYER3_VERDICT_DIFF_OVERRIDE": str(fake)},
+            )
+            self.assertEqual(code, 1,
+                f"THRESHOLD must win over duration shortfall, got {code}\n{out}")
+            self.assertIn("THRESHOLD", out)
+
+    def test_signal_divergence_overrides_short_window(self):
+        """diff_exit=2 (SIGNAL_DIV) wins over duration < 7d."""
+        with tempfile.TemporaryDirectory() as tmp_a, \
+             tempfile.TemporaryDirectory() as tmp_b, \
+             tempfile.TemporaryDirectory() as tmp_bin:
+            stub, tn = Path(tmp_a), Path(tmp_b)
+            self._setup_journals_short_window(stub, tn)
+            fake = _make_fake_diff_binary(Path(tmp_bin), 2)
+            code, out, _ = run_wrapper(
+                "--stub-dir", str(stub), "--testnet-dir", str(tn),
+                env_extra={"LAYER3_VERDICT_DIFF_OVERRIDE": str(fake)},
+            )
+            self.assertEqual(code, 2,
+                f"SIGNAL_DIV must win over duration shortfall, got {code}\n{out}")
+            self.assertIn("SIGNAL_DIVERGENCE", out)
+
+    def test_panic_overrides_short_window(self):
+        """diff_exit=4 (PANIC) wins over duration shortfall and routes to 3."""
+        with tempfile.TemporaryDirectory() as tmp_a, \
+             tempfile.TemporaryDirectory() as tmp_b, \
+             tempfile.TemporaryDirectory() as tmp_bin:
+            stub, tn = Path(tmp_a), Path(tmp_b)
+            self._setup_journals_short_window(stub, tn)
+            fake = _make_fake_diff_binary(Path(tmp_bin), 4)
+            code, out, _ = run_wrapper(
+                "--stub-dir", str(stub), "--testnet-dir", str(tn),
+                env_extra={"LAYER3_VERDICT_DIFF_OVERRIDE": str(fake)},
+            )
+            self.assertEqual(code, 3,
+                f"PANIC must win over duration shortfall + route to 3, "
+                f"got {code}\n{out}")
+
+    def test_skip_min_days_does_not_mask_threshold(self):
+        """--skip-min-days makes duration advisory, but THRESHOLD still
+        wins — operator dry-running mustn't accidentally PASS a real
+        threshold violation."""
+        with tempfile.TemporaryDirectory() as tmp_a, \
+             tempfile.TemporaryDirectory() as tmp_b, \
+             tempfile.TemporaryDirectory() as tmp_bin:
+            stub, tn = Path(tmp_a), Path(tmp_b)
+            self._setup_journals_short_window(stub, tn)
+            fake = _make_fake_diff_binary(Path(tmp_bin), 1)
+            code, out, _ = run_wrapper(
+                "--stub-dir", str(stub), "--testnet-dir", str(tn),
+                "--skip-min-days",
+                env_extra={"LAYER3_VERDICT_DIFF_OVERRIDE": str(fake)},
+            )
+            self.assertEqual(code, 1,
+                f"--skip-min-days must not mask THRESHOLD, got {code}\n{out}")
+
+
+class CliFlagTest(unittest.TestCase):
+    """Pin the CLI surface against accidental contract changes."""
+
+    def test_unknown_flag_exits_3(self):
+        code, _, err = run_wrapper("--nonsense", "value")
+        self.assertEqual(code, 3, f"unknown flag must exit 3, got {code}\n{err}")
+        self.assertIn("unknown flag", err)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
