@@ -6,6 +6,9 @@
 #   2. forward_paper_status.sh — operational snapshot, dated under
 #      results/forward_paper_snapshots/<YYYY-MM-DD>.txt for longitudinal
 #      diffing
+# Additional stages 3-7 layer in journal validation, kill_protocol_check,
+# stage_promotion_check, forward_paper_resolution (LIMBO rule synthesis),
+# and lag_summary (REST-poll-lag aggregator added 2026-05-11).
 #
 # Drift check exits with the decision-grade severity; this wrapper
 # preserves that as its OWN exit code so launchd's last-exit-code column
@@ -387,6 +390,77 @@ $(echo "$RESOLUTION_OUTPUT" | tail -3)"
         ;;
 esac
 
+# --- 7. Fleet-wide source-to-receipt lag check ---
+# lag_summary.sh aggregates the lag_p99_ms percentiles emitted by the
+# REST-poll-lag instrumentation (commit 033ed02). Stage 7 closes the
+# loop between the instrumentation and operator-actionable alerts —
+# without this, lag degradation is only visible at redeploy time via
+# scripts/post_deploy_check.sh §4 (between deploys it goes unmonitored).
+# Tier contract matches lag_summary's locked exit codes:
+#   0 HEALTHY      — no alert
+#   1 DEGRADED     — WARN (p99 > 15s on ≥1 engine)
+#   2 HIGH         — CRITICAL (p99 > 30s — severe degradation)
+#   3 SSH_FAILURE  — WARN
+#   4 INPUT_ERROR  — WARN
+#   else           — UNEXPECTED WARN (script crash etc.)
+# Runs in full mode so the captured output is suitable for the
+# decision_snapshots/<date>-lag.txt persistence below.
+LAG_OUTPUT=$("${REPO_ROOT}/scripts/lag_summary.sh" 2>&1)
+LAG_EXIT=$?
+LAG_CLASS=$(_classify_python_exit "$LAG_EXIT" "1:DEGRADED,2:HIGH,3:SSH_FAILURE,4:INPUT_ERROR" "0")
+echo "lag_summary: exit=$LAG_EXIT class=$LAG_CLASS"
+case "$LAG_CLASS" in
+    CONTINUE)
+        # 0 HEALTHY — documented status quo, no alert.
+        :
+        ;;
+    DEGRADED)
+        notify_telegram WARN "weekly_audit lag: DEGRADED" \
+"lag_summary returned exit 1 — ≥1 engine reported lag_p99 > 15s in the
+last heartbeat. Source-to-receipt lag (Binance trade time → our receipt)
+is above the TYPICAL band; not severe but operator should investigate
+upstream API or network conditions.
+
+Run: scripts/lag_summary.sh
+Snapshot: results/decision_snapshots/$(date -u +%Y-%m-%d)-lag.txt
+$(echo "$LAG_OUTPUT" | grep -E '⚠|🚨|DEGRADED' | head -3)"
+        ;;
+    HIGH)
+        # CRITICAL because p99 > 30s indicates severe upstream
+        # degradation that will manifest as realized fill drift at
+        # Layer 2. Operator should investigate before the next cron.
+        notify_telegram CRITICAL "weekly_audit lag: HIGH on $(hostname)" \
+"lag_summary returned exit 2 — ≥1 engine reported lag_p99 > 30s. Severe
+source-to-receipt lag indicating upstream API degradation, network
+partition, or REST polling falling behind. At Layer 2 testnet this
+would manifest as realized fill drift; at paper today it's an early
+warning that the data pipeline is unhealthy.
+
+Run: scripts/lag_summary.sh
+Snapshot: results/decision_snapshots/$(date -u +%Y-%m-%d)-lag.txt
+$(echo "$LAG_OUTPUT" | grep -E '🚨|HIGH' | head -3)"
+        ;;
+    SSH_FAILURE)
+        notify_telegram WARN "weekly_audit lag: SSH_FAILURE" \
+"lag_summary returned exit 3 — could not reach VPS to fetch heartbeats.
+Same shape as the F2-fix tier classifier on journal_validate: this is
+operational/transient (network, ssh, auth) not lag degradation.
+$(echo "$LAG_OUTPUT" | tail -3)"
+        ;;
+    INPUT_ERROR)
+        notify_telegram WARN "weekly_audit lag: INPUT_ERROR" \
+"lag_summary returned exit 4 — bad flags or missing dependencies on
+the cron environment. Investigate before next firing.
+$(echo "$LAG_OUTPUT" | tail -3)"
+        ;;
+    UNEXPECTED|*)
+        notify_telegram WARN "weekly_audit lag: UNEXPECTED EXIT" \
+"lag_summary returned exit $LAG_EXIT (outside documented contract 0-4).
+Likely script crash, OOM, or env failure.
+$(echo "$LAG_OUTPUT" | tail -3)"
+        ;;
+esac
+
 # --- Persist decision snapshots for longitudinal review ---
 SNAP_DIR="${REPO_ROOT}/results/decision_snapshots"
 mkdir -p "$SNAP_DIR"
@@ -394,6 +468,7 @@ TODAY=$(date -u +%Y-%m-%d)
 echo "$KILL_OUTPUT" > "${SNAP_DIR}/${TODAY}-kill.txt"
 echo "$PROMOTE_OUTPUT" > "${SNAP_DIR}/${TODAY}-promote.txt"
 echo "$RESOLUTION_OUTPUT" > "${SNAP_DIR}/${TODAY}-resolution.txt"
+echo "$LAG_OUTPUT" > "${SNAP_DIR}/${TODAY}-lag.txt"
 
 # --- exit with the drift wrapper's code so launchd surfaces the right thing ---
 # Rationale: drift is the decision-grade KILL signal calibrated against null;

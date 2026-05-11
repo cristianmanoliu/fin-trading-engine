@@ -88,6 +88,20 @@ assert_eq "promote exit 4 → CANDIDATE"       "$(_classify_python_exit 4 "$PROM
 assert_eq "promote exit 99 → UNEXPECTED"     "$(_classify_python_exit 99 "$PROMOTE_MODES" "$PROMOTE_CONTINUE")" "UNEXPECTED"
 
 echo
+echo "Stage 7: _classify_python_exit (lag_summary contract)"
+# lag_summary.sh exit codes (commit bb53c1b):
+#   0 HEALTHY / 1 DEGRADED / 2 HIGH / 3 SSH_FAILURE / 4 INPUT_ERROR
+LAG_MODES="1:DEGRADED,2:HIGH,3:SSH_FAILURE,4:INPUT_ERROR"
+LAG_CONTINUE="0"
+assert_eq "lag exit 0 → CONTINUE"     "$(_classify_python_exit 0 "$LAG_MODES" "$LAG_CONTINUE")" "CONTINUE"
+assert_eq "lag exit 1 → DEGRADED"     "$(_classify_python_exit 1 "$LAG_MODES" "$LAG_CONTINUE")" "DEGRADED"
+assert_eq "lag exit 2 → HIGH"         "$(_classify_python_exit 2 "$LAG_MODES" "$LAG_CONTINUE")" "HIGH"
+assert_eq "lag exit 3 → SSH_FAILURE"  "$(_classify_python_exit 3 "$LAG_MODES" "$LAG_CONTINUE")" "SSH_FAILURE"
+assert_eq "lag exit 4 → INPUT_ERROR"  "$(_classify_python_exit 4 "$LAG_MODES" "$LAG_CONTINUE")" "INPUT_ERROR"
+# REGRESSION: crash exit must NOT silently route to "no alert"
+assert_eq "lag exit 5 → UNEXPECTED"   "$(_classify_python_exit 5 "$LAG_MODES" "$LAG_CONTINUE")" "UNEXPECTED"
+
+echo
 echo "F5: _classify_python_exit (forward_paper_resolution contract)"
 RESOLUTION_MODES="1:PROMOTE,2:WATCH,3:OPERATOR_REVIEW,4:KILL,5:INPUT_ERROR"
 RESOLUTION_CONTINUE="0"
