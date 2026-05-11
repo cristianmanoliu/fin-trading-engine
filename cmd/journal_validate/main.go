@@ -353,6 +353,33 @@ func validateFile(path string, state *symbolState) ([]issue, error) {
 			prevTS = e.TS
 		}
 
+		// Field-presence guard for open/close events. Missing symbol or ts
+		// silently corrupts the in-flight tracker (state.inFlight[""] is
+		// shared across all empty-symbol entries; openKey{"", ""} collapses
+		// across events). Without this guard, a malformed engine emit could
+		// hide invariant violations (e.g., a real "open while in-flight"
+		// gets miscounted because both opens land in inFlight[""]).
+		if e.Event == "open" || e.Event == "close" {
+			if e.Symbol == "" {
+				issues = append(issues, issue{
+					Severity: "ERROR",
+					File:     path,
+					Line:     lineno,
+					Msg:      fmt.Sprintf("%s event missing required field: symbol", e.Event),
+				})
+				continue
+			}
+			if e.TS == "" {
+				issues = append(issues, issue{
+					Severity: "ERROR",
+					File:     path,
+					Line:     lineno,
+					Msg:      fmt.Sprintf("%s event for %s missing required field: ts", e.Event, e.Symbol),
+				})
+				continue
+			}
+		}
+
 		switch e.Event {
 		case "open":
 			k := openKey{e.Symbol, e.TS}

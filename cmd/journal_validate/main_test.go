@@ -380,6 +380,46 @@ func TestValidateFile_CostDecomp_RoundOffWithinTolerance(t *testing.T) {
 	}
 }
 
+func TestValidateFile_OpenMissingSymbol_Errors(t *testing.T) {
+	// open event with empty symbol must not silently increment inFlight[""]
+	// — that would mask real invariant violations elsewhere.
+	p := writeJournal(t,
+		`{"event":"open","symbol":"","ts":"2026-05-08T08:00:00Z","side":"LONG","entry":100}`,
+	)
+	issues, err := validateFile(p, newSymbolState())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(issues) == 0 || issues[0].Severity != "ERROR" {
+		t.Fatalf("expected ERROR for open-missing-symbol, got %+v", issues)
+	}
+	if !strings.Contains(issues[0].Msg, "missing required field: symbol") {
+		t.Errorf("error msg should name the missing field: %q", issues[0].Msg)
+	}
+}
+
+func TestValidateFile_CloseMissingTS_Errors(t *testing.T) {
+	// close event with empty ts must not silently decrement state — would
+	// hide a real "close without open" if the symbol matches an in-flight.
+	p := writeJournal(t,
+		openLine("BTCUSDT", "2026-05-08T08:00:00Z"),
+		`{"event":"close","symbol":"BTCUSDT","ts":"","side":"LONG","entry":100,"exit":110,"outcome":"TARGET"}`,
+	)
+	issues, err := validateFile(p, newSymbolState())
+	if err != nil {
+		t.Fatal(err)
+	}
+	hasFieldErr := false
+	for _, iss := range issues {
+		if iss.Severity == "ERROR" && strings.Contains(iss.Msg, "missing required field: ts") {
+			hasFieldErr = true
+		}
+	}
+	if !hasFieldErr {
+		t.Errorf("expected ERROR for close-missing-ts, got %+v", issues)
+	}
+}
+
 func TestValidateFile_MultipleSymbolsIndependent(t *testing.T) {
 	// open ETH then close BTC (without ETH being closed first) is OK only if
 	// BTC was previously opened. Cross-symbol pairing is per-symbol.
