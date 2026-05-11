@@ -57,19 +57,19 @@ crit() {
 # ── 1. Engine systemd state ────────────────────────────────────────────────────
 echo ""
 echo "1. Engine systemd state"
-ACTIVE_COUNT=$(ssh "${TARGET}" "systemctl list-units 'paper-live@*.service' --state=active --no-legend 2>/dev/null | wc -l" || echo 0)
+ACTIVE_COUNT=$(ssh -o BatchMode=yes -o ConnectTimeout=10 "${TARGET}" "systemctl list-units 'paper-live@*.service' --state=active --no-legend 2>/dev/null | wc -l" || echo 0)
 EXPECTED=$(echo "$SYMBOLS_LC" | wc -w | tr -d ' ')
 if [[ "$ACTIVE_COUNT" == "$EXPECTED" ]]; then
     ok "all $EXPECTED deployed engines active"
 else
     warn "$ACTIVE_COUNT/$EXPECTED engines active"
-    ssh "${TARGET}" "systemctl list-units 'paper-live@*.service' --no-legend 2>&1 | grep -v active" || true
+    ssh -o BatchMode=yes -o ConnectTimeout=10 "${TARGET}" "systemctl list-units 'paper-live@*.service' --no-legend 2>&1 | grep -v active" || true
 fi
 
 # ── 2. Watchdog timers ─────────────────────────────────────────────────────────
 echo ""
 echo "2. Watchdog timers"
-TIMER_STATUS=$(ssh "${TARGET}" "systemctl list-units --no-legend 'paper-live-*.timer' 2>/dev/null" || echo "")
+TIMER_STATUS=$(ssh -o BatchMode=yes -o ConnectTimeout=10 "${TARGET}" "systemctl list-units --no-legend 'paper-live-*.timer' 2>/dev/null" || echo "")
 for timer in paper-live-watchdog.timer paper-live-digest.timer; do
     # systemctl output indents with 2 leading spaces — match anywhere on the timer's line.
     if echo "$TIMER_STATUS" | grep -qE "${timer}.*active"; then
@@ -83,7 +83,7 @@ done
 echo ""
 echo "3. Binary code matches local"
 LOCAL_MD5=$(md5sum pkg/funding/funding.go pkg/strategy/engine.go pkg/strategy/entry.go cmd/engine/main.go 2>/dev/null | awk '{print $1}' | sort | md5sum | awk '{print $1}')
-REMOTE_MD5=$(ssh "${TARGET}" "md5sum /opt/trading-engine/pkg/funding/funding.go /opt/trading-engine/pkg/strategy/engine.go /opt/trading-engine/pkg/strategy/entry.go /opt/trading-engine/cmd/engine/main.go 2>/dev/null | awk '{print \$1}' | sort | md5sum | awk '{print \$1}'" 2>/dev/null || echo "")
+REMOTE_MD5=$(ssh -o BatchMode=yes -o ConnectTimeout=10 "${TARGET}" "md5sum /opt/trading-engine/pkg/funding/funding.go /opt/trading-engine/pkg/strategy/engine.go /opt/trading-engine/pkg/strategy/entry.go /opt/trading-engine/cmd/engine/main.go 2>/dev/null | awk '{print \$1}' | sort | md5sum | awk '{print \$1}'" 2>/dev/null || echo "")
 if [[ "$LOCAL_MD5" == "$REMOTE_MD5" ]]; then
     ok "code-path checksums match (engine binary is from current source)"
 else
@@ -98,7 +98,7 @@ echo ""
 printf "  %-14s %-9s %-13s %-30s %s\n" "symbol" "state" "last_tick" "last_event" "uptime"
 printf "  %-14s %-9s %-13s %-30s %s\n" "------" "------" "---------" "----------" "------"
 
-CHECK_RESULTS=$(ssh "${TARGET}" "now=\$(date -u +%s)
+CHECK_RESULTS=$(ssh -o BatchMode=yes -o ConnectTimeout=10 "${TARGET}" "now=\$(date -u +%s)
 for sym in $SYMBOLS_LC; do
   active=\$(systemctl is-active paper-live@\${sym}.service 2>&1)
   last_hb=\$(grep '\"msg\":\"heartbeat\"' /var/log/paper-live/\${sym}.log 2>/dev/null | tail -1)
@@ -169,7 +169,7 @@ fi
 # so all rows always matched. Use jq to extract the .time field for proper compare.
 echo ""
 echo "5. ERROR-level events in last 5 min"
-ERR_TOTAL=$(ssh "${TARGET}" "now_iso=\$(date -u -d '5 minutes ago' '+%Y-%m-%dT%H:%M:%SZ')
+ERR_TOTAL=$(ssh -o BatchMode=yes -o ConnectTimeout=10 "${TARGET}" "now_iso=\$(date -u -d '5 minutes ago' '+%Y-%m-%dT%H:%M:%SZ')
 for sym in $SYMBOLS_LC; do
   jq -rc --arg cutoff \"\$now_iso\" 'select(.level == \"ERROR\" and .time >= \$cutoff)' /var/log/paper-live/\${sym}.log 2>/dev/null
 done | wc -l")
@@ -182,13 +182,13 @@ elif [[ "$MIN_UPTIME" -lt 5 ]]; then
     # 5min uptime, at which point the gate releases and any persistent
     # error flips back to a warn.
     echo "  ⓘ  $ERR_TOTAL ERROR-level events in last 5 min (fleet warming up: min uptime ${MIN_UPTIME}min — re-run after fleet ages 5+ min):"
-    ssh "${TARGET}" "now_iso=\$(date -u -d '5 minutes ago' '+%Y-%m-%dT%H:%M:%SZ')
+    ssh -o BatchMode=yes -o ConnectTimeout=10 "${TARGET}" "now_iso=\$(date -u -d '5 minutes ago' '+%Y-%m-%dT%H:%M:%SZ')
     for sym in $SYMBOLS_LC; do
       jq -rc --arg cutoff \"\$now_iso\" 'select(.level == \"ERROR\" and .time >= \$cutoff)' /var/log/paper-live/\${sym}.log 2>/dev/null | head -3 | sed \"s/^/    /\"
     done"
 else
     warn "$ERR_TOTAL ERROR-level events in last 5 min — investigate:"
-    ssh "${TARGET}" "now_iso=\$(date -u -d '5 minutes ago' '+%Y-%m-%dT%H:%M:%SZ')
+    ssh -o BatchMode=yes -o ConnectTimeout=10 "${TARGET}" "now_iso=\$(date -u -d '5 minutes ago' '+%Y-%m-%dT%H:%M:%SZ')
     for sym in $SYMBOLS_LC; do
       jq -rc --arg cutoff \"\$now_iso\" 'select(.level == \"ERROR\" and .time >= \$cutoff)' /var/log/paper-live/\${sym}.log 2>/dev/null | head -3 | sed \"s/^/    /\"
     done"
@@ -197,7 +197,7 @@ fi
 # ── 6. Recent rate-limit pressure ─────────────────────────────────────────────
 echo ""
 echo "6. Rate-limit pressure (last 5 min)"
-RL_TOTAL=$(ssh "${TARGET}" "now_iso=\$(date -u -d '5 minutes ago' '+%Y-%m-%dT%H:%M:%SZ')
+RL_TOTAL=$(ssh -o BatchMode=yes -o ConnectTimeout=10 "${TARGET}" "now_iso=\$(date -u -d '5 minutes ago' '+%Y-%m-%dT%H:%M:%SZ')
 for sym in $SYMBOLS_LC; do
   jq -rc --arg cutoff \"\$now_iso\" 'select(.msg | test(\"rate limited\")) | select(.time >= \$cutoff)' /var/log/paper-live/\${sym}.log 2>/dev/null
 done | wc -l")
@@ -226,7 +226,7 @@ fi
 # Cohort split (live vs shadow/<label>) derived from the .journal_path field.
 echo ""
 echo "7. Position recovery events in last 24h"
-REC_TOTAL=$(ssh "${TARGET}" "cutoff=\$(date -u -d '24 hours ago' '+%Y-%m-%dT%H:%M:%SZ')
+REC_TOTAL=$(ssh -o BatchMode=yes -o ConnectTimeout=10 "${TARGET}" "cutoff=\$(date -u -d '24 hours ago' '+%Y-%m-%dT%H:%M:%SZ')
 total=0
 for sym in $SYMBOLS_LC; do
   for f in /var/log/paper-live/\${sym}.log /var/log/paper-live/\${sym}.log.1; do
@@ -243,7 +243,7 @@ else
     # ⓘ rather than ⚠: a recovery isn't inherently a problem (planned deploy
     # restarts will trigger it), but the operator should verify each is expected.
     echo "  ⓘ  $REC_TOTAL recovery event(s) in last 24h — verify each is a planned restart"
-    ssh "${TARGET}" "cutoff=\$(date -u -d '24 hours ago' '+%Y-%m-%dT%H:%M:%SZ')
+    ssh -o BatchMode=yes -o ConnectTimeout=10 "${TARGET}" "cutoff=\$(date -u -d '24 hours ago' '+%Y-%m-%dT%H:%M:%SZ')
     for sym in $SYMBOLS_LC; do
       for f in /var/log/paper-live/\${sym}.log /var/log/paper-live/\${sym}.log.1; do
         [[ -f \"\$f\" ]] || continue
@@ -260,7 +260,7 @@ fi
 # check; pre-promotion it should always show 0 real-money engines.
 echo ""
 echo "8. Executor mode per engine"
-EXEC_REPORT=$(ssh "${TARGET}" "real_count=0
+EXEC_REPORT=$(ssh -o BatchMode=yes -o ConnectTimeout=10 "${TARGET}" "real_count=0
 real_list=''
 testnet_count=0
 testnet_list=''
@@ -330,7 +330,7 @@ fi
 # run >5min after restart. Scan the current log for the literal message.
 echo ""
 echo "9. Funding CSV staleness"
-STALE_REPORT=$(ssh "${TARGET}" "stale_lines=\$(for sym in $SYMBOLS_LC; do
+STALE_REPORT=$(ssh -o BatchMode=yes -o ConnectTimeout=10 "${TARGET}" "stale_lines=\$(for sym in $SYMBOLS_LC; do
   jq -rc 'select(.msg == \"funding CSV is stale; trades held past last entry will accrue \$0 funding — run scripts/refresh_funding.sh + redeploy\") | \"  \" + .symbol + \"  stale_days=\" + (.stale_days|tostring) + \"  last_funding_ts=\" + .last_funding_ts' /var/log/paper-live/\${sym}.log 2>/dev/null | tail -1
 done | grep -v '^\$' || true)
 echo -n \"\$stale_lines\"")
@@ -351,7 +351,7 @@ fi
 # runaway logs.
 echo ""
 echo "10. Disk space"
-DISK_REPORT=$(ssh "${TARGET}" "free_mb=\$(df -BM / | tail -1 | awk '{print \$4}' | sed 's/M\$//')
+DISK_REPORT=$(ssh -o BatchMode=yes -o ConnectTimeout=10 "${TARGET}" "free_mb=\$(df -BM / | tail -1 | awk '{print \$4}' | sed 's/M\$//')
 largest_bytes=\$(ls -l /var/log/paper-live/*.log 2>/dev/null | awk '{print \$5}' | sort -n | tail -1)
 largest_bytes=\${largest_bytes:-0}
 echo \"\$free_mb|\$largest_bytes\"")
@@ -467,7 +467,7 @@ fi
 # >5 implies a real loop.
 echo ""
 echo "12. Restart-loop detection (last 1 hour)"
-RESTART_REPORT=$(ssh "${TARGET}" "for sym in $SYMBOLS_LC; do
+RESTART_REPORT=$(ssh -o BatchMode=yes -o ConnectTimeout=10 "${TARGET}" "for sym in $SYMBOLS_LC; do
     n=\$(journalctl -u paper-live@\${sym}.service --since '1 hour ago' --no-pager 2>/dev/null | grep -c 'Started paper-live' || true)
     if [[ \$n -gt 2 ]]; then
         echo \"\$sym|\$n\"
@@ -505,7 +505,7 @@ fi
 # VPS) so we only assert the flag is present.
 echo ""
 echo "13. Live-config compliance"
-DEVIATIONS=$(ssh "${TARGET}" "for sym in $SYMBOLS_LC; do
+DEVIATIONS=$(ssh -o BatchMode=yes -o ConnectTimeout=10 "${TARGET}" "for sym in $SYMBOLS_LC; do
     es=\$(systemctl show -p ExecStart --value paper-live@\${sym}.service 2>/dev/null || true)
     missing=''
     for spec in \\

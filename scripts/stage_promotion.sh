@@ -381,7 +381,7 @@ For paper → STAGE_1 (real-money first activation):
      on the VPS (separate from any testnet keys used at Layer 2).
   3. Set stake_usd: \$${STAKE_USD} (CLI override --stake-usd ${STAKE_USD})
   4. Generate the diff against current production config:
-     ssh root@178.105.24.230 'cat /etc/systemd/system/paper-live@.service'
+     ssh -o BatchMode=yes -o ConnectTimeout=10 root@178.105.24.230 'cat /etc/systemd/system/paper-live@.service'
      (capture, edit locally, plan the systemd-edit + daemon-reload sequence)
 
 EOF
@@ -430,7 +430,7 @@ Apply the locked diff per runbook §Phase-2, then re-run with STAGE_PROMOTION_CO
     else
         # ConnectTimeout caps the wait if the VPS is unreachable; the
         # operator's Phase 2 shouldn't hang on a transient SSH issue.
-        if systemd_snapshot=$(ssh -o ConnectTimeout=5 "$target" \
+        if systemd_snapshot=$(ssh -o BatchMode=yes -o ConnectTimeout=5 "$target" \
                               'systemctl cat paper-live@.service 2>/dev/null' 2>/dev/null); then
             if [[ -n "$systemd_snapshot" ]]; then
                 echo "✓ captured systemd unit snapshot from VPS"
@@ -480,12 +480,12 @@ The halt SSH command: systemctl stop paper-live@*.service on the VPS."
         fi
         if [[ "${STAGE_PROMOTION_DRY_RUN:-0}" != "1" ]]; then
             echo "→ Halting all engines on VPS…"
-            if ! ssh root@178.105.24.230 'systemctl stop "paper-live@*.service"'; then
+            if ! ssh -o BatchMode=yes -o ConnectTimeout=10 root@178.105.24.230 'systemctl stop "paper-live@*.service"'; then
                 die "$EXIT_PHASE_RUNTIME_ERROR" "phase3-halt-ssh-failed" \
                     "SSH to VPS failed during STAGE_4 halt. Investigate connectivity before retrying."
             fi
             local active_count
-            active_count=$(ssh root@178.105.24.230 'systemctl list-units "paper-live@*.service" --state=active --no-legend 2>/dev/null | wc -l' | tr -d ' ')
+            active_count=$(ssh -o BatchMode=yes -o ConnectTimeout=10 root@178.105.24.230 'systemctl list-units "paper-live@*.service" --state=active --no-legend 2>/dev/null | wc -l' | tr -d ' ')
             if [[ "$active_count" != "0" ]]; then
                 die "$EXIT_PHASE_VERIFICATION_FAILED" "phase3-halt-incomplete" \
                     "After 'systemctl stop' the VPS still reports $active_count active paper-live engines. Investigate before deploying."
@@ -590,7 +590,7 @@ PYEOF
         # python script here — heredoc stdin overrides piped stdin
         # (shellcheck SC2259), so the journal stream would never reach
         # python. Use -c with an inline script that reads from stdin.
-        ssh "$target" 'cat /var/log/paper-live/journal/*.jsonl 2>/dev/null || true' \
+        ssh -o BatchMode=yes -o ConnectTimeout=10 "$target" 'cat /var/log/paper-live/journal/*.jsonl 2>/dev/null || true' \
         | python3 -c "
 import json, sys
 since = sys.argv[1]

@@ -18,7 +18,7 @@ fi
 
 run_remote() {
     if [[ -n "$VPS" ]]; then
-        ssh "$VPS" bash -s <<< "$1"
+        ssh -o BatchMode=yes -o ConnectTimeout=10 "$VPS" bash -s <<< "$1"
     else
         bash -c "$1"
     fi

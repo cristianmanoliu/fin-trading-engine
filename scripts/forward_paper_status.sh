@@ -57,7 +57,7 @@ remote_or_local() {
     if [[ "$VPS" == "local" ]]; then
         bash -c "JOURNAL_DIR=$journal_safe bash -s" <<<"$1"
     else
-        ssh "$VPS" "JOURNAL_DIR=$journal_safe bash -s" <<<"$1"
+        ssh -o BatchMode=yes -o ConnectTimeout=10 "$VPS" "JOURNAL_DIR=$journal_safe bash -s" <<<"$1"
     fi
 }
 
