@@ -79,6 +79,16 @@ func main() {
 	if *symbol != "" {
 		cfg.Symbol = *symbol
 	}
+	// BD-1: partial --year/--month previously silently ignored — operator
+	// passing only one expected the override and got the YAML-default
+	// CSV path. Audit-pattern fail-open: ambiguous flag → wrong data
+	// source → wrong backtest verdict locked into results/. Now: refuse
+	// asymmetric flags loudly.
+	if (*year != "") != (*month != "") {
+		slog.Error("--year and --month must be set together (or both omitted); partial override is ambiguous",
+			"year", *year, "month", *month)
+		os.Exit(1)
+	}
 	if *year != "" && *month != "" {
 		cfg.Backtest.CSVPath = fmt.Sprintf("./data/%s-1m-%s-%s.csv", cfg.Symbol, *year, *month)
 	}
@@ -106,6 +116,19 @@ func main() {
 		sideDir = models.Short
 	default:
 		slog.Error("invalid --side-filter; must be both | long | short", "got", *sideFilter)
+		os.Exit(1)
+	}
+
+	// BD-3 (pre-flight): if the funding-filter flag is set without
+	// --funding-csv-dir, the post-load type assertion will fail and
+	// silently disable the filter. Pre-flight catches the obvious
+	// flag-pair misuse before we spend CSV-open time. Mirrors the
+	// cmd/engine validateExecutorArgs ordering principle. The later
+	// post-LoadFromDir check still fires when the dir IS provided but
+	// the per-symbol file is missing — a separate shape.
+	if *fundingFilterMaxBpsPerDay > 0 && *fundingCSVDir == "" {
+		slog.Error("--funding-filter-max-bps-per-day requires --funding-csv-dir to load Historical provider — refusing silent disable",
+			"max_bps_per_day", *fundingFilterMaxBpsPerDay)
 		os.Exit(1)
 	}
 
@@ -222,22 +245,40 @@ func main() {
 
 	// Funding filter (optional): gate SHORT signals by current funding regime.
 	// Requires Historical funding provider — Constant rate has no time variation.
+	//
+	// BD-3: previously slog.Warn + continue when the type assertion failed —
+	// operator enabled the filter flag expecting shorts to be gated; the
+	// backtest silently ran WITHOUT the filter, producing strategy results
+	// that don't match operator intent. Same audit-pattern shape as the
+	// cmd/engine 2nd-pass fix at fe4bf21 (--funding-filter-max-bps-per-day
+	// silently disabled when provider isn't Historical). Now: exit 1.
 	if *fundingFilterMaxBpsPerDay > 0 {
-		if hist, ok := exec.FundingProvider.(*funding.Historical); ok {
-			runner.SetFundingFilter(&strategy.FundingFilter{
-				Reader:       hist,
-				MaxBpsPerDay: *fundingFilterMaxBpsPerDay,
-			})
-			slog.Info("funding filter enabled", "max_bps_per_day", *fundingFilterMaxBpsPerDay)
-		} else {
-			slog.Warn("--funding-filter-max-bps-per-day requires --funding-csv-dir to load Historical provider; filter ignored")
+		hist, ok := exec.FundingProvider.(*funding.Historical); if !ok {
+			slog.Error("--funding-filter-max-bps-per-day requires --funding-csv-dir to load Historical provider — refusing silent disable",
+				"max_bps_per_day", *fundingFilterMaxBpsPerDay,
+				"funding_csv_dir", *fundingCSVDir,
+				"symbol", cfg.Symbol)
+			os.Exit(1)
 		}
+		runner.SetFundingFilter(&strategy.FundingFilter{
+			Reader:       hist,
+			MaxBpsPerDay: *fundingFilterMaxBpsPerDay,
+		})
+		slog.Info("funding filter enabled", "max_bps_per_day", *fundingFilterMaxBpsPerDay)
 	}
 
+	// BD-4: track whether the loop exited via SIGINT/SIGTERM cancellation
+	// vs natural CSV-exhausted completion. Without this distinction,
+	// "backtest complete" fires identically in both cases — a Ctrl-C'd
+	// run looks the same as a fully-replayed one. A partial sweep with
+	// matching log message could be locked into results/ as if it were
+	// a clean run.
+	cancelled := false
 loop:
 	for {
 		select {
 		case <-ctx.Done():
+			cancelled = true
 			break loop
 		case tick, ok := <-ticks:
 			if !ok {
@@ -251,5 +292,9 @@ loop:
 	}
 
 	runner.Summarize()
+	if cancelled {
+		slog.Warn("backtest CANCELLED (interrupted before CSV exhaustion) — summary is PARTIAL, do not lock as a verdict")
+		os.Exit(130) // 128 + SIGINT(2) — conventional shell exit code for interrupted process
+	}
 	slog.Info("backtest complete")
 }

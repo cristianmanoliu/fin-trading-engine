@@ -141,3 +141,49 @@ func TestCLI_YearMonthOverride_BuildsCSVPath(t *testing.T) {
 		t.Errorf("expected year/month-overridden path in error, got:\n%s", out)
 	}
 }
+
+// TestCLI_BD1_PartialYearOnly_Exits1 — operator passes only --year
+// without --month (or vice versa). Previously the override was silently
+// skipped (`if *year != "" && *month != ""`) and the CSV path defaulted
+// to whatever the YAML had — operator runs "Jan 2024" but gets a
+// different month/year, then locks the wrong verdict into results/.
+// Now: refuse asymmetric flags.
+func TestCLI_BD1_PartialYearOnly_Exits1(t *testing.T) {
+	cfg := minimalConfig(t, "/tmp/nonexistent.csv")
+	code, out := runBT(t, "--config", cfg, "--year", "2024")
+	if code != 1 {
+		t.Errorf("expected exit 1 on partial year-only, got %d\nout:\n%s", code, out)
+	}
+	if !strings.Contains(out, "--year and --month must be set together") {
+		t.Errorf("expected partial-flag error, got:\n%s", out)
+	}
+}
+
+func TestCLI_BD1_PartialMonthOnly_Exits1(t *testing.T) {
+	cfg := minimalConfig(t, "/tmp/nonexistent.csv")
+	code, out := runBT(t, "--config", cfg, "--month", "06")
+	if code != 1 {
+		t.Errorf("expected exit 1 on partial month-only, got %d\nout:\n%s", code, out)
+	}
+	if !strings.Contains(out, "--year and --month must be set together") {
+		t.Errorf("expected partial-flag error, got:\n%s", out)
+	}
+}
+
+// TestCLI_BD3_FundingFilterWithoutCSVDir_Exits1 — operator enables the
+// funding-cross filter flag expecting shorts to be gated; previously the
+// type assertion to *funding.Historical failed (no --funding-csv-dir
+// provided), slog.Warn fired, and the backtest ran WITHOUT the filter.
+// Strategy results then didn't match operator intent. Same audit-pattern
+// shape as the cmd/engine 2nd-pass fix at fe4bf21. Now: exit 1.
+func TestCLI_BD3_FundingFilterWithoutCSVDir_Exits1(t *testing.T) {
+	cfg := minimalConfig(t, "/tmp/nonexistent.csv")
+	code, out := runBT(t, "--config", cfg,
+		"--funding-filter-max-bps-per-day", "5")
+	if code != 1 {
+		t.Errorf("expected exit 1 on funding-filter without csv-dir, got %d\nout:\n%s", code, out)
+	}
+	if !strings.Contains(out, "refusing silent disable") {
+		t.Errorf("expected explicit refusal message, got:\n%s", out)
+	}
+}
