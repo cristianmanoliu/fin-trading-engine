@@ -39,14 +39,15 @@ That's it. If it's 16, the engines are running. If it's <16, something needs inv
 
 ### Weekly (≤ 15 min, every Sunday)
 
-The launchd cron `com.tradingengine.drift-check` fires every Sunday at 09:00 local. It runs `scripts/weekly_audit.sh` which executes 6 stages and Telegram-routes per the locked tier mapping:
+The launchd cron `com.tradingengine.drift-check` fires every Sunday at 09:00 local. It runs `scripts/weekly_audit.sh` which executes 7 stages and Telegram-routes per the locked tier mapping:
 
-1. `run_drift_check.sh` — decision-grade kill signal
+1. `run_drift_check.sh` — decision-grade kill signal (exit 0/1/2/3/4/5 — **NEW exit 5 = HISTORY_CORRUPT**: malformed line in `drift_check_history.jsonl`, two-firings rule cannot be evaluated until repaired)
 2. `forward_paper_status.sh` snapshot → `results/forward_paper_snapshots/<date>.txt`
 3. `cmd/journal_validate` — journal self-consistency
 4. `kill_protocol_check.py` — locked kill criteria
 5. `stage_promotion_check.py` — locked promotion criteria
 6. `forward_paper_resolution.py` — LIMBO 5-verdict synthesis
+7. `lag_summary.sh` — fleet-wide source-to-receipt lag aggregator (commit `7784c6a`). Tier verdict: HEALTHY (silent) / DEGRADED (WARN, p99 > 15s on ≥1 engine) / HIGH (CRITICAL, p99 > 30s — severe API degradation)
 
 If you receive **NO Telegram alerts** Sunday 09:00–10:00, the system is healthy. **Status quo means silence.** Don't be alarmed by silence.
 
@@ -57,9 +58,10 @@ cat results/forward_paper_snapshots/$(date -u +%Y-%m-%d).txt        # forward_pa
 cat results/decision_snapshots/$(date -u +%Y-%m-%d)-resolution.txt  # LIMBO verdict (stage 6)
 cat results/decision_snapshots/$(date -u +%Y-%m-%d)-kill.txt        # kill_protocol_check (stage 4)
 cat results/decision_snapshots/$(date -u +%Y-%m-%d)-promote.txt     # stage_promotion_check (stage 5)
+cat results/decision_snapshots/$(date -u +%Y-%m-%d)-lag.txt         # lag_summary fleet view (stage 7)
 ```
 
-The first is the operator dashboard; the next three are decision-grade verdicts written by the cron's stages 4–6. A weekly fire that produces `-kill.txt` + `-promote.txt` but **no `-resolution.txt`** means stage 6 (LIMBO) did NOT run — investigate.
+The first is the operator dashboard; the rest are decision-grade verdicts written by the cron's stages 4–7. A weekly fire that produces `-kill.txt` + `-promote.txt` but **no `-resolution.txt`** means stage 6 (LIMBO) did NOT run — investigate. Same shape for missing `-lag.txt` and stage 7.
 
 For trends across snapshots:
 
@@ -97,6 +99,7 @@ Tier prefixes (from `pkg/notify/telegram.go`):
 - **PROMOTION READY** — stage_promotion_check exit 0 — all gates pass. Pre-promotion checklist (Layer 2 + Layer 3) before flipping --executor.
 - **Engine panic / crashed** — investigate logs, restart engine.
 - **Journal write failed** — REAL-MONEY POSITION MAY BE INVISIBLE. Check disk + permissions.
+- **weekly_audit lag: HIGH** (stage 7, ≥1 engine `lag_p99 > 30s`) — severe source-to-receipt lag indicating upstream API degradation, network partition, or REST polling falling behind. At Layer 2 this would manifest as realized fill drift; in paper today it's early warning the data pipeline is unhealthy.
 
 ### What fires WARN (investigate within 24h)
 
@@ -107,6 +110,9 @@ Tier prefixes (from `pkg/notify/telegram.go`):
 - Layer 2 / Layer 3 startup events
 - Funding CSV staleness >7 days
 - post_deploy_check.sh STRICT-mode FAIL
+- **weekly_audit lag: DEGRADED** (stage 7, ≥1 engine `lag_p99 > 15s`) — investigate upstream API or network conditions. Not severe but the lag pipeline detected something abnormal.
+- **weekly_audit lag: SSH_FAILURE** (stage 7, exit 3) — could not fetch heartbeats from VPS to compute lag; operational/transient, not lag degradation itself.
+- **drift_check: HISTORY_CORRUPT** (exit 5) — malformed line in `drift_check_history.jsonl`; two-firings rule cannot be evaluated until repaired. Inspect the file, remove or correct the malformed line, then re-run.
 
 ### What fires INFO (read at leisure)
 
@@ -128,9 +134,10 @@ Tier prefixes (from `pkg/notify/telegram.go`):
 | `scripts/forward_paper_trajectory.py` | Trend across snapshots — direction-of-travel. |
 | `scripts/realized_cost_trajectory.py` | Per-trade fee/slip trend, not just cumulative average. |
 | `scripts/forward_paper_resolution.py` | LIMBO 5-verdict synthesis (CONTINUE / WATCH / PROMOTE / KILL / OPERATOR_REVIEW). |
-| `scripts/post_deploy_check.sh` | 13-section operational health audit. Run after every redeploy. `STRICT=1 ./scripts/post_deploy_check.sh` for fail-loud / CI mode (exit 1 + Telegram WARN on any FAIL). |
+| `scripts/post_deploy_check.sh` | 13-section operational health audit. Run after every redeploy. §4 now includes per-engine `lag_p99` column (commit `58fd906`) — DEGRADED ≥15s, HIGH ≥30s tier rollups. `STRICT=1 ./scripts/post_deploy_check.sh` for fail-loud / CI mode (exit 1 + Telegram WARN on any FAIL). |
+| `scripts/lag_summary.sh` | **NEW** (commit `bb53c1b`) — fleet-wide source-to-receipt lag aggregator. Per-engine p50/p99/max table + fleet rollup + tier verdict. `--quiet` for 1-line cron output; exit 0 HEALTHY / 1 DEGRADED / 2 HIGH / 3 SSH_FAILURE / 4 INPUT_ERROR. |
 | `scripts/paper_live_trades.sh` | Per-engine trade summary. |
-| `scripts/run_drift_check.sh` | Decision-grade kill detector (manual invocation). |
+| `scripts/run_drift_check.sh` | Decision-grade kill detector (manual invocation). Exit codes: 0 CLEAN / 1 INVESTIGATION / 2 INSUFFICIENT / 3 ERROR / 4 AUTO-KILL CANDIDATE / **NEW 5 HISTORY_CORRUPT** (commit `3b664f1`). |
 
 ### Decision-grade evaluators (mechanical verdicts)
 
@@ -225,6 +232,23 @@ BINANCE_API_KEY=<key> BINANCE_API_SECRET=<secret> \
 ```
 
 CRITICAL Telegram alerts pre/post-fire. Idempotent — re-running with same positions is safe.
+
+### Scenario: weekly_audit lag fires DEGRADED or HIGH
+
+1. Read the snapshot: `cat results/decision_snapshots/$(date -u +%Y-%m-%d)-lag.txt` — per-engine table + fleet rollup names the offending symbols.
+2. Cross-check: run `scripts/lag_summary.sh` interactively to see live state (snapshot is from cron-firing time).
+3. If single symbol → likely upstream WebSocket issue for that pair; not fleet-wide. Engine will fall back to REST polling at 10s interval, which is the documented worst-case.
+4. If multiple symbols → fleet-wide pattern. Check `https://www.binance.com/en/support/announcement` for Binance status; check VPS network with `ssh root@178.105.24.230 'mtr -c 10 fapi.binance.com'`.
+5. HIGH tier (`lag_p99 > 30s`) — degradation is severe enough that real fills at Layer 2/STAGE_1 would diverge from modeled cost. Pre-promotion: do NOT promote until lag clears. Post-promotion: monitor realized cost trajectory closely.
+
+### Scenario: drift_check fires HISTORY_CORRUPT (exit 5)
+
+The wrapper detected ≥1 malformed line in `results/drift_check_history.jsonl`. The decision-grade two-firings-≥7d rule cannot be evaluated against a partially-corrupt history.
+
+1. Inspect: `jq -c . results/drift_check_history.jsonl > /dev/null 2>&1; echo $?` — non-zero confirms corruption. `tail -20 results/drift_check_history.jsonl | jq -c .` to find the bad line.
+2. Repair: either delete the malformed line OR replace it with a valid `{"ts":"...","exit_code":N,"verdict":"..."}` entry. Backup first: `cp results/drift_check_history.jsonl{,.bak.$(date -u +%F)}`.
+3. Re-run: `scripts/run_drift_check.sh --quiet` should exit 0/1/2 (CLEAN/INVESTIGATION/INSUFFICIENT) post-repair — exit 5 means corruption remains.
+4. The Telegram alert during the corruption window did NOT trip auto-kill — the wrapper suppresses AUTO-KILL when MALFORMED>0, by design. Decision-grade kill mechanism is paused until repair completes.
 
 ### Scenario: Engine crashed
 
