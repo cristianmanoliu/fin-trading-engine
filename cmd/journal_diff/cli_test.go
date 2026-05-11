@@ -278,3 +278,83 @@ func TestCLI_MissingFlags_Exits3(t *testing.T) {
 		t.Errorf("expected exit 3 when required flags missing, got %d", code)
 	}
 }
+
+// TestCLI_Layer3Topology_DefaultExcludesShadows is the regression for the
+// fail-CLOSE that blocked every Layer 3 run before this commit. Pre-fix,
+// parseJournalDir always walked shadow/<label>/*.jsonl, so the stub-dir
+// vs testnet-dir diff flagged every shadow trade as "only-in-A" →
+// SIGNAL_DIVERGENCE (exit 2). The default must now PASS this topology
+// because the production caller (scripts/layer3_verdict.sh) cannot pass
+// --include-shadows without code change, and pre-fix the gate would
+// fire-CLOSE on every legitimate Layer 3 attempt.
+//
+// Topology mirrors cmd/engine/main.go production paths:
+//   - stub-dir/BTCUSDT-2026-05.jsonl                    (live, matches B)
+//   - stub-dir/shadow/alt5-15-336/ETHUSDT-2026-05.jsonl (shadow, NO peer in B)
+//   - testnet-dir/BTCUSDT-2026-05.jsonl                 (live, matches A live)
+func TestCLI_Layer3Topology_DefaultExcludesShadows(t *testing.T) {
+	stubRoot := t.TempDir()
+	tnRoot := t.TempDir()
+
+	// Live trade present on BOTH sides — Layer 3 sees identical live.
+	liveLines := []string{
+		`{"event":"open","symbol":"BTCUSDT","ts":"2026-05-08T08:00:00Z","side":"LONG","entry":50000,"stop":49500,"target":53000,"reason":"r"}`,
+		`{"event":"close","symbol":"BTCUSDT","ts":"2026-05-08T09:00:00Z","side":"LONG","entry":50000,"exit":53000,"pnl_usd":3000,"outcome":"TARGET","reason":"r"}`,
+	}
+	writeFile(t, filepath.Join(stubRoot, "BTCUSDT-2026-05.jsonl"), liveLines)
+	writeFile(t, filepath.Join(tnRoot, "BTCUSDT-2026-05.jsonl"), liveLines)
+
+	// Shadow trade ONLY on the stub side. This mirrors what cmd/engine
+	// writes: shadow runners write to <journalDir>/shadow/<label>/, the
+	// testnet executor writes only the live trade flat in <testnet-dir>/.
+	if err := os.MkdirAll(filepath.Join(stubRoot, "shadow", "alt5-15-336"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(stubRoot, "shadow", "alt5-15-336", "ETHUSDT-2026-05.jsonl"), []string{
+		`{"event":"open","symbol":"ETHUSDT","ts":"2026-05-08T08:00:00Z","side":"SHORT","entry":3000,"stop":3050,"target":2700,"reason":"r"}`,
+		`{"event":"close","symbol":"ETHUSDT","ts":"2026-05-08T09:00:00Z","side":"SHORT","entry":3000,"exit":2700,"pnl_usd":1000,"outcome":"TARGET","reason":"r"}`,
+	})
+
+	// Default invocation (no --include-shadows). Must PASS — live trade
+	// matches, shadow tree is invisible.
+	code, out := runDiff(t, "--dir-a", stubRoot, "--dir-b", tnRoot)
+	if code != 0 {
+		t.Errorf("Layer 3 topology must PASS by default (live matches, shadow tree present only on A), got exit %d\nout:\n%s",
+			code, out)
+	}
+	// Verify the shadow ETH trade did NOT leak through.
+	if strings.Contains(out, "ETHUSDT") {
+		t.Errorf("shadow ETHUSDT trade leaked into default report — default must exclude shadows.\nout:\n%s", out)
+	}
+}
+
+// TestCLI_IncludeShadowsFlag_RestoresFullCompare verifies the opt-in path:
+// when --include-shadows is passed, the shadow tree IS walked. With the
+// Layer 3 topology (shadows only on A), this correctly surfaces signal
+// divergence — proving the flag is wired both directions.
+func TestCLI_IncludeShadowsFlag_RestoresFullCompare(t *testing.T) {
+	stubRoot := t.TempDir()
+	tnRoot := t.TempDir()
+	liveLines := []string{
+		`{"event":"open","symbol":"BTCUSDT","ts":"2026-05-08T08:00:00Z","side":"LONG","entry":50000,"stop":49500,"target":53000,"reason":"r"}`,
+		`{"event":"close","symbol":"BTCUSDT","ts":"2026-05-08T09:00:00Z","side":"LONG","entry":50000,"exit":53000,"pnl_usd":3000,"outcome":"TARGET","reason":"r"}`,
+	}
+	writeFile(t, filepath.Join(stubRoot, "BTCUSDT-2026-05.jsonl"), liveLines)
+	writeFile(t, filepath.Join(tnRoot, "BTCUSDT-2026-05.jsonl"), liveLines)
+	if err := os.MkdirAll(filepath.Join(stubRoot, "shadow", "alt5-15-336"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(stubRoot, "shadow", "alt5-15-336", "ETHUSDT-2026-05.jsonl"), []string{
+		`{"event":"open","symbol":"ETHUSDT","ts":"2026-05-08T08:00:00Z","side":"SHORT","entry":3000,"stop":3050,"target":2700,"reason":"r"}`,
+		`{"event":"close","symbol":"ETHUSDT","ts":"2026-05-08T09:00:00Z","side":"SHORT","entry":3000,"exit":2700,"pnl_usd":1000,"outcome":"TARGET","reason":"r"}`,
+	})
+
+	code, out := runDiff(t, "--include-shadows", "--dir-a", stubRoot, "--dir-b", tnRoot)
+	if code != 2 {
+		t.Errorf("with --include-shadows, asymmetric shadow tree must produce SIGNAL_DIVERGENCE (exit 2), got %d\nout:\n%s",
+			code, out)
+	}
+	if !strings.Contains(out, "ETHUSDT") {
+		t.Errorf("opt-in shadow path: ETHUSDT must appear in report\nout:\n%s", out)
+	}
+}

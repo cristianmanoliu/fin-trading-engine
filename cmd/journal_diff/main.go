@@ -96,7 +96,21 @@ func (t trade) key() tradeKey {
 // zero trades on both sides → false-positive Layer 3 PASS, silently
 // failing the gate open. This is the only failure mode that could
 // propagate past the operator into a real-money promotion decision.
-func parseJournalDir(dir string) ([]trade, error) {
+//
+// Shadow-subdir inclusion is opt-in via includeShadows. Default (false) is
+// the Layer 3 topology: stub primary writes to <dir>/<sym>-<month>.jsonl
+// AND ShadowRunners write to <dir>/shadow/<label>/<sym>-<month>.jsonl,
+// while the BinanceLive testnet executor writes ONLY to the top level
+// (testnet dir has no shadow/<label>/ subdir by construction — see
+// cmd/engine/main.go:423). If shadows were included by default, the
+// stub-dir vs testnet-dir diff would flag every shadow trade as
+// "only-in-A → SIGNAL_DIVERGENCE (exit 2)" — a fail-CLOSE that would
+// silently block every legitimate Layer 3 PASS before the operator
+// could even see a real divergence signal. Default OFF makes the Layer
+// 3 wrapper (the only production caller) safe by construction.
+// Pass --include-shadows for cross-shadow diffs (interactive debug of
+// alt5-15-336 vs bb20 etc., where BOTH sides have parallel shadow trees).
+func parseJournalDir(dir string, includeShadows bool) ([]trade, error) {
 	info, err := os.Stat(dir)
 	if err != nil {
 		return nil, fmt.Errorf("stat %s: %w", dir, err)
@@ -108,17 +122,18 @@ func parseJournalDir(dir string) ([]trade, error) {
 	if err != nil {
 		return nil, fmt.Errorf("glob %s: %w", dir, err)
 	}
-	// Also pick up shadow subdirs (shadow/<label>/*.jsonl) so the tool
-	// covers full-fleet diffs in one pass. Symmetric error handling with
-	// the primary glob — a permission-denied or other I/O error during
-	// the shadow walk used to be silently dropped (J3 finding), which
-	// would surface as missing trades on Layer 3 → false-positive
-	// signal divergence → wrongly-blocked promotion.
-	shadowMatches, err := filepath.Glob(filepath.Join(dir, "shadow", "*", "*.jsonl"))
-	if err != nil {
-		return nil, fmt.Errorf("glob %s/shadow: %w", dir, err)
+	// Shadow subdirs (shadow/<label>/*.jsonl): opt-in only. Symmetric error
+	// handling with the primary glob — a permission-denied or other I/O
+	// error during the shadow walk used to be silently dropped (J3
+	// finding); whichever path is taken must surface I/O errors loudly
+	// rather than silently produce partial trades.
+	if includeShadows {
+		shadowMatches, err := filepath.Glob(filepath.Join(dir, "shadow", "*", "*.jsonl"))
+		if err != nil {
+			return nil, fmt.Errorf("glob %s/shadow: %w", dir, err)
+		}
+		matches = append(matches, shadowMatches...)
 	}
-	matches = append(matches, shadowMatches...)
 	sort.Strings(matches) // deterministic order
 
 	var all []trade
@@ -293,6 +308,12 @@ func main() {
 		labelA       = flag.String("label-a", "A", "label for journal A in the report")
 		labelB       = flag.String("label-b", "B", "label for journal B in the report")
 		verbose      = flag.Bool("verbose", false, "print every matched pair, not just violations")
+		// includeShadows: opt-in to the shadow/<label>/*.jsonl tree. OFF by
+		// default — the Layer 3 topology (stub dir has shadows; testnet
+		// dir doesn't) would false-fire SIGNAL_DIVERGENCE on every shadow
+		// trade with no peer. Pass --include-shadows for cross-shadow diffs.
+		includeShadows = flag.Bool("include-shadows", false,
+			"include shadow/<label>/*.jsonl trees in the diff (default OFF: Layer 3 wrapper compares live-only)")
 	)
 	flag.Parse()
 
@@ -302,12 +323,12 @@ func main() {
 		os.Exit(3)
 	}
 
-	aTrades, err := parseJournalDir(*dirA)
+	aTrades, err := parseJournalDir(*dirA, *includeShadows)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ERROR reading --dir-a: %v\n", err)
 		os.Exit(3)
 	}
-	bTrades, err := parseJournalDir(*dirB)
+	bTrades, err := parseJournalDir(*dirB, *includeShadows)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ERROR reading --dir-b: %v\n", err)
 		os.Exit(3)

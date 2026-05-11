@@ -274,14 +274,19 @@ func TestParseJournalFile_CloseWithoutOpen_Skipped(t *testing.T) {
 
 // ── End-to-end through parseJournalDir ─────────────────────────────────────
 
-func TestParseJournalDir_PicksUpShadowSubdirs(t *testing.T) {
-	root := t.TempDir()
-	// Top-level live journal
+// writeLayer3TopologyFixture builds the production paper-live tree under root:
+//
+//	<root>/BTCUSDT-2026-05.jsonl                   ← live trade (1 pair)
+//	<root>/shadow/alt5-15-336/ETHUSDT-2026-05.jsonl ← shadow trade (1 pair)
+//
+// Both live and shadow contain matched open/close events. Used by tests that
+// exercise the include-shadows / Layer-3-topology contract.
+func writeLayer3TopologyFixture(t *testing.T, root string) {
+	t.Helper()
 	writeFile(t, filepath.Join(root, "BTCUSDT-2026-05.jsonl"), []string{
 		`{"event":"open","symbol":"BTCUSDT","ts":"2026-05-08T08:00:00Z","side":"LONG","entry":50000,"stop":49500,"target":53000,"reason":"r"}`,
 		`{"event":"close","symbol":"BTCUSDT","ts":"2026-05-08T09:00:00Z","side":"LONG","entry":50000,"exit":53000,"pnl_usd":3000,"outcome":"TARGET","reason":"r"}`,
 	})
-	// Shadow subdir (matches paper-live shadow layout: shadow/<label>/<sym>-<month>.jsonl)
 	if err := os.MkdirAll(filepath.Join(root, "shadow", "alt5-15-336"), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -289,13 +294,44 @@ func TestParseJournalDir_PicksUpShadowSubdirs(t *testing.T) {
 		`{"event":"open","symbol":"ETHUSDT","ts":"2026-05-08T08:00:00Z","side":"SHORT","entry":3000,"stop":3050,"target":2700,"reason":"r"}`,
 		`{"event":"close","symbol":"ETHUSDT","ts":"2026-05-08T09:00:00Z","side":"SHORT","entry":3000,"exit":2700,"pnl_usd":1000,"outcome":"TARGET","reason":"r"}`,
 	})
+}
 
-	got, err := parseJournalDir(root)
+func TestParseJournalDir_DefaultExcludesShadows(t *testing.T) {
+	// Layer 3 regression: stub-dir contains shadows, testnet-dir doesn't.
+	// Pre-fix, parseJournalDir always globbed shadow/<label>/*.jsonl, so the
+	// stub side picked up shadow trades that had no testnet peer → false
+	// SIGNAL_DIVERGENCE on every legitimate Layer 3 run. Default must now
+	// EXCLUDE shadows so the locked production caller (layer3_verdict.sh)
+	// is safe by construction.
+	root := t.TempDir()
+	writeLayer3TopologyFixture(t, root)
+
+	got, err := parseJournalDir(root, false)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("trades = %d, want 1 (live only — shadow must be excluded by default)", len(got))
+	}
+	if got[0].Symbol != "BTCUSDT" {
+		t.Errorf("expected live BTCUSDT, got %q (shadow ETHUSDT leaked through default-OFF)", got[0].Symbol)
+	}
+}
+
+func TestParseJournalDir_IncludeShadows_FlagOn(t *testing.T) {
+	// Cross-shadow diff use case: operator explicitly opts in to walking
+	// shadow/<label>/. Both live and shadow trades returned, matching the
+	// pre-fix behavior so interactive shadow-vs-shadow debugging continues
+	// to work.
+	root := t.TempDir()
+	writeLayer3TopologyFixture(t, root)
+
+	got, err := parseJournalDir(root, true)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
 	if len(got) != 2 {
-		t.Fatalf("trades = %d, want 2 (live + shadow)", len(got))
+		t.Fatalf("trades = %d, want 2 (live + shadow when flag ON)", len(got))
 	}
 	symbols := map[string]bool{}
 	for _, t := range got {
@@ -303,6 +339,30 @@ func TestParseJournalDir_PicksUpShadowSubdirs(t *testing.T) {
 	}
 	if !symbols["BTCUSDT"] || !symbols["ETHUSDT"] {
 		t.Errorf("expected BTCUSDT (live) + ETHUSDT (shadow); got %v", symbols)
+	}
+}
+
+func TestParseJournalDir_DefaultExcludesShadows_PreservesShadowIOErrors(t *testing.T) {
+	// When shadows are EXCLUDED, the function must not attempt to glob the
+	// shadow subdir at all — so a permission-denied or other I/O error on
+	// the shadow path can't surface (there's nothing to surface). This
+	// pins that the shadow-glob path is taken only on opt-in: writing an
+	// unreadable shadow dir is non-fatal when the flag is OFF.
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "BTCUSDT-2026-05.jsonl"), []string{
+		`{"event":"open","symbol":"BTCUSDT","ts":"2026-05-08T08:00:00Z","side":"LONG","entry":100,"stop":99,"target":106,"reason":"r"}`,
+		`{"event":"close","symbol":"BTCUSDT","ts":"2026-05-08T09:00:00Z","side":"LONG","entry":100,"exit":106,"pnl_usd":3000,"outcome":"TARGET","reason":"r"}`,
+	})
+	// shadow path exists but is irrelevant when flag OFF.
+	if err := os.MkdirAll(filepath.Join(root, "shadow", "x"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	got, err := parseJournalDir(root, false)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if len(got) != 1 {
+		t.Errorf("trades = %d, want 1 (live only with shadow tree present but excluded)", len(got))
 	}
 }
 

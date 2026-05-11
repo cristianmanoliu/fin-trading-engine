@@ -478,5 +478,63 @@ class CliFlagTest(unittest.TestCase):
         self.assertIn("unknown flag", err)
 
 
+class Layer3TopologyRegressionTest(unittest.TestCase):
+    """End-to-end regression for the shadow-asymmetry fail-CLOSE that blocked
+    every Layer 3 run before the journal_diff --include-shadows fix.
+
+    The production topology (cmd/engine/main.go):
+        STUB primary:    <journal>/<sym>-<month>.jsonl                      (Layer 3 dir-a)
+        ShadowRunners:   <journal>/shadow/<label>/<sym>-<month>.jsonl       (only on stub side)
+        Testnet shadow:  <layer3-testnet-dir>/<sym>-<month>.jsonl           (Layer 3 dir-b)
+
+    Pre-fix, the diff binary unconditionally walked shadow/<label>/ on both
+    sides. Since the testnet shadow doesn't produce shadow/<label>/ subdirs
+    (only its single live executor writes), every stub-side shadow trade
+    landed as "only-in-A" → SIGNAL_DIVERGENCE (exit 2) → wrapper returned
+    Layer 3 FAIL. Operator could NEVER reach STAGE_1 from this gate.
+
+    Post-fix, default behavior excludes shadows. Layer 3 PASSes when the
+    live trades match, regardless of shadow tree presence on the stub side.
+    """
+
+    def test_stub_side_shadows_does_not_false_diverge(self):
+        with tempfile.TemporaryDirectory() as tmp_a, \
+             tempfile.TemporaryDirectory() as tmp_b:
+            stub, tn = Path(tmp_a), Path(tmp_b)
+            base = dt.datetime.now(dt.timezone.utc).replace(tzinfo=None) \
+                   - dt.timedelta(days=10)
+
+            # Live trade on BOTH sides — Layer 3 verdict should compare these.
+            write_pair(stub, "BTCUSDT", base, +5000.0)
+            write_pair(tn,   "BTCUSDT", base, +5000.0)
+
+            # Shadow trades ONLY on the stub side — production layout.
+            # Three shadow strategies, multiple trades each, mirroring the
+            # 1 live + 3 shadow per-engine fleet config from CLAUDE.md.
+            for label in ("alt5-15-336", "alt5-15-504", "bb20"):
+                shadow_dir = stub / "shadow" / label
+                for i, sym in enumerate(("ETHUSDT", "SOLUSDT")):
+                    ts = base + dt.timedelta(hours=i)
+                    write_pair(shadow_dir, sym, ts, +1000.0 * (i + 1))
+
+            code, out, err = run_wrapper(
+                "--stub-dir", str(stub), "--testnet-dir", str(tn),
+            )
+            self.assertEqual(code, 0,
+                f"Layer 3 must PASS when live matches, even with stub-side "
+                f"shadows asymmetric to testnet — pre-fix this exited 2 "
+                f"(SIGNAL_DIVERGENCE) blocking every legitimate STAGE_1 "
+                f"promotion attempt.\nexit={code}\nstdout:\n{out}\nstderr:\n{err}")
+            self.assertIn("PASS — Layer 3 criterion met", out)
+            # Verify shadow trades did NOT leak into the report (would be
+            # reported as Only-A trades pre-fix).
+            self.assertNotIn("ETHUSDT", out,
+                f"shadow ETHUSDT trade leaked into Layer 3 report — "
+                f"default shadow-exclusion broken.\nout:\n{out}")
+            self.assertNotIn("SOLUSDT", out,
+                f"shadow SOLUSDT trade leaked into Layer 3 report — "
+                f"default shadow-exclusion broken.\nout:\n{out}")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
