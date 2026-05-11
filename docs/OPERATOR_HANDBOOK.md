@@ -130,12 +130,14 @@ Tier prefixes (from `pkg/notify/telegram.go`):
 
 | Tool | Purpose |
 |---|---|
+| `scripts/daily_status.sh` | **NEW** (commit `662fbd6`) — single paste-ready snapshot fusing `forward_paper_status` + `lag_summary` + cost/snapshot trajectories + LIMBO verdict. `--quiet` for 1-line aggregate (cron); `--local` for off-VPS check. Exit codes 0 OK / 1 WARN / 2 KILL / 3 INPUT_ERR — aggregate of the locked LIMBO tier + lag tier + per-section invocation outcome. |
 | `scripts/forward_paper_status.sh` | Per-cohort go/no-go status. Operator dashboard. |
 | `scripts/forward_paper_trajectory.py` | Trend across snapshots — direction-of-travel. |
 | `scripts/realized_cost_trajectory.py` | Per-trade fee/slip trend, not just cumulative average. |
 | `scripts/forward_paper_resolution.py` | LIMBO 5-verdict synthesis (CONTINUE / WATCH / PROMOTE / KILL / OPERATOR_REVIEW). |
 | `scripts/post_deploy_check.sh` | 13-section operational health audit. Run after every redeploy. §4 now includes per-engine `lag_p99` column (commit `58fd906`) — DEGRADED ≥15s, HIGH ≥30s tier rollups. `STRICT=1 ./scripts/post_deploy_check.sh` for fail-loud / CI mode (exit 1 + Telegram WARN on any FAIL). |
-| `scripts/lag_summary.sh` | **NEW** (commit `bb53c1b`) — fleet-wide source-to-receipt lag aggregator. Per-engine p50/p99/max table + fleet rollup + tier verdict. `--quiet` for 1-line cron output; exit 0 HEALTHY / 1 DEGRADED / 2 HIGH / 3 SSH_FAILURE / 4 INPUT_ERROR. |
+| `scripts/lag_summary.sh` | Fleet-wide source-to-receipt lag aggregator (commit `bb53c1b`). Per-engine p50/p99/max table + fleet rollup + tier verdict. `--quiet` for 1-line cron output; exit 0 HEALTHY / 1 DEGRADED / 2 HIGH / 3 SSH_FAILURE / 4 INPUT_ERROR. |
+| `scripts/layer2_smoke.sh` | Pre-flight before activating real testnet creds (commit `7faa7fe` closes the 4-branch analysis-phase test gap + `grep -c` silent-no-op fail-open). `LAYER2_SMOKE_INJECT_LOG=path` (with DRY_RUN) lets the test suite exercise auth/error/no-heartbeat/no-backfill paths without invoking cmd/engine. |
 | `scripts/paper_live_trades.sh` | Per-engine trade summary. |
 | `scripts/run_drift_check.sh` | Decision-grade kill detector (manual invocation). Exit codes: 0 CLEAN / 1 INVESTIGATION / 2 INSUFFICIENT / 3 ERROR / 4 AUTO-KILL CANDIDATE / **NEW 5 HISTORY_CORRUPT** (commit `3b664f1`). |
 
