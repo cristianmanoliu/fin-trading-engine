@@ -50,8 +50,14 @@ func main() {
 
 	entries, err := os.ReadDir(*journalDir)
 	if err != nil {
+		// R1: harmonize with the no-data path below — exit 3 (INPUT ERROR)
+		// rather than exit 1. cron / CI consumers and the canonical
+		// journal_validate / journal_diff contract both use exit 3 for
+		// unreadable input; using exit 1 here was an asymmetry that could
+		// have routed through a different Telegram tier than the no-data
+		// case did.
 		slog.Error("cannot read journal dir", "path", *journalDir, "err", err)
-		os.Exit(1)
+		os.Exit(3)
 	}
 
 	stats := map[string]*symbolStats{}
@@ -68,9 +74,18 @@ func main() {
 		}
 
 		sc := bufio.NewScanner(f)
+		// Match journal_diff's buffer sizing — default 64KB max line is
+		// too small for any future schema with embedded context blobs.
+		sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+		fileLines, fileCorrupt := 0, 0
 		for sc.Scan() {
+			fileLines++
 			var e journalEntry
 			if err := json.Unmarshal(sc.Bytes(), &e); err != nil {
+				// R3: track corrupt lines (sibling of journal_diff J2 +
+				// Stub fix at 4154374) so an all-corrupt file (schema
+				// drift) doesn't silently produce an empty stats table.
+				fileCorrupt++
 				continue
 			}
 			if e.Event != "close" {
@@ -93,6 +108,20 @@ func main() {
 			if ts.After(s.maxTS) {
 				s.maxTS = ts
 			}
+		}
+		// R2: scanner.Err() must be checked. Token-too-long (>1MB single
+		// line) would otherwise silently truncate the file's contribution
+		// to the report — operator sees correct-looking stats from a
+		// truncated parse. Same shape as journal_diff J1.
+		if err := sc.Err(); err != nil {
+			slog.Warn("scanner error mid-file (some events may have been dropped)",
+				"file", path, "err", err, "lines_read", fileLines)
+		}
+		// R3: all-corrupt warning. Threshold mirrors journal_diff: >50%
+		// corrupt OR all-N-corrupt is a likely schema-drift signal.
+		if fileLines > 0 && (fileCorrupt == fileLines || float64(fileCorrupt)/float64(fileLines) > 0.5) {
+			slog.Warn("file has high JSON-parse failure rate (schema drift?)",
+				"file", path, "corrupt", fileCorrupt, "total", fileLines)
 		}
 		f.Close()
 	}

@@ -60,13 +60,15 @@ func runReport(t *testing.T, args ...string) (int, string) {
 	return 0, buf.String()
 }
 
-// TestCLI_MissingJournalDir_Exits1 — os.ReadDir failure path. Distinct
+// TestCLI_MissingJournalDir_Exits3 — os.ReadDir failure path. Distinct
 // from the empty-dir case — this is the operator typo'd a path that
-// doesn't exist.
-func TestCLI_MissingJournalDir_Exits1(t *testing.T) {
+// doesn't exist. Harmonized with the no-data path (also exit 3) and
+// the canonical journal_validate / journal_diff INPUT_ERROR contract
+// per the R1 audit fix.
+func TestCLI_MissingJournalDir_Exits3(t *testing.T) {
 	code, out := runReport(t, "--journal-dir", "/nonexistent/path/abc")
-	if code != 1 {
-		t.Errorf("expected exit 1 on missing journal dir, got %d\nout:\n%s", code, out)
+	if code != 3 {
+		t.Errorf("expected exit 3 on missing journal dir (INPUT_ERROR), got %d\nout:\n%s", code, out)
 	}
 	if !strings.Contains(out, "cannot read journal dir") {
 		t.Errorf("expected error message about missing dir, got:\n%s", out)
