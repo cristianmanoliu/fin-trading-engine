@@ -42,6 +42,32 @@ compare_code_checksums() {
     fi
 }
 
+# classify_lag_ms: bucket a lag-percentile value (ms) into a verdict tier.
+# Thresholds anchored on REST polling interval (10s = 10000ms):
+#   NO_DATA   — non-numeric / empty / negative sentinel ("n/a", "null",
+#               -1) — usually CSV replay or pre-first-tick state, not
+#               an alert condition
+#   OK        — ≤ 1000ms  → WebSocket-dominant (push-based, low lag)
+#   TYPICAL   — ≤ 15000ms → REST-dominant or mixed; expected range when
+#               the WS→REST fallback is engaged (poll interval = 10s,
+#               natural max ~10s + parse + transit)
+#   DEGRADED  — ≤ 30000ms → API or network slowdown, investigate
+#   HIGH      — > 30000ms → severe degradation, likely visible in
+#               realized fill drift at Layer 2 — operator must act
+classify_lag_ms() {
+    local lag="$1"
+    if [[ -z "$lag" ]] || ! [[ "$lag" =~ ^-?[0-9]+$ ]]; then
+        echo "NO_DATA"
+        return
+    fi
+    if   [[ "$lag" -lt 0     ]]; then echo "NO_DATA"
+    elif [[ "$lag" -le 1000  ]]; then echo "OK"
+    elif [[ "$lag" -le 15000 ]]; then echo "TYPICAL"
+    elif [[ "$lag" -le 30000 ]]; then echo "DEGRADED"
+    else                              echo "HIGH"
+    fi
+}
+
 # classify_ssh_exit: separate ssh-transport failure (couldn't reach host,
 # auth, signal) from remote-command outcomes (the command ran and exited
 # with some code). Without this, every section's `$(ssh ... || echo 0)`
@@ -183,10 +209,10 @@ esac
 
 # ── 4. Per-engine tick freshness ──────────────────────────────────────────────
 echo ""
-echo "4. Per-engine tick freshness (heartbeat last_tick_age)"
+echo "4. Per-engine tick freshness (heartbeat last_tick_age + lag_p99)"
 echo ""
-printf "  %-14s %-9s %-13s %-30s %s\n" "symbol" "state" "last_tick" "last_event" "uptime"
-printf "  %-14s %-9s %-13s %-30s %s\n" "------" "------" "---------" "----------" "------"
+printf "  %-14s %-9s %-13s %-10s %-22s %s\n" "symbol" "state" "last_tick" "lag_p99" "last_event" "uptime"
+printf "  %-14s %-9s %-13s %-10s %-22s %s\n" "------" "------" "---------" "-------" "----------" "------"
 
 ssh_remote "now=\$(date -u +%s)
 for sym in $SYMBOLS_LC; do
@@ -194,6 +220,12 @@ for sym in $SYMBOLS_LC; do
   last_hb=\$(grep '\"msg\":\"heartbeat\"' /var/log/paper-live/\${sym}.log 2>/dev/null | tail -1)
   age_ns=\$(echo \"\$last_hb\" | jq -r '.last_tick_age // 0' 2>/dev/null || echo 0)
   age_s=\$(( age_ns / 1000000000 ))
+  # lag_p99_ms — added 2026-05-11. Heartbeat now carries source-to-receipt
+  # lag percentiles when LocalReceiptTS is set (BinanceFutures path).
+  # 'n/a' sentinel when the field is absent (older builds, pre-first-tick
+  # state, CSV replay) so the local-side classifier can distinguish
+  # 'no data' from 'OK 0ms'. Same guard pattern as age_ns.
+  lag_p99=\$(echo \"\$last_hb\" | jq -r '.lag_p99_ms // \"n/a\"' 2>/dev/null || echo n/a)
   last_event=\$(tail -1 /var/log/paper-live/\${sym}.log 2>/dev/null | jq -r '.msg' 2>/dev/null)
   # Uptime via systemd (source of truth; survives daily log rotation that
   # would otherwise hide the 'starting live engine' line in .log.1).
@@ -209,7 +241,7 @@ for sym in $SYMBOLS_LC; do
   else
     uptime_min=0
   fi
-  printf '%s|%s|%d|%s|%d\n' \"\$sym\" \"\$active\" \"\$age_s\" \"\$last_event\" \"\$uptime_min\"
+  printf '%s|%s|%d|%s|%d|%s\n' \"\$sym\" \"\$active\" \"\$age_s\" \"\$last_event\" \"\$uptime_min\" \"\$lag_p99\"
 done"
 # PD-3: distinct ssh-failure path. Without this, ssh failure → empty
 # CHECK_RESULTS → 0 loop iterations → green "all engines have recent
@@ -225,22 +257,44 @@ fi
 
 STALE_COUNT=0
 NO_TICK_EVER=0
-while IFS='|' read -r sym state age_s event uptime; do
+LAG_DEGRADED_COUNT=0
+LAG_HIGH_COUNT=0
+LAG_DEGRADED_LIST=""
+LAG_HIGH_LIST=""
+while IFS='|' read -r sym state age_s event uptime lag_p99; do
     [[ -z "$sym" ]] && continue
     case "$state" in
         active) state_disp="active" ;;
         *)      state_disp="$state" ; warn "  $sym not active ($state)" ;;
     esac
+    # Render lag column. NO_DATA → "n/a"; numeric → "<N>ms" or "<N>s" for
+    # readability. Degraded/high tiers also tagged on the row.
+    lag_class=$(classify_lag_ms "$lag_p99")
+    case "$lag_class" in
+        NO_DATA)  lag_disp="n/a" ;;
+        OK)       lag_disp="${lag_p99}ms" ;;
+        TYPICAL)  lag_disp="${lag_p99}ms" ;;
+        DEGRADED)
+            lag_disp="${lag_p99}ms ⚠"
+            LAG_DEGRADED_COUNT=$((LAG_DEGRADED_COUNT + 1))
+            LAG_DEGRADED_LIST="$LAG_DEGRADED_LIST $sym"
+            ;;
+        HIGH)
+            lag_disp="${lag_p99}ms 🚨"
+            LAG_HIGH_COUNT=$((LAG_HIGH_COUNT + 1))
+            LAG_HIGH_LIST="$LAG_HIGH_LIST $sym"
+            ;;
+    esac
     # Stale = last tick > 5 min AND uptime > 5 min (allow startup grace)
     if [[ "$age_s" -gt 300 ]] && [[ "$uptime" -gt 5 ]]; then
         STALE_COUNT=$((STALE_COUNT + 1))
-        printf "  %-14s %-9s %-13s %-30s %dmin  ⚠ STALE\n" "$sym" "$state_disp" "${age_s}s" "$event" "$uptime"
+        printf "  %-14s %-9s %-13s %-10s %-22s %dmin  ⚠ STALE\n" "$sym" "$state_disp" "${age_s}s" "$lag_disp" "$event" "$uptime"
     elif [[ "$age_s" == "0" ]] && [[ "$uptime" -gt 10 ]]; then
         # Heartbeat says no ticks ever and engine has been up 10+ min
         NO_TICK_EVER=$((NO_TICK_EVER + 1))
-        printf "  %-14s %-9s %-13s %-30s %dmin  ⚠ NO TICKS\n" "$sym" "$state_disp" "${age_s}s" "$event" "$uptime"
+        printf "  %-14s %-9s %-13s %-10s %-22s %dmin  ⚠ NO TICKS\n" "$sym" "$state_disp" "${age_s}s" "$lag_disp" "$event" "$uptime"
     else
-        printf "  %-14s %-9s %-13s %-30s %dmin\n" "$sym" "$state_disp" "${age_s}s" "$event" "$uptime"
+        printf "  %-14s %-9s %-13s %-10s %-22s %dmin\n" "$sym" "$state_disp" "${age_s}s" "$lag_disp" "$event" "$uptime"
     fi
 done <<< "$CHECK_RESULTS"
 
@@ -250,11 +304,22 @@ fi
 if [[ "$NO_TICK_EVER" -gt 0 ]]; then
     warn "$NO_TICK_EVER engine(s) reported zero ticks despite >10min uptime — possible bad WS connection"
 fi
+# Lag-tier rollups. DEGRADED is operator-visible; HIGH is a louder signal
+# warranting a separate line. Both feed into FAIL via warn() so STRICT
+# mode propagates them.
+if [[ "$LAG_HIGH_COUNT" -gt 0 ]]; then
+    warn "$LAG_HIGH_COUNT engine(s) lag_p99 > 30s — severe API/network degradation:$LAG_HIGH_LIST"
+fi
+if [[ "$LAG_DEGRADED_COUNT" -gt 0 ]]; then
+    warn "$LAG_DEGRADED_COUNT engine(s) lag_p99 > 15s — degraded source-to-receipt lag:$LAG_DEGRADED_LIST"
+fi
 # PD-3 closure: only emit the green "all healthy" line if we ACTUALLY
 # inspected at least one engine. The empty-CHECK_RESULTS case (ssh
 # failure handled above) must NOT fall through to ok().
-if [[ "$STALE_COUNT" -eq 0 && "$NO_TICK_EVER" -eq 0 ]] && [[ -n "$CHECK_RESULTS" ]]; then
-    ok "all engines have recent tick activity"
+if [[ "$STALE_COUNT" -eq 0 && "$NO_TICK_EVER" -eq 0 ]] && \
+   [[ "$LAG_DEGRADED_COUNT" -eq 0 && "$LAG_HIGH_COUNT" -eq 0 ]] && \
+   [[ -n "$CHECK_RESULTS" ]]; then
+    ok "all engines have recent tick activity (lag healthy)"
 fi
 
 # Compute fleet-min uptime from CHECK_RESULTS for use by sections 5 and 6:

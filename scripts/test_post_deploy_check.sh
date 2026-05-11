@@ -73,6 +73,34 @@ assert_eq "exit 1 → REMOTE_FAILURE"   "$(classify_ssh_exit 1)"   "REMOTE_FAILU
 assert_eq "exit 2 → REMOTE_FAILURE"   "$(classify_ssh_exit 2)"   "REMOTE_FAILURE"
 assert_eq "exit 99 → REMOTE_FAILURE"  "$(classify_ssh_exit 99)"  "REMOTE_FAILURE"
 
+# ─────────────────────────────────────────────────────────────────────
+# classify_lag_ms — tier the per-engine source-to-receipt lag p99 into
+# OK / TYPICAL / DEGRADED / HIGH / NO_DATA. Wrapper consumes this in §4.
+# Thresholds anchored on REST polling interval (10s = 10000ms).
+# ─────────────────────────────────────────────────────────────────────
+echo
+echo "lag-tier: classify_lag_ms"
+# NO_DATA shapes — non-numeric / sentinel / negative
+assert_eq "empty → NO_DATA"           "$(classify_lag_ms '')"     "NO_DATA"
+assert_eq "n/a → NO_DATA"             "$(classify_lag_ms 'n/a')"  "NO_DATA"
+assert_eq "null → NO_DATA"            "$(classify_lag_ms 'null')" "NO_DATA"
+assert_eq "negative → NO_DATA"        "$(classify_lag_ms -1)"     "NO_DATA"
+# OK tier — WebSocket-dominant
+assert_eq "0 → OK"                    "$(classify_lag_ms 0)"      "OK"
+assert_eq "500 → OK"                  "$(classify_lag_ms 500)"    "OK"
+assert_eq "1000 → OK (boundary)"      "$(classify_lag_ms 1000)"   "OK"
+# TYPICAL tier — REST-dominant or mixed
+assert_eq "1001 → TYPICAL"            "$(classify_lag_ms 1001)"   "TYPICAL"
+assert_eq "5000 → TYPICAL"            "$(classify_lag_ms 5000)"   "TYPICAL"
+assert_eq "15000 → TYPICAL (boundary)" "$(classify_lag_ms 15000)" "TYPICAL"
+# DEGRADED tier — investigate
+assert_eq "15001 → DEGRADED"          "$(classify_lag_ms 15001)"  "DEGRADED"
+assert_eq "20000 → DEGRADED"          "$(classify_lag_ms 20000)"  "DEGRADED"
+assert_eq "30000 → DEGRADED (boundary)" "$(classify_lag_ms 30000)" "DEGRADED"
+# HIGH tier — severe
+assert_eq "30001 → HIGH"              "$(classify_lag_ms 30001)"  "HIGH"
+assert_eq "60000 → HIGH"              "$(classify_lag_ms 60000)"  "HIGH"
+
 # --- summary ---
 echo
 TOTAL=$((PASS + FAIL))
