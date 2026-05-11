@@ -130,7 +130,8 @@ Tier prefixes (from `pkg/notify/telegram.go`):
 
 | Tool | Purpose |
 |---|---|
-| `scripts/daily_status.sh` | **NEW** (commit `662fbd6`) — single paste-ready snapshot fusing `forward_paper_status` + `lag_summary` + cost/snapshot trajectories + LIMBO verdict. `--quiet` for 1-line aggregate (cron); `--local` for off-VPS check. Exit codes 0 OK / 1 WARN / 2 KILL / 3 INPUT_ERR — aggregate of the locked LIMBO tier + lag tier + per-section invocation outcome. |
+| `scripts/promotion_rehearsal.sh` | **NEW** (commit `fcd1f1c`) — end-to-end "am I ready for STAGE_1?" composer. Walks all 5 phases of the locked promotion path (forward-paper resolution + STAGE_0→1 gates + kill criteria + Layer 2 readiness + Layer 3 readiness). Read-only across all underlying tools; phases 4-5 inspect operator-touched `.last_pass` / `.last_layer3_pass` attestation markers. Exit codes 0 READY / 1 BLOCKED / 2 WAITING / 3 INPUT_ERR. `--quiet` 1-line aggregate; `--phase N` single-phase. |
+| `scripts/daily_status.sh` | Single paste-ready snapshot (commit `662fbd6`) fusing `forward_paper_status` + `lag_summary` + cost/snapshot trajectories + LIMBO verdict. `--quiet` for 1-line aggregate (cron); `--local` for off-VPS check. Exit codes 0 OK / 1 WARN / 2 KILL / 3 INPUT_ERR — aggregate of the locked LIMBO tier + lag tier + per-section invocation outcome. |
 | `scripts/forward_paper_status.sh` | Per-cohort go/no-go status. Operator dashboard. |
 | `scripts/forward_paper_trajectory.py` | Trend across snapshots — direction-of-travel. |
 | `scripts/realized_cost_trajectory.py` | Per-trade fee/slip trend, not just cumulative average. |
@@ -139,7 +140,7 @@ Tier prefixes (from `pkg/notify/telegram.go`):
 | `scripts/lag_summary.sh` | Fleet-wide source-to-receipt lag aggregator (commit `bb53c1b`). Per-engine p50/p99/max table + fleet rollup + tier verdict. `--quiet` for 1-line cron output; exit 0 HEALTHY / 1 DEGRADED / 2 HIGH / 3 SSH_FAILURE / 4 INPUT_ERROR. |
 | `scripts/layer2_smoke.sh` | Pre-flight before activating real testnet creds (commit `7faa7fe` closes the 4-branch analysis-phase test gap + `grep -c` silent-no-op fail-open). `LAYER2_SMOKE_INJECT_LOG=path` (with DRY_RUN) lets the test suite exercise auth/error/no-heartbeat/no-backfill paths without invoking cmd/engine. |
 | `scripts/paper_live_trades.sh` | Per-engine trade summary. |
-| `scripts/run_drift_check.sh` | Decision-grade kill detector (manual invocation). Exit codes: 0 CLEAN / 1 INVESTIGATION / 2 INSUFFICIENT / 3 ERROR / 4 AUTO-KILL CANDIDATE / **NEW 5 HISTORY_CORRUPT** (commit `3b664f1`). |
+| `scripts/run_drift_check.sh` | Decision-grade kill detector (manual invocation). Exit codes: 0 CLEAN / 1 INVESTIGATION / 2 INSUFFICIENT / 3 ERROR / 4 AUTO-KILL CANDIDATE / 5 HISTORY_CORRUPT (commit `3b664f1`). Commit `8feae4b` added jq pre-flight + HISTORY parent-dir guard + 3 pin tests for the catch-all dispatch (15 tests total). |
 
 ### Decision-grade evaluators (mechanical verdicts)
 
@@ -148,7 +149,7 @@ Tier prefixes (from `pkg/notify/telegram.go`):
 | `scripts/kill_protocol_check.py` | Locked kill criteria → CONTINUE / KILL / WAITING / OPERATOR-VERIFY |
 | `scripts/stage_promotion_check.py` | Locked promotion gates → PROMOTE / BLOCKED / WAITING / DEFERRED |
 | `scripts/forward_paper_resolution.py` | LIMBO synthesis → 5 verdicts (see exit-code table below) |
-| `scripts/layer3_verdict.sh` | Layer 3 7d shadow parity → PASS / THRESHOLD / SIGNAL_DIV / INPUT_ERROR / INSUFFICIENT_DURATION |
+| `scripts/layer3_verdict.sh` | Layer 3 7d shadow parity → PASS / THRESHOLD / SIGNAL_DIV / INPUT_ERROR / INSUFFICIENT_DURATION. Commit `01d863a` closed 2 fail-opens: (F1) `journal_diff` PANIC=4 or SIGSEGV=139 used to fall through to PASS — now routed to INPUT_ERROR; (F2) future-timestamp now exits INPUT_ERROR instead of "keep running." `LAYER3_VERDICT_DIFF_OVERRIDE=path` test hook lets the suite inject canned exit codes (20 tests total). |
 
 **`forward_paper_resolution.py` exit-code map** (mirrors locked rule's Telegram tier mapping):
 
