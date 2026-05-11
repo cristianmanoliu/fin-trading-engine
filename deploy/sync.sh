@@ -22,6 +22,14 @@ rsync -az --delete \
 
 # Funding CSVs for P4-Combined / P4-Shorts-Only — small (~330k rows total) and load-bearing.
 # Excluded from the main sync (which excludes data/) so we ship them explicitly here.
+#
+# SD-1: previously, missing local data/funding/ silently skipped the sync.
+# Engine on the VPS would then start with default per-day funding rates (the
+# `--funding-csv-dir` fallback added by the cmd/engine 2nd-pass audit) and
+# silently diverge from backtest assumptions. Operator on a fresh dev box
+# would deploy without funding CSVs and not be told. Now: explicit warn so
+# the gap surfaces at deploy time rather than weeks later when realized
+# funding diverges from modeled.
 if [[ -d "${ROOT}/data/funding" ]]; then
     echo "→ Syncing data/funding/ (Binance funding rate history)..."
     ssh ${SSH_OPTS} "${TARGET}" "mkdir -p ${REMOTE_DIR}/data/funding"
@@ -29,6 +37,12 @@ if [[ -d "${ROOT}/data/funding" ]]; then
         -e "ssh ${SSH_OPTS}" \
         "${ROOT}/data/funding/" \
         "${TARGET}:${REMOTE_DIR}/data/funding/"
+else
+    echo "⚠ ${ROOT}/data/funding/ does not exist locally — skipping funding CSV sync." >&2
+    echo "   Engine will fall back to default per-day funding rates and diverge from" >&2
+    echo "   backtest assumptions. To fix:" >&2
+    echo "     ./scripts/refresh_funding.sh           # download fresh history" >&2
+    echo "     ./deploy/sync.sh ${TARGET}             # re-run this sync" >&2
 fi
 
 echo "→ Building binaries on ${TARGET}..."
