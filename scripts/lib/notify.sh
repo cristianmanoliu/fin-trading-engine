@@ -21,6 +21,27 @@
 # operational bug (one script alerting reliably, the other silently dropping
 # under transient network failure).
 
+# Internal: pick prefix + retry count for a severity tier. Echoes the
+# pair as "prefix|retries" for the caller to split. Unknown severity is
+# treated as CRITICAL with an explicit [UNKNOWN SEVERITY: ...] tag — fail
+# loud, never silently downgrade a typo'd alert to INFO.
+#
+# The original case-with-`*) INFO` was a quiet downgrade: a caller that
+# wrote `notify_telegram CRITCAL ...` (typo) or `notify_telegram critical
+# ...` (lowercase) saw their CRITICAL turn into INFO at 1 retry with no
+# visual prefix indicating something was wrong. Same shape as the
+# missing-input → silent-success audit pattern: malformed input maps
+# silently into the lowest-urgency branch. Pinned by F6 of
+# scripts/test_notify.sh.
+_notify_select_tier() {
+    case "$1" in
+        CRITICAL) echo "🚨 [CRITICAL]|3" ;;
+        WARN)     echo "⚠ [WARN]|2" ;;
+        INFO)     echo "ℹ [INFO]|1" ;;
+        *)        echo "🚨 [CRITICAL] [UNKNOWN SEVERITY: $1]|3" ;;
+    esac
+}
+
 # Send a Telegram alert. Returns 0 always (calling script must not fail
 # because of a notification path failure).
 notify_telegram() {
@@ -29,12 +50,10 @@ notify_telegram() {
     local chat="${TELEGRAM_CHAT_ID:-}"
     [[ -z "$token" || -z "$chat" ]] && return 0
 
-    local prefix retries
-    case "$severity" in
-        CRITICAL) prefix="🚨 [CRITICAL]"; retries=3 ;;
-        WARN)     prefix="⚠ [WARN]";     retries=2 ;;
-        *)        prefix="ℹ [INFO]";     retries=1 ;;
-    esac
+    local tier prefix retries
+    tier=$(_notify_select_tier "$severity")
+    prefix="${tier%|*}"
+    retries="${tier##*|}"
 
     local text="${prefix} ${subject}"
     if [[ -n "$body" ]]; then
