@@ -267,16 +267,34 @@ def check_trades(trades: list[Trade]) -> Criterion:
 
 
 def check_days(trades: list[Trade]) -> Criterion:
+    # TIME-ANCHOR AMBIGUITY (open question — needs operator resolution):
+    #   real_money_protocol_decision_rule_2026-05-08.md (line 134) anchors
+    #     elapsed-time reasoning on "forward-paper start" (deploy date).
+    #   forward_paper_outcome_resolution_decision_rule_2026-05-10.md (line 47)
+    #     anchors on "first close" (LIMBO-rule semantics).
+    #   This function (and check_pro_rated_annual below) anchors on FIRST
+    #   TRADE timestamp — close to but not identical to either pre-reg.
+    # Magnitude is small in current state (first trade landed within hours
+    # of 2026-05-05 deploy). At a quiet-signal regime where first trade
+    # lands days/weeks after deploy:
+    #   - check_days fail-CLOSES (promote later than pre-reg's intent)
+    #   - check_pro_rated_annual fail-OPENS (smaller pro-rated target)
+    # Locked semantics surfaced explicitly in the threshold string so any
+    # operator reading the report sees which anchor is in force; a future
+    # change to use deploy-start should update the threshold string in
+    # lockstep so this doc-vs-code drift cannot recur silently.
     if not trades:
-        return Criterion("2. ≥60 calendar days elapsed", f"≥{MIN_DAYS}", "0", "PENDING")
+        return Criterion("2. ≥60 calendar days elapsed (since first trade)",
+                         f"≥{MIN_DAYS}d", "0", "PENDING")
     first = min((parse_iso(t.ts) for t in trades if parse_iso(t.ts)), default=None)
     if first is None:
-        return Criterion("2. ≥60 calendar days elapsed", f"≥{MIN_DAYS}", "?", "PENDING")
+        return Criterion("2. ≥60 calendar days elapsed (since first trade)",
+                         f"≥{MIN_DAYS}d", "?", "PENDING")
     days = (datetime.now(timezone.utc) - first).days
     return Criterion(
-        name="2. ≥60 calendar days elapsed",
-        threshold=f"≥{MIN_DAYS}",
-        actual=str(days),
+        name="2. ≥60 calendar days elapsed (since first trade)",
+        threshold=f"≥{MIN_DAYS}d",
+        actual=f"{days}d",
         status="PASS" if days >= MIN_DAYS else "PENDING",
     )
 
@@ -292,17 +310,28 @@ def check_net_positive(trades: list[Trade]) -> Criterion:
 
 
 def check_pro_rated_annual(trades: list[Trade]) -> Criterion:
+    # See TIME-ANCHOR AMBIGUITY note above check_days. Same first-trade
+    # anchor here. Fail-open direction: if first trade lands well after
+    # deploy, the elapsed denominator is shorter than pre-reg's intent,
+    # producing a smaller target threshold → easier PASS than the locked
+    # rule's deploy-anchored semantics would yield. Magnitude is bounded
+    # by (first_trade_offset_days / 365.25) × HONEST_ANNUAL × HONEST_FRACTION.
+    # The "(since first trade)" suffix on the criterion name surfaces the
+    # implementation anchor explicitly so any operator reading the report
+    # can compare it against the pre-reg's intent before promoting.
     if not trades:
-        return Criterion("4. PnL ≥60% pro-rated annual", "varies", "$0", "PENDING")
+        return Criterion("4. PnL ≥60% pro-rated annual (since first trade)",
+                         "varies", "$0", "PENDING")
     first = min((parse_iso(t.ts) for t in trades if parse_iso(t.ts)), default=None)
     if first is None:
-        return Criterion("4. PnL ≥60% pro-rated annual", "varies", "?", "PENDING")
+        return Criterion("4. PnL ≥60% pro-rated annual (since first trade)",
+                         "varies", "?", "PENDING")
     days = max(1, (datetime.now(timezone.utc) - first).days)
     elapsed_yr = days / 365.25
     target = HONEST_ANNUAL_USD * elapsed_yr * HONEST_FRACTION
     pnl = sum(t.pnl_usd for t in trades)
     return Criterion(
-        name="4. PnL ≥60% pro-rated annual",
+        name="4. PnL ≥60% pro-rated annual (since first trade)",
         threshold=f"≥${target:,.0f} (=${HONEST_ANNUAL_USD/1000:.0f}k×{elapsed_yr:.2f}y×{HONEST_FRACTION})",
         actual=f"${pnl:+,.0f}",
         status="PASS" if pnl >= target else (

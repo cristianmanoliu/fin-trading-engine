@@ -420,7 +420,17 @@ def evaluate(inp: Inputs) -> Verdict:
         review_reasons.append(
             f"low trade rate: n={inp.live_n_trades} after "
             f"{inp.live_n_days}d (well below 1.18/day fleet rate)")
-    # Slow-bleed: positive but <30% of pro-rated expectation
+    # Slow-bleed: positive but <30% of pro-rated expectation.
+    # NOTE: live_n_days here comes from forward_paper_status.sh which
+    # measures "days since first trade" (not deploy date). Pre-reg
+    # real_money_protocol_decision_rule_2026-05-08.md line 134 anchors
+    # elapsed reasoning on forward-paper deploy start; LIMBO rule
+    # (forward_paper_outcome_resolution_decision_rule_2026-05-10.md
+    # line 47) anchors on "first close". This implementation matches
+    # forward_paper_status's first-trade anchor — surfaced explicitly
+    # in the diagnostic string below so any operator reading the
+    # verdict sees which anchor is in force. See TIME-ANCHOR AMBIGUITY
+    # comment in stage_promotion_check.check_days.
     if (inp.live_pnl_usd is not None and inp.live_pnl_usd > 0
             and inp.live_n_days is not None and inp.live_n_days >= 60):
         pro_rated = EXPECTED_ANNUAL_PNL_USD * inp.live_n_days / 365
@@ -428,7 +438,7 @@ def evaluate(inp: Inputs) -> Verdict:
             review_reasons.append(
                 f"slow-bleed: live PnL +${inp.live_pnl_usd:.0f} < "
                 f"{SLOW_BLEED_PNL_FRAC*100:.0f}% of pro-rated "
-                f"${pro_rated:.0f} (n_days={inp.live_n_days}, "
+                f"${pro_rated:.0f} (n_days={inp.live_n_days} since first trade, "
                 f"expected ${EXPECTED_ANNUAL_PNL_USD}/yr × {inp.live_n_days}/365)")
     if review_reasons:
         return Verdict(3, "OPERATOR_REVIEW", "Rule 6", review_reasons, inp)

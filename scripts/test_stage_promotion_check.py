@@ -110,6 +110,35 @@ class CriterionUnitTest(unittest.TestCase):
         c = sp.check_days(trades)
         self.assertEqual(c.status, "PASS")
 
+    def test_check_days_name_surfaces_first_trade_anchor(self):
+        """TIME-ANCHOR AMBIGUITY pin: pre-reg
+        real_money_protocol_decision_rule_2026-05-08.md line 134 anchors
+        elapsed-time on "forward-paper start" (deploy date); the LIMBO
+        rule (forward_paper_outcome_resolution_decision_rule_2026-05-10.md
+        line 47) anchors on "first close"; this implementation anchors on
+        FIRST TRADE timestamp. The discrepancy is small in current state
+        but compounds in a quiet-signal regime. Lock the implementation
+        choice into the criterion name so any operator reading the report
+        sees explicitly which anchor is in force. A future change to use
+        deploy-start as the anchor MUST update this test in lockstep so
+        doc-vs-code drift cannot recur silently."""
+        old_ts = (datetime.now(timezone.utc) - timedelta(days=65)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        c = sp.check_days([sp.Trade(old_ts, "BTC", "STOP", -1, 0, 0, 0)])
+        self.assertIn("since first trade", c.name,
+            f"check_days name must surface the first-trade anchor explicitly; "
+            f"got: {c.name!r}")
+
+    def test_check_pro_rated_annual_name_surfaces_first_trade_anchor(self):
+        """Sibling pin to test_check_days_name_surfaces_first_trade_anchor.
+        check_pro_rated_annual shares the same anchor and the same pre-reg
+        ambiguity. Pin the explicit anchor in the criterion name."""
+        old_ts = (datetime.now(timezone.utc) - timedelta(days=65)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        trades = [sp.Trade(old_ts, "BTC", "TARGET", 100, 0, 0, 0)] * 200
+        c = sp.check_pro_rated_annual(trades)
+        self.assertIn("since first trade", c.name,
+            f"check_pro_rated_annual name must surface the first-trade anchor "
+            f"explicitly; got: {c.name!r}")
+
     def test_check_net_positive(self):
         trades = [sp.Trade("2026-05-01T00:00:00Z", "BTC", "TARGET", 100, 0, 0, 0)] * 150
         c = sp.check_net_positive(trades)

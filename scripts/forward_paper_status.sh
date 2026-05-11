@@ -499,7 +499,7 @@ echo "$DATA" | grep "^STRATEGY|" | while IFS='|' read -r _ label first_ts last_t
     pnl_int=$(awk -v p="$pnl" 'BEGIN{printf "%+d", p}')
 
     printf "\n  ── %s ─%s\n" "$label" "$(printf '%0.s─' $(seq 1 $((70 - ${#label}))))"
-    printf "    Days elapsed:        %4d / %d              [%s]\n" "$days_elapsed" "$MIN_DAYS" "$s_days"
+    printf "    Days elapsed:        %4d / %d (since first trade)  [%s]\n" "$days_elapsed" "$MIN_DAYS" "$s_days"
     printf "    Trades closed:       %4d / %d              [%s]\n" "$trades" "$MIN_TRADES" "$s_trades"
     printf "    Wins / WR:           %4d / %s%%             [%s]\n" "$wins" "$wr_pct" "$s_wr"
     printf "    Net PnL:             \$%-12s              [%s]\n" "$pnl_int" "$s_pnl"
