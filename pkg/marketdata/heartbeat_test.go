@@ -598,3 +598,134 @@ func (rt rewriteTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	target.Header = req.Header
 	return rt.base.RoundTrip(target)
 }
+
+// ── Lag tracking (REST-poll-lag instrumentation) ───────────────────────────
+
+func TestHeartbeat_Observe_NoLagWhenLocalReceiptUnset(t *testing.T) {
+	// CSV replay path: tick has no LocalReceiptTS. Observe should not
+	// pollute the lag ring with bogus zero-time measurements.
+	h := NewHeartbeat("BTCUSDT")
+	for i := 0; i < 10; i++ {
+		h.Observe(models.Tick{
+			Symbol:    "BTCUSDT",
+			Timestamp: time.Date(2026, 5, 8, 10, i, 0, 0, time.UTC),
+			Price:     50000,
+			// LocalReceiptTS deliberately unset (zero value)
+		})
+	}
+	_, _, _, n := h.lagSnapshot()
+	if n != 0 {
+		t.Errorf("CSV-replay path: lagSnapshot n = %d, want 0", n)
+	}
+}
+
+func TestHeartbeat_Observe_RecordsLagWhenLocalReceiptSet(t *testing.T) {
+	// BinanceFutures path: each tick carries LocalReceiptTS. Observe
+	// captures lag = LocalReceiptTS - Timestamp into the ring.
+	h := NewHeartbeat("BTCUSDT")
+	exchange := time.Date(2026, 5, 8, 10, 0, 0, 0, time.UTC)
+	for i, ms := range []int64{50, 100, 200, 500, 1000} {
+		h.Observe(models.Tick{
+			Symbol:         "BTCUSDT",
+			Timestamp:      exchange.Add(time.Duration(i) * time.Millisecond),
+			LocalReceiptTS: exchange.Add(time.Duration(i)*time.Millisecond + time.Duration(ms)*time.Millisecond),
+			Price:          50000,
+		})
+	}
+	p50, p99, maxLag, n := h.lagSnapshot()
+	if n != 5 {
+		t.Errorf("n = %d, want 5", n)
+	}
+	if p50 != 200*time.Millisecond {
+		t.Errorf("p50 = %v, want 200ms (median of {50, 100, 200, 500, 1000})", p50)
+	}
+	if maxLag != 1000*time.Millisecond {
+		t.Errorf("max = %v, want 1000ms", maxLag)
+	}
+	// p99 of n=5: index = (5*99)/100 = 4 → samples[4] = 1000ms
+	if p99 != 1000*time.Millisecond {
+		t.Errorf("p99 = %v, want 1000ms (small-n: clamps to last sample)", p99)
+	}
+}
+
+func TestHeartbeat_LagRing_WrapsAtCapacity(t *testing.T) {
+	// Once we've pushed > lagRingSize samples, the oldest get overwritten.
+	// Verify lagFilled flips and the snapshot uses the full ring.
+	h := NewHeartbeat("BTCUSDT")
+	for i := 0; i < lagRingSize+50; i++ {
+		exchange := time.Date(2026, 5, 8, 10, 0, 0, i, time.UTC)
+		h.Observe(models.Tick{
+			Symbol:         "BTCUSDT",
+			Timestamp:      exchange,
+			LocalReceiptTS: exchange.Add(time.Duration(i) * time.Millisecond),
+		})
+	}
+	_, _, _, n := h.lagSnapshot()
+	if n != lagRingSize {
+		t.Errorf("after wrap, n = %d, want %d (lagRingSize)", n, lagRingSize)
+	}
+}
+
+func TestHeartbeat_LagSnapshot_EmptyRing(t *testing.T) {
+	h := NewHeartbeat("BTCUSDT")
+	p50, p99, maxLag, n := h.lagSnapshot()
+	if n != 0 {
+		t.Errorf("empty ring: n = %d, want 0", n)
+	}
+	if p50 != 0 || p99 != 0 || maxLag != 0 {
+		t.Errorf("empty ring: percentiles = (%v, %v, %v), want all zero", p50, p99, maxLag)
+	}
+}
+
+func TestSnapshotForLog_IncludesLagArgsWhenSamplesPresent(t *testing.T) {
+	// Lag args must be appended when the ring has samples — operator
+	// reads lag_p99_ms from heartbeat output to detect API degradation.
+	h := NewHeartbeat("BTCUSDT")
+	now := time.Now()
+	tick := models.Tick{
+		Symbol:         "BTCUSDT",
+		Timestamp:      now.Add(-50 * time.Millisecond),
+		LocalReceiptTS: now,
+	}
+	for i := 0; i < 10; i++ {
+		h.Observe(tick)
+	}
+	_, _, args, _ := h.snapshotForLog(0)
+	hasLagP50 := false
+	hasLagSamples := false
+	for i := 0; i+1 < len(args); i += 2 {
+		k, _ := args[i].(string)
+		if k == "lag_p50_ms" {
+			hasLagP50 = true
+		}
+		if k == "lag_samples" {
+			hasLagSamples = true
+		}
+	}
+	if !hasLagP50 {
+		t.Errorf("snapshotForLog should include lag_p50_ms when samples present, got args: %v", args)
+	}
+	if !hasLagSamples {
+		t.Errorf("snapshotForLog should include lag_samples when samples present, got args: %v", args)
+	}
+}
+
+func TestSnapshotForLog_OmitsLagArgsWhenNoSamples(t *testing.T) {
+	// CSV replay or pre-first-tick state: no lag samples, lag args
+	// should NOT appear in heartbeat output (don't pollute schema with
+	// "lag_p50_ms": 0 misleading the operator).
+	h := NewHeartbeat("BTCUSDT")
+	// Observe with no LocalReceiptTS — increments tickCount but does
+	// NOT populate the lag ring.
+	h.Observe(models.Tick{
+		Symbol:    "BTCUSDT",
+		Timestamp: time.Now(),
+	})
+	_, _, args, _ := h.snapshotForLog(0)
+	for i := 0; i+1 < len(args); i += 2 {
+		k, _ := args[i].(string)
+		if strings.HasPrefix(k, "lag_") {
+			t.Errorf("snapshotForLog should NOT include lag_* args without samples, got: %s = %v", k, args[i+1])
+		}
+	}
+}

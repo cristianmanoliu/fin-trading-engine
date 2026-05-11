@@ -358,6 +358,11 @@ func (b *BinanceFutures) readLoop(ctx context.Context, conn *websocket.Conn, ch 
 			Timestamp: time.UnixMilli(trade.TradeTime).UTC(),
 			Price:     price,
 			Volume:    qty,
+			// Captured at deserialization time. WebSocket lag is typically
+			// <100ms (push-based, network only); REST polling lag is
+			// 0-10s+ (poll interval = 10s). Surfaced via Heartbeat so
+			// the operator can detect a degradation in either mode.
+			LocalReceiptTS: time.Now().UTC(),
 		}
 
 		select {
@@ -516,6 +521,11 @@ func (b *BinanceFutures) processAggTradeBatch(ctx context.Context, trades []aggT
 			Timestamp: time.UnixMilli(t.Timestamp).UTC(),
 			Price:     price,
 			Volume:    qty,
+			// Captured at parse time. For REST batches the receipt time is
+			// shared across the whole batch (~10s window). Lag = receipt -
+			// trade-time will report up to the poll interval as the natural
+			// upper bound; the percentile distribution surfaces drift.
+			LocalReceiptTS: time.Now().UTC(),
 		}
 
 		select {

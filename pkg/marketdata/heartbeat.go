@@ -4,12 +4,22 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sort"
+	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/cristianmanoliu/trading-engine/pkg/models"
 	"github.com/cristianmanoliu/trading-engine/pkg/notify"
 )
+
+// lagRingSize is the rolling window for source-to-receipt lag samples.
+// 256 samples at the live tick rate (~few/min during quiet periods,
+// hundreds/min during volatile windows) gives roughly 1-30 minutes of
+// recent lag distribution — long enough to dampen noise, short enough
+// that the metric tracks current network conditions rather than
+// hours-old data. Heartbeat percentiles are computed from this window.
+const lagRingSize = 256
 
 // Heartbeat periodically emits a liveness log line showing the last tick timestamp
 // and tick count since the previous heartbeat. A gap exceeding heartbeatStaleThreshold
@@ -37,6 +47,19 @@ type Heartbeat struct {
 	Notifier     *notify.Notifier // optional; nil disables Telegram alerts
 	StartupGrace time.Duration    // optional; 0 disables the grace window
 	startupAt    time.Time        // set by Run; consulted by snapshotForLog
+
+	// Source-to-receipt lag ring buffer. Populated by Observe when
+	// tick.LocalReceiptTS is set (BinanceFutures sets it; CSV replay
+	// leaves it zero). Captures up to lagRingSize most-recent samples
+	// in a fixed-size circular buffer; percentiles computed on demand
+	// in lagSnapshot. Mutex-guarded — Observe is documented as
+	// single-goroutine but the snapshotForLog path runs on the
+	// heartbeat ticker goroutine, so a brief Lock is needed for safe
+	// concurrent reads.
+	lagMu     sync.Mutex
+	lagRing   [lagRingSize]time.Duration
+	lagHead   int  // next write index
+	lagFilled bool // true once we've wrapped around at least once
 }
 
 // heartbeatStaleThreshold is the age beyond which a heartbeat log line is
@@ -65,10 +88,61 @@ func NewHeartbeat(symbol string) *Heartbeat {
 }
 
 // Observe records a tick for heartbeat tracking. Safe to call from one goroutine.
+// When tick.LocalReceiptTS is non-zero, also captures the source-to-receipt lag
+// into the rolling lag ring (see lagSnapshot).
 func (h *Heartbeat) Observe(tick models.Tick) {
 	t := tick.Timestamp
 	h.lastTick.Store(&t)
 	h.tickCount.Add(1)
+
+	if !tick.LocalReceiptTS.IsZero() {
+		lag := tick.LocalReceiptTS.Sub(tick.Timestamp)
+		// Negative lag (clock skew between local + exchange) is rare but
+		// possible — store the raw value rather than clamping; lagSnapshot
+		// surfaces it as a min so the operator can spot the skew.
+		h.lagMu.Lock()
+		h.lagRing[h.lagHead] = lag
+		h.lagHead = (h.lagHead + 1) % lagRingSize
+		if h.lagHead == 0 {
+			h.lagFilled = true
+		}
+		h.lagMu.Unlock()
+	}
+}
+
+// lagSnapshot returns the current rolling distribution of source-to-receipt
+// lag. Returns (n=0) when no lag samples have been observed yet (e.g.,
+// CSV replay path, or pre-first-tick startup window). p50 = median;
+// p99 catches the tail (REST polling lag spikes / API slowdowns); max =
+// worst observed lag in the window. Computed on demand because the
+// percentile sort would otherwise dominate Observe's cost on the live
+// path. Caller (snapshotForLog) runs once per heartbeat interval.
+func (h *Heartbeat) lagSnapshot() (p50, p99, maxLag time.Duration, n int) {
+	h.lagMu.Lock()
+	var samples []time.Duration
+	if h.lagFilled {
+		samples = make([]time.Duration, lagRingSize)
+		copy(samples, h.lagRing[:])
+	} else if h.lagHead > 0 {
+		samples = make([]time.Duration, h.lagHead)
+		copy(samples, h.lagRing[:h.lagHead])
+	}
+	h.lagMu.Unlock()
+
+	n = len(samples)
+	if n == 0 {
+		return 0, 0, 0, 0
+	}
+	sort.Slice(samples, func(i, j int) bool { return samples[i] < samples[j] })
+	p50 = samples[n/2]
+	// p99 index: clamp so we don't overflow on small n.
+	p99idx := (n * 99) / 100
+	if p99idx >= n {
+		p99idx = n - 1
+	}
+	p99 = samples[p99idx]
+	maxLag = samples[n-1]
+	return p50, p99, maxLag, n
 }
 
 // snapshotForLog computes the level, message, and structured args for the next
@@ -103,6 +177,21 @@ func (h *Heartbeat) snapshotForLog(prevCount int64) (level slog.Level, msg strin
 		"symbol", h.symbol,
 		"ticks_since_last", delta,
 		"last_tick_age", age,
+	}
+	// Append lag distribution when we have samples (BinanceFutures
+	// captures LocalReceiptTS; CSV replay does not, so the field is
+	// silently absent in backtest contexts). p50 ~= typical case,
+	// p99 catches the REST-polling tail (≤10s expected), max surfaces
+	// any worst-case spike. Operator can grep `lag_p99_ms > 15000` in
+	// post_deploy_check or weekly_audit to detect API degradation
+	// before it manifests as fill-price drift.
+	if p50, p99, maxLag, n := h.lagSnapshot(); n > 0 {
+		args = append(args,
+			"lag_p50_ms", p50.Milliseconds(),
+			"lag_p99_ms", p99.Milliseconds(),
+			"lag_max_ms", maxLag.Milliseconds(),
+			"lag_samples", n,
+		)
 	}
 	if age > heartbeatStaleThreshold {
 		if inGrace {
