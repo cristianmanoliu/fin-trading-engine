@@ -207,6 +207,53 @@ invoke 1 "$hist"
 assert_eq "T12.exit"    "$WRAPPER_EXIT" "1"
 assert_contains "T12.text" "$WRAPPER_OUT" "INVESTIGATION"
 
+# --- T13 (PIN): operator-supplied HISTORY parent dir doesn't exist —
+# pre-fix the redirect at line 62 (`: > "$HISTORY"`) failed under set -e
+# without ever reaching the case → Telegram dispatch. The wrapper now
+# pre-creates the parent dir, so this path PASSES rather than aborting. ---
+echo "T13: HISTORY parent dir missing → wrapper creates it, exits 0"
+nested_hist="${TMPDIR_ROOT}/deep/path/that/does/not/exist/$$/history.jsonl"
+nested_runs="${TMPDIR_ROOT}/deep-runs-$$"
+detector_zero=$(mkdetector 0)
+set +e
+TELEGRAM_BOT_TOKEN='' TELEGRAM_CHAT_ID='' \
+    DRIFT_CHECK_DETECTOR="$detector_zero" \
+    DRIFT_CHECK_HISTORY="$nested_hist" \
+    DRIFT_CHECK_RUNS_DIR="$nested_runs" \
+    "$WRAPPER" --quiet > /dev/null 2>&1
+T13_RC=$?
+set -e
+assert_eq "T13.exit"     "$T13_RC" "0"
+# Verify the parent dir was actually created (= the mkdir worked).
+if [[ -d "$(dirname "$nested_hist")" ]]; then
+    PASS=$((PASS + 1))
+    echo "  ✓ T13.parent_dir_created"
+else
+    FAIL=$((FAIL + 1))
+    FAIL_LABELS+=("T13.parent_dir_created")
+    echo "  ✗ T13.parent_dir_created: parent dir not created"
+fi
+
+# --- T14 (PIN): detector exit 99 → wrapper exit 3 (ERROR).
+# Locks the `else WRAPPER_EXIT=3` catch-all so a future refactor that
+# moves the if-elif chain can't accidentally drop it. T4 tests exit 3
+# specifically; T14 tests an exit code outside the documented 0-3
+# Python contract. Same lens as today's layer3_verdict F1 — unknown
+# subprocess exit codes must never fall through to a success branch.
+echo "T14: detector exit 99 (unknown) → wrapper exit 3 (ERROR)"
+invoke 99 ""
+assert_eq "T14.exit"     "$WRAPPER_EXIT" "3"
+assert_contains "T14.text" "$WRAPPER_OUT" "ERROR"
+
+# --- T15 (PIN): detector exit 139 (SIGSEGV shape) → wrapper exit 3.
+# Defends against the Python interpreter crashing on a corrupt jsonl
+# / OOM-killed by the operator's laptop / etc. Must not silently route
+# to CLEAN or INVESTIGATION via type-coercion accident.
+echo "T15: detector exit 139 (SIGSEGV shape) → wrapper exit 3 (ERROR)"
+invoke 139 ""
+assert_eq "T15.exit"     "$WRAPPER_EXIT" "3"
+assert_contains "T15.text" "$WRAPPER_OUT" "ERROR"
+
 # --- summary ---
 echo
 TOTAL=$((PASS + FAIL))

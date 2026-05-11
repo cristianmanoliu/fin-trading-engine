@@ -53,12 +53,34 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# --- jq pre-flight ---
+# jq is used at four places in this script (history append + 3 read sites).
+# A missing-jq install aborts the script at the first call with rc=127,
+# BEFORE the case → Telegram dispatch later in the script runs. The
+# diagnostic at exit 127 is "jq: command not found" — opaque if you're
+# reading launchd.err.log. Surface a clear message + documented exit 3
+# (ERROR tier) here instead. weekly_audit.sh still propagates the exit
+# code to its own Telegram alert; this just makes the operator-side
+# diagnostic legible.
+if ! command -v jq >/dev/null 2>&1; then
+    echo "ERROR: jq is required but not found in PATH." >&2
+    echo "  Install with 'brew install jq' (macOS) or 'apt install jq' (Linux)." >&2
+    echo "  Without jq, drift_check_history.jsonl cannot be parsed and the" >&2
+    echo "  two-firings rule cannot be evaluated." >&2
+    exit 3
+fi
+
 # --- paths (env-overridable for testing) ---
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DETECTOR="${DRIFT_CHECK_DETECTOR:-${REPO_ROOT}/scripts/live_vs_backtest_drift.py}"
 RUNS_DIR="${DRIFT_CHECK_RUNS_DIR:-${REPO_ROOT}/results/drift_runs}"
 HISTORY="${DRIFT_CHECK_HISTORY:-${REPO_ROOT}/results/drift_check_history.jsonl}"
 mkdir -p "$RUNS_DIR"
+# Mirror the same mkdir -p for HISTORY's parent. Pre-fix, an operator-
+# supplied DRIFT_CHECK_HISTORY=/tmp/no/such/dir/history.jsonl failed at
+# the redirect below with set -e + no Telegram dispatch (the case fires
+# later in the script). Tested by T13.
+mkdir -p "$(dirname "$HISTORY")"
 [[ -f "$HISTORY" ]] || : > "$HISTORY"
 
 if [[ ! -x "$DETECTOR" ]] && [[ ! -f "$DETECTOR" ]]; then
