@@ -83,6 +83,19 @@ jobs:
             python3 "$f"
           done
 
+      - name: Run bash test_*.sh files
+        run: |
+          # Bash regression tests for safety-critical operational scripts.
+          # Mirrors the python-test loop pattern — each test_*.sh exits
+          # non-zero on failure, the loop bubbles that up via set -e.
+          set -e
+          if compgen -G "scripts/test_*.sh" > /dev/null; then
+            for f in scripts/test_*.sh; do
+              echo "=== $f ==="
+              bash "$f"
+            done
+          fi
+
   lint:
     name: shellcheck + ruff
     runs-on: ubuntu-latest

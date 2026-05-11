@@ -28,6 +28,13 @@
 #   2  INSUFFICIENT       — n_live below detector's floor (pass-through)
 #   3  ERROR              — detector itself failed
 #   4  AUTO-KILL CANDIDATE — two firings ≥7 days apart
+#   5  HISTORY_CORRUPT    — malformed line(s) in drift_check_history.jsonl;
+#                           two-firings rule cannot be evaluated until repaired
+#
+# Paths (env-overridable for testing):
+#   DRIFT_CHECK_DETECTOR   — path to live_vs_backtest_drift.py
+#   DRIFT_CHECK_HISTORY    — path to drift_check_history.jsonl
+#   DRIFT_CHECK_RUNS_DIR   — directory for per-run logs
 #
 # Cadence reminder: WEEKLY, not daily. Daily inflates FP to ~28%/year.
 set -euo pipefail
@@ -46,11 +53,11 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# --- paths ---
+# --- paths (env-overridable for testing) ---
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-DETECTOR="${REPO_ROOT}/scripts/live_vs_backtest_drift.py"
-RUNS_DIR="${REPO_ROOT}/results/drift_runs"
-HISTORY="${REPO_ROOT}/results/drift_check_history.jsonl"
+DETECTOR="${DRIFT_CHECK_DETECTOR:-${REPO_ROOT}/scripts/live_vs_backtest_drift.py}"
+RUNS_DIR="${DRIFT_CHECK_RUNS_DIR:-${REPO_ROOT}/results/drift_runs}"
+HISTORY="${DRIFT_CHECK_HISTORY:-${REPO_ROOT}/results/drift_check_history.jsonl}"
 mkdir -p "$RUNS_DIR"
 [[ -f "$HISTORY" ]] || : > "$HISTORY"
 
@@ -97,13 +104,42 @@ to_epoch() {
         || date -u -d "$1" '+%s'
 }
 
+# Per-line lenient parse. Each malformed line is counted into MALFORMED
+# rather than aborting the script under set -e + pipefail. Without this
+# guard, a single bad append (kill -9 mid-write, disk-full, manual edit)
+# crashes the wrapper with jq's parse code (~5), bypasses the case→
+# Telegram dispatch below, and weekly_audit propagates the unmapped exit
+# to launchd as the day's verdict — a decision-grade tool silently dying
+# on the only failure mode that matters. Pinned by T8-T11 of
+# scripts/test_run_drift_check.sh.
 FIRINGS=()
+MALFORMED=0
+MALFORMED_DETAILS=()
+LINE_NUM=0
 while IFS= read -r line; do
+    LINE_NUM=$((LINE_NUM + 1))
     [[ -z "$line" ]] && continue
-    v=$(echo "$line" | jq -r '.verdict')
-    if [[ "$v" == "DRIFT_FIRED" ]]; then
-        FIRINGS+=("$(echo "$line" | jq -r '.ts')")
+    # jq -e returns non-zero on parse failure; the if-test absorbs it so
+    # set -e does NOT abort.
+    if ! verdict=$(echo "$line" | jq -er '.verdict // ""' 2>/dev/null); then
+        MALFORMED=$((MALFORMED + 1))
+        MALFORMED_DETAILS+=("L${LINE_NUM}: malformed JSON")
+        continue
     fi
+    [[ "$verdict" != "DRIFT_FIRED" ]] && continue
+    if ! ts=$(echo "$line" | jq -er '.ts // ""' 2>/dev/null) || [[ -z "$ts" ]]; then
+        MALFORMED=$((MALFORMED + 1))
+        MALFORMED_DETAILS+=("L${LINE_NUM}: DRIFT_FIRED with missing .ts")
+        continue
+    fi
+    # Pre-validate the timestamp parses — to_epoch failure under set -e
+    # would otherwise abort the same way as the original bug.
+    if ! to_epoch "$ts" >/dev/null 2>&1; then
+        MALFORMED=$((MALFORMED + 1))
+        MALFORMED_DETAILS+=("L${LINE_NUM}: malformed .ts=${ts}")
+        continue
+    fi
+    FIRINGS+=("$ts")
 done < "$HISTORY"
 
 RULE_TRIPPED=0
@@ -123,11 +159,27 @@ if [[ ${#FIRINGS[@]} -ge 2 ]]; then
     done
 fi
 
+# Defensive: if the history has any corrupt lines, suppress AUTO-KILL.
+# The two-firings rule cannot be trusted against partial data; the
+# operator must repair the file before treating any rule trip as
+# decision-grade. Pinned by T11.
+if [[ "$MALFORMED" -gt 0 ]] && [[ "$RULE_TRIPPED" -eq 1 ]]; then
+    RULE_TRIPPED=0
+    TRIP_PAIR="(suppressed — history corrupt)"
+fi
+
 # --- decide wrapper exit code ---
+# Precedence: AUTO-KILL > INVESTIGATION > HISTORY_CORRUPT > ERROR > INSUFF > CLEAN.
+# History corruption sits below the current run's drift firing because a
+# fresh DRIFT_FIRED is still a real signal worth investigating, just
+# without the rule context. The CLEAN-but-corrupt case routes through
+# exit 5 instead of silently exiting 0.
 if [[ "$RULE_TRIPPED" -eq 1 ]]; then
     WRAPPER_EXIT=4
 elif [[ "$DETECTOR_EXIT" == "1" ]]; then
     WRAPPER_EXIT=1
+elif [[ "$MALFORMED" -gt 0 ]]; then
+    WRAPPER_EXIT=5
 elif [[ "$DETECTOR_EXIT" == "2" ]]; then
     WRAPPER_EXIT=2
 elif [[ "$DETECTOR_EXIT" == "0" ]]; then
@@ -138,13 +190,22 @@ fi
 
 # --- output ---
 verdict_line() {
+    local main
     case "$WRAPPER_EXIT" in
-        0) echo "drift_check: CLEAN" ;;
-        1) echo "drift_check: INVESTIGATION (single firing — cross-check forward-paper)" ;;
-        2) echo "drift_check: INSUFFICIENT (n_live below floor)" ;;
-        3) echo "drift_check: ERROR (see $RUN_LOG)" ;;
-        4) echo "drift_check: AUTO-KILL CANDIDATE (firings ≥7d apart: $TRIP_PAIR)" ;;
+        0) main="drift_check: CLEAN" ;;
+        1) main="drift_check: INVESTIGATION (single firing — cross-check forward-paper)" ;;
+        2) main="drift_check: INSUFFICIENT (n_live below floor)" ;;
+        3) main="drift_check: ERROR (see $RUN_LOG)" ;;
+        4) main="drift_check: AUTO-KILL CANDIDATE (firings ≥7d apart: $TRIP_PAIR)" ;;
+        5) main="drift_check: HISTORY_CORRUPT (${MALFORMED} malformed line(s) in $HISTORY)" ;;
     esac
+    # Surface corruption alongside the main verdict so an INVESTIGATION
+    # or AUTO-KILL pair isn't treated as fully decision-grade when the
+    # underlying history is questionable. (Exit 5 already names it.)
+    if [[ "$MALFORMED" -gt 0 ]] && [[ "$WRAPPER_EXIT" != "5" ]]; then
+        main+=" [+ HISTORY_CORRUPT: ${MALFORMED} malformed lines]"
+    fi
+    echo "$main"
 }
 
 # Telegram alert path uses the shared scripts/lib/notify.sh helper which
@@ -169,6 +230,12 @@ detector itself failed — investigate before next run" ;;
     4) notify_telegram CRITICAL "drift_check on $(hostname)" "$(verdict_line)
 log: $RUN_LOG
 This is a decision-grade kill candidate per the time-to-detection verdict. Cross-check forward_paper_status.sh + the drift run logs before acting." ;;
+    5) notify_telegram WARN "drift_check on $(hostname)" "$(verdict_line)
+log: $RUN_LOG
+Two-firings rule cannot be evaluated until $HISTORY is repaired.
+Sample malformed entries:
+$(printf '  %s\n' "${MALFORMED_DETAILS[@]:0:5}")
+Detector's most-recent verdict was: $VERDICT (detector exit $DETECTOR_EXIT)" ;;
 esac
 
 if [[ "$QUIET" -eq 1 ]]; then
@@ -184,8 +251,16 @@ echo "  Operational rule history"
 echo "$SEP"
 echo "  Last 5 runs (most recent first):"
 # Reverse-print last 5 history entries portably (no `tac` on BSD).
+# Per-line lenient parse — a malformed entry prints as "(malformed)" rather
+# than aborting under set -e + pipefail. Same shape as the FIRINGS walk.
 tail -5 "$HISTORY" | awk '{lines[NR]=$0} END {for (i=NR; i>=1; i--) print lines[i]}' \
-    | jq -r '"    \(.ts)  exit=\(.exit_code)  \(.verdict)"'
+    | while IFS= read -r _entry; do
+        if _parsed=$(echo "$_entry" | jq -r '"    \(.ts)  exit=\(.exit_code)  \(.verdict)"' 2>/dev/null); then
+            echo "$_parsed"
+        else
+            echo "    (malformed: ${_entry:0:80}...)"
+        fi
+    done
 echo
 echo "  Drift firings in full history: ${#FIRINGS[@]}"
 if [[ ${#FIRINGS[@]} -gt 0 ]]; then
