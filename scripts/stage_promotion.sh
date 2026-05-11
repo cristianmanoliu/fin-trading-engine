@@ -381,7 +381,7 @@ For paper → STAGE_1 (real-money first activation):
      on the VPS (separate from any testnet keys used at Layer 2).
   3. Set stake_usd: \$${STAKE_USD} (CLI override --stake-usd ${STAKE_USD})
   4. Generate the diff against current production config:
-     ssh -o BatchMode=yes -o ConnectTimeout=10 root@178.105.24.230 'cat /etc/systemd/system/paper-live@.service'
+     ssh -o BatchMode=yes -o ConnectTimeout=10 ${STAGE_PROMOTION_VPS:-root@178.105.24.230} 'cat /etc/systemd/system/paper-live@.service'
      (capture, edit locally, plan the systemd-edit + daemon-reload sequence)
 
 EOF
@@ -471,27 +471,34 @@ phase3() {
 
     # STAGE_4 only: optional HALT first (per runbook §Phase-3 line 126).
     if [[ "$TO" == "STAGE_4" ]]; then
+        # Use the same env-override pattern as phase2/phase4. Pre-fix, phase3
+        # hardcoded `root@178.105.24.230` here while phase2/phase4 honored
+        # STAGE_PROMOTION_VPS — so an operator setting the override to a test
+        # VPS would silently still hit production for the STAGE_4 halt.
+        # Inconsistency caught by Track 7 lens audit 2026-05-11.
+        local target="${STAGE_PROMOTION_VPS:-root@178.105.24.230}"
         echo "── STAGE_4 — graceful halt before deploy (runbook recommendation) ──"
+        echo "── target: $target ──"
         if [[ "${STAGE_PROMOTION_CONFIRM:-}" != "YES" ]]; then
             die "$EXIT_OPERATOR_INTERVENTION_REQUIRED" "phase3-stage4-halt-confirm" \
                 "STAGE_4 promotion REQUIRES graceful pre-deploy halt.
 Confirm by re-running with STAGE_PROMOTION_CONFIRM=YES.
-The halt SSH command: systemctl stop paper-live@*.service on the VPS."
+The halt SSH command: systemctl stop paper-live@*.service on $target."
         fi
         if [[ "${STAGE_PROMOTION_DRY_RUN:-0}" != "1" ]]; then
-            echo "→ Halting all engines on VPS…"
-            if ! ssh -o BatchMode=yes -o ConnectTimeout=10 root@178.105.24.230 'systemctl stop "paper-live@*.service"'; then
+            echo "→ Halting all engines on $target…"
+            if ! ssh -o BatchMode=yes -o ConnectTimeout=10 "$target" 'systemctl stop "paper-live@*.service"'; then
                 die "$EXIT_PHASE_RUNTIME_ERROR" "phase3-halt-ssh-failed" \
-                    "SSH to VPS failed during STAGE_4 halt. Investigate connectivity before retrying."
+                    "SSH to $target failed during STAGE_4 halt. Investigate connectivity before retrying."
             fi
             local active_count
-            active_count=$(ssh -o BatchMode=yes -o ConnectTimeout=10 root@178.105.24.230 'systemctl list-units "paper-live@*.service" --state=active --no-legend 2>/dev/null | wc -l' | tr -d ' ')
+            active_count=$(ssh -o BatchMode=yes -o ConnectTimeout=10 "$target" 'systemctl list-units "paper-live@*.service" --state=active --no-legend 2>/dev/null | wc -l' | tr -d ' ')
             if [[ "$active_count" != "0" ]]; then
                 die "$EXIT_PHASE_VERIFICATION_FAILED" "phase3-halt-incomplete" \
-                    "After 'systemctl stop' the VPS still reports $active_count active paper-live engines. Investigate before deploying."
+                    "After 'systemctl stop' on $target the VPS still reports $active_count active paper-live engines. Investigate before deploying."
             fi
         else
-            echo "  (DRY_RUN — would halt engines via SSH)"
+            echo "  (DRY_RUN — would halt engines via SSH to $target)"
         fi
     fi
 
@@ -585,25 +592,42 @@ for f in journal_dir.glob("*.jsonl"):
 print(n)
 PYEOF
     else
-        # Remote path: stream journals via SSH to local python. Avoids the
-        # need for remote python or remote globbing. Cannot use a heredoc
-        # python script here — heredoc stdin overrides piped stdin
-        # (shellcheck SC2259), so the journal stream would never reach
-        # python. Use -c with an inline script that reads from stdin.
-        ssh -o BatchMode=yes -o ConnectTimeout=10 "$target" 'cat /var/log/paper-live/journal/*.jsonl 2>/dev/null || true' \
-        | python3 -c "
+        # Remote path: stream journals via SSH to a tempfile, then run python
+        # against the file. Pre-fix used `ssh ... | python3 -c "..."` which
+        # under `set -euo pipefail` aborts the script ungracefully on ssh
+        # failure — no die(), no Telegram dispatch, just a bash exit with
+        # ssh's rc. Capturing ssh's exit explicitly lets phase4 emit the
+        # right diagnostic + die() at the right tier. Same lens shape as
+        # journal_validate's _classify_validate_exit in weekly_audit.sh.
+        local tmpfile
+        tmpfile=$(mktemp)
+        set +e
+        ssh -o BatchMode=yes -o ConnectTimeout=10 "$target" \
+            'cat /var/log/paper-live/journal/*.jsonl 2>/dev/null' > "$tmpfile" 2>&1
+        local ssh_rc=$?
+        set -e
+        if [[ "$ssh_rc" -ne 0 ]]; then
+            rm -f "$tmpfile"
+            # Sentinel for caller to detect — distinct from a numeric count.
+            # Operator-visible diagnostic happens in phase4 via die().
+            echo "SSH_FAILURE_$ssh_rc"
+            return
+        fi
+        python3 -c "
 import json, sys
 since = sys.argv[1]
 n = 0
-for line in sys.stdin:
-    try:
-        d = json.loads(line)
-    except ValueError:
-        continue
-    if d.get('event') == 'close' and d.get('ts', '') >= since:
-        n += 1
+with open(sys.argv[2]) as f:
+    for line in f:
+        try:
+            d = json.loads(line)
+        except ValueError:
+            continue
+        if d.get('event') == 'close' and d.get('ts', '') >= since:
+            n += 1
 print(n)
-" "$since"
+" "$since" "$tmpfile"
+        rm -f "$tmpfile"
     fi
 }
 
@@ -621,6 +645,18 @@ phase4() {
 
     local closes
     closes=$(count_post_deploy_closes "$since")
+    # SSH_FAILURE sentinel from count_post_deploy_closes — distinct from
+    # "no closes yet" so the operator gets the right diagnostic. Pre-fix,
+    # ssh failure under set -e + pipefail aborted the whole script with
+    # no Telegram dispatch; now it routes cleanly to exit 5 (runtime).
+    if [[ "$closes" == SSH_FAILURE_* ]]; then
+        local ssh_rc="${closes#SSH_FAILURE_}"
+        die "$EXIT_PHASE_RUNTIME_ERROR" "phase4-ssh-failed" \
+            "ssh to VPS failed (rc=$ssh_rc) during journal fetch.
+Pre-fix this would have aborted the script ungracefully with no Telegram;
+the route is now distinct from 'no closes yet' (which is PHASE_PENDING_DATA).
+Investigate VPS connectivity before retrying."
+    fi
     if [[ -z "$closes" ]] || ! [[ "$closes" =~ ^[0-9]+$ ]]; then
         die "$EXIT_PHASE_RUNTIME_ERROR" "phase4-journal-unreadable" \
             "Could not count closes from journal since $since (got: '$closes'). Investigate VPS journal access."

@@ -511,5 +511,109 @@ class RollbackTest(unittest.TestCase):
             self.assertIn("STATE: ROLLBACK_COMPLETE", content)
 
 
+class VpsTargetConsistencyTest(unittest.TestCase):
+    """Pin the STAGE_PROMOTION_VPS override is honored consistently across
+    every ssh-invocation path. Pre-fix, phase3's STAGE_4 halt block
+    hardcoded `root@178.105.24.230` while phase2/phase4 honored
+    STAGE_PROMOTION_VPS — an operator setting the override would silently
+    hit production for the STAGE_4 halt. Track 7 audit 2026-05-11."""
+
+    def test_no_hardcoded_ssh_target_remains(self):
+        """Source-scan: any line invoking `ssh ...root@178.105.24.230`
+        (whitespace-separated target) is a fail-open. Legitimate uses
+        of the IP must go through `${STAGE_PROMOTION_VPS:-root@...}`
+        expansion (preceded by `:-`, not whitespace)."""
+        import re
+        source = SCRIPT_SRC.read_text()
+        # Match "ssh", then any non-newline chars, then whitespace,
+        # then the literal IP. Excludes `:-root@178.105.24.230` because
+        # that's preceded by `:-`, not whitespace.
+        pattern = re.compile(r"ssh[^\n]*\sroot@178\.105\.24\.230")
+        hits = []
+        for i, line in enumerate(source.splitlines(), 1):
+            if pattern.search(line):
+                hits.append((i, line))
+        # Filter out lines inside heredoc instruction text — those are
+        # docs the operator sees, not invocations. A heredoc with
+        # ${STAGE_PROMOTION_VPS:-root@...} expands correctly.
+        real_invocations = [
+            (i, l) for i, l in hits
+            if ":-root@178.105.24.230" not in l
+        ]
+        self.assertEqual(
+            real_invocations, [],
+            f"Hardcoded ssh-target found (should use "
+            f"$target / ${{STAGE_PROMOTION_VPS:-root@...}}): {real_invocations}")
+
+    def test_phase3_stage4_halt_shows_target_in_dry_run(self):
+        """Positive test: with STAGE_PROMOTION_VPS=root@alt-host and
+        --phase3 (DRY_RUN, TO=STAGE_4), the script's stdout includes
+        `target: root@alt-host` proving the override propagated."""
+        with tempfile.TemporaryDirectory() as d:
+            tmp = scaffold_root(Path(d))
+            # Set up an in-progress STAGE_3 → STAGE_4 promotion with
+            # phases 1 + 2 complete.
+            artifact = tmp / "results" / "stage_promotion_2026-09-05_STAGE_3_to_STAGE_4.md.in-progress"
+            artifact.write_text(
+                "# STAGE promotion — STAGE_3 → STAGE_4\n"
+                "STATE: PHASE_1_COMPLETE at 2026-09-05T00:00:00Z\n"
+                "STATE: PHASE_2_COMPLETE at 2026-09-05T00:01:00Z\n"
+            )
+            code, out, err = run_sp(tmp, "phase3", env_extra={
+                "STAGE_PROMOTION_DRY_RUN": "1",
+                "STAGE_PROMOTION_CONFIRM": "YES",
+                "STAGE_PROMOTION_VPS": "root@alt-host-for-test",
+            })
+            # phase3 may exit 0 (full success) or some other code if the
+            # dry-run path doesn't fully succeed — the contract here is
+            # just that the target was used during the STAGE_4 halt block.
+            self.assertIn("target: root@alt-host-for-test", out,
+                f"phase3 STAGE_4 halt did not honor STAGE_PROMOTION_VPS — "
+                f"saw output: {out[:500]}\nstderr: {err[:500]}")
+
+
+class Phase4SshFailureTest(unittest.TestCase):
+    """Pin the SSH_FAILURE sentinel routing — pre-fix, ssh failure in
+    count_post_deploy_closes aborted the script ungracefully (no
+    Telegram, no clean exit code). Post-fix, routes to exit 5
+    (PHASE_RUNTIME_ERROR) with a clear diagnostic."""
+
+    def test_phase4_ssh_failure_exits_5(self):
+        with tempfile.TemporaryDirectory() as d:
+            tmp = scaffold_root(Path(d))
+            # Set up phases 1-3 complete with DEPLOY_TIMESTAMP.
+            past = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=1)
+                    ).strftime("%Y-%m-%dT%H:%M:%SZ")
+            artifact = tmp / "results" / "stage_promotion_2026-09-05_paper_to_STAGE_1.md.in-progress"
+            artifact.write_text(
+                "# STAGE promotion — paper → STAGE_1\n"
+                "STATE: PHASE_1_COMPLETE at 2026-09-05T00:00:00Z\n"
+                "STATE: PHASE_2_COMPLETE at 2026-09-05T00:01:00Z\n"
+                f"DEPLOY_TIMESTAMP: {past}\n"
+                "STATE: PHASE_3_COMPLETE at 2026-09-05T00:02:00Z\n"
+            )
+            # Inject a fake ssh in PATH that exits non-zero (simulates
+            # connection failure, auth, etc.).
+            fake_bin = tmp / "fake_bin"
+            fake_bin.mkdir()
+            (fake_bin / "ssh").write_text(
+                "#!/usr/bin/env bash\n"
+                "echo 'ssh: connect to host failed' >&2\n"
+                "exit 255\n"
+            )
+            (fake_bin / "ssh").chmod(0o755)
+            env_extra = {
+                "PATH": f"{fake_bin}:{os.environ['PATH']}",
+                # Don't set STAGE_PROMOTION_LOCAL_JOURNAL — force the
+                # remote ssh branch.
+            }
+            code, out, err = run_sp(tmp, "phase4", env_extra=env_extra)
+            self.assertEqual(code, 5,
+                f"ssh-failure must route to exit 5 (PHASE_RUNTIME_ERROR), "
+                f"got {code}\nstdout: {out[:300]}\nstderr: {err[:300]}")
+            self.assertIn("ssh to VPS failed", err)
+            self.assertIn("rc=255", err)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
