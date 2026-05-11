@@ -105,6 +105,15 @@ aggregate() {
             printf "CLOSE|%s|%s|%s|%s|%s\n", label, $2, $3, $4, $5
             if (first_ts=="") first_ts=$2
             last_ts=$2
+            # PARTIAL handling drift (latent today; fires if a multi-leg strategy
+            # is ever deployed): this dashboard counts every close event toward
+            # total/wins (line 109 treats PARTIAL as a win, line 108 counts each
+            # PARTIAL as a separate trade). stage_promotion_check.py:load_journal
+            # SKIPS PARTIAL closes — counts only terminal positions for the
+            # "≥150 trades" formal gate. Today live config emits zero PARTIAL
+            # events so views agree; with B2/multi-TP enabled they would
+            # diverge (dashboard over-counts vs formal gate). Cross-referenced
+            # from stage_promotion_check.load_journal for symmetric visibility.
             total++
             if ($5=="TARGET" || $5=="PARTIAL") wins++
             pnl += $4

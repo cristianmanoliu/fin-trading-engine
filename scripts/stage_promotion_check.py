@@ -94,6 +94,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shlex
 import subprocess
 import sys
@@ -116,7 +117,24 @@ MAX_SLIP_BPS = 20.0
 MAX_SINGLE_SYM_PCT = 40.0
 HONEST_ANNUAL_USD = 69000.0
 HONEST_FRACTION = 0.60
-BENCHMARK_NOTIONAL = 32000.0  # CLAUDE.md locked HODL benchmark size
+# BTC-HODL benchmark notional. CLAUDE.md ("Deploy real money..." criteria
+# line 5) specifies $32k from the deployed-32 era (32 symbols × $1k stake).
+# CURRENT REALITY: deployed fleet is 16 engines × $1k = $16k notional. The
+# locked criterion was written before the deployed-32 → deployed-16 reduction
+# and was not updated. Honoring the locked spec value ($32k) means the gate
+# fail-CLOSES relative to a fair-comparison ($16k), making the bar 2× harder.
+#
+# Operator may override via BENCHMARK_NOTIONAL env to reconcile with current
+# fleet size (mirrors scripts/forward_paper_status.sh which has the same
+# env override). Default stays at the locked $32k value pending operator
+# resolution of the spec-vs-reality question (pre-registration discipline:
+# locked criterion stands until rule-owner updates it).
+#
+# Dashboard ↔ gate consistency: pre-fix the dashboard had this env override
+# but the formal gate did not — operator could override the dashboard view
+# without the gate matching. Aligning here closes that operator-visible
+# inconsistency.
+BENCHMARK_NOTIONAL = float(os.environ.get("BENCHMARK_NOTIONAL", "32000"))
 
 # ── Modeled costs (Binance USDT-M Futures Regular tier, per CLAUDE.md) ─────
 # Round-trip taker fee: 5 bp/side × 2 sides = 10 bp.
@@ -199,7 +217,19 @@ class Criterion:
 
 def load_journal(journal_dir: Path) -> list[Trade]:
     """Load LIVE-cohort closes only (top-level *.jsonl, not shadow/*).
-    Skips PARTIAL closes and pre-cost-decomp closes (notional==0)."""
+    Skips PARTIAL closes and pre-cost-decomp closes (notional==0).
+
+    PARTIAL handling drift with the dashboard (latent, fires only if a
+    PARTIAL-emitting strategy is deployed): scripts/forward_paper_status.sh
+    line 108-109 counts PARTIAL closes as separate trades AND as wins
+    in its per-cohort total/WR aggregation. This function (the formal
+    gate evaluator) excludes them. Today's live config (single 6:1 RR
+    target, no multi-leg exits) emits zero PARTIAL events so the
+    discrepancy is invisible. If a B2/multi-TP strategy is ever
+    deployed, the dashboard's "≥150 trades" view will fire before
+    this gate's "≥150 trades" criterion does — operator mental model
+    will diverge from the formal verdict. Cross-referenced from the
+    dashboard's awk block for symmetric discoverability."""
     if not journal_dir.is_dir():
         return []
     out: list[Trade] = []

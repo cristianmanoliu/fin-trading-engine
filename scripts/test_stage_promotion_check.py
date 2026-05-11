@@ -13,6 +13,7 @@ breaks a single criterion doesn't get masked by the verdict aggregation.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -138,6 +139,49 @@ class CriterionUnitTest(unittest.TestCase):
         self.assertIn("since first trade", c.name,
             f"check_pro_rated_annual name must surface the first-trade anchor "
             f"explicitly; got: {c.name!r}")
+
+    def test_benchmark_notional_default_matches_locked_spec(self):
+        """SPEC-vs-REALITY DRIFT pin: CLAUDE.md ("Deploy real money..."
+        criterion 5) specifies $32k notional from the deployed-32 era.
+        Current deployed fleet is 16 engines × $1k = $16k. The locked
+        criterion was not updated when the fleet shrank, so the gate
+        fail-CLOSES relative to a fair comparison ($32k benchmark is 2×
+        what the strategy actually risks). Until the operator resolves
+        the spec-vs-reality question, default stays at $32k per pre-reg
+        discipline. Pin to lock that the default matches locked spec —
+        any change to the default MUST update the docstring + this test
+        in lockstep."""
+        self.assertEqual(sp.BENCHMARK_NOTIONAL, 32000.0,
+            f"BENCHMARK_NOTIONAL default must match CLAUDE.md locked spec "
+            f"($32k from deployed-32 era); got {sp.BENCHMARK_NOTIONAL}. "
+            f"If operator resolved the spec-vs-reality question, update both "
+            f"the docstring above the constant AND this test.")
+
+    def test_benchmark_notional_env_override_propagates_to_subprocess(self):
+        """The constant is loaded at module-import time from
+        BENCHMARK_NOTIONAL env var. The gate evaluator now mirrors the
+        operator dashboard (forward_paper_status.sh line 40) which has
+        the same env override — closing the operator-visible
+        inconsistency where dashboard could reconcile to current fleet
+        but the formal gate could not.
+
+        Tested via subprocess (separate Python process picks up the
+        env at import time)."""
+        env = {**os.environ, "BENCHMARK_NOTIONAL": "16000"}
+        result = subprocess.run(
+            ["python3", "-c",
+             "import sys; sys.path.insert(0, 'scripts'); "
+             "import stage_promotion_check; "
+             "print(stage_promotion_check.BENCHMARK_NOTIONAL)"],
+            cwd=str(REPO),
+            env=env,
+            capture_output=True, text=True,
+        )
+        self.assertEqual(result.returncode, 0,
+            f"subprocess failed: {result.stderr}")
+        self.assertEqual(result.stdout.strip(), "16000.0",
+            f"BENCHMARK_NOTIONAL env override did not propagate; "
+            f"got stdout={result.stdout!r}")
 
     def test_check_net_positive(self):
         trades = [sp.Trade("2026-05-01T00:00:00Z", "BTC", "TARGET", 100, 0, 0, 0)] * 150
