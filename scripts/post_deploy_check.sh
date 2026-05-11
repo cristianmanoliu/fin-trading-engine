@@ -20,6 +20,69 @@
 
 set -euo pipefail
 
+# ─────────────────────────────────────────────────────────────────────
+# Internal helpers (extracted for testability — see scripts/test_post_deploy_check.sh)
+# ─────────────────────────────────────────────────────────────────────
+
+# compare_code_checksums: classify a (local, remote) md5 pair into one of
+# MATCH / MISMATCH / UNAVAILABLE. The original `[[ "$LOCAL" == "$REMOTE" ]]`
+# at §3 was a canonical empty-empty-equality fail-open: when both md5sum
+# invocations produced empty output (e.g., source files moved locally
+# AND ssh broken), empty == empty was TRUE → ok "checksums match" while
+# the operator believed the binary was current and neither side could
+# actually be checked. Pinned by PD-2 of the post_deploy_check audit.
+compare_code_checksums() {
+    local local_md5="$1" remote_md5="$2"
+    if [[ -z "$local_md5" ]] || [[ -z "$remote_md5" ]]; then
+        echo "UNAVAILABLE"
+    elif [[ "$local_md5" == "$remote_md5" ]]; then
+        echo "MATCH"
+    else
+        echo "MISMATCH"
+    fi
+}
+
+# classify_ssh_exit: separate ssh-transport failure (couldn't reach host,
+# auth, signal) from remote-command outcomes (the command ran and exited
+# with some code). Without this, every section's `$(ssh ... || echo 0)`
+# collapses ssh-level failure into the same value as a successful "0"
+# count → misclassification of "ssh broken" as "the thing being measured
+# is broken." Same shape as F2 _classify_validate_exit on weekly_audit.
+classify_ssh_exit() {
+    case "$1" in
+        0)                   echo "OK" ;;
+        126|127|130|137|255) echo "SSH_FAILURE" ;;
+        *)                   echo "REMOTE_FAILURE" ;;
+    esac
+}
+
+# ssh_remote: run a command via ssh, capture stdout+stderr + exit code in
+# named globals (SSH_REPLY, SSH_EXIT). Returns 0 always so set -e doesn't
+# abort on transient ssh; callers MUST check SSH_EXIT explicitly via
+# classify_ssh_exit.
+SSH_REPLY=
+SSH_EXIT=
+ssh_remote() {
+    local _e
+    set +e
+    SSH_REPLY=$(ssh -o BatchMode=yes -o ConnectTimeout=10 "${TARGET}" "$@" 2>&1)
+    _e=$?
+    set -e
+    SSH_EXIT=$_e
+    return 0
+}
+
+# Test entry-point: when sourced (BASH_SOURCE != $0), stop here so
+# consumers get only the function definitions without triggering the
+# main orchestration flow.
+if [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
+    return 0
+fi
+
+# ─────────────────────────────────────────────────────────────────────
+# Main orchestration flow
+# ─────────────────────────────────────────────────────────────────────
+
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TARGET="${1:-root@178.105.24.230}"
 STRICT="${STRICT:-0}"
@@ -57,14 +120,26 @@ crit() {
 # ── 1. Engine systemd state ────────────────────────────────────────────────────
 echo ""
 echo "1. Engine systemd state"
-ACTIVE_COUNT=$(ssh -o BatchMode=yes -o ConnectTimeout=10 "${TARGET}" "systemctl list-units 'paper-live@*.service' --state=active --no-legend 2>/dev/null | wc -l" || echo 0)
 EXPECTED=$(echo "$SYMBOLS_LC" | wc -w | tr -d ' ')
-if [[ "$ACTIVE_COUNT" == "$EXPECTED" ]]; then
-    ok "all $EXPECTED deployed engines active"
-else
-    warn "$ACTIVE_COUNT/$EXPECTED engines active"
-    ssh -o BatchMode=yes -o ConnectTimeout=10 "${TARGET}" "systemctl list-units 'paper-live@*.service' --no-legend 2>&1 | grep -v active" || true
-fi
+ssh_remote "systemctl list-units 'paper-live@*.service' --state=active --no-legend 2>/dev/null | wc -l"
+case "$(classify_ssh_exit "$SSH_EXIT")" in
+    OK)
+        ACTIVE_COUNT="$SSH_REPLY"
+        if [[ "$ACTIVE_COUNT" == "$EXPECTED" ]]; then
+            ok "all $EXPECTED deployed engines active"
+        else
+            warn "$ACTIVE_COUNT/$EXPECTED engines active"
+            ssh_remote "systemctl list-units 'paper-live@*.service' --no-legend 2>&1 | grep -v active"
+            [[ "$SSH_EXIT" -eq 0 ]] && echo "$SSH_REPLY"
+        fi
+        ;;
+    SSH_FAILURE|REMOTE_FAILURE)
+        # PD-1: distinct from "0/N engines active" — this is "could not
+        # query systemd state on the host." Misclassifying ssh failure
+        # as engine death sends the operator down the wrong rabbit hole.
+        warn "could not query systemd state on ${TARGET} (ssh exit=$SSH_EXIT) — engine count UNKNOWN"
+        ;;
+esac
 
 # ── 2. Watchdog timers ─────────────────────────────────────────────────────────
 echo ""
@@ -83,13 +158,28 @@ done
 echo ""
 echo "3. Binary code matches local"
 LOCAL_MD5=$(md5sum pkg/funding/funding.go pkg/strategy/engine.go pkg/strategy/entry.go cmd/engine/main.go 2>/dev/null | awk '{print $1}' | sort | md5sum | awk '{print $1}')
-REMOTE_MD5=$(ssh -o BatchMode=yes -o ConnectTimeout=10 "${TARGET}" "md5sum /opt/trading-engine/pkg/funding/funding.go /opt/trading-engine/pkg/strategy/engine.go /opt/trading-engine/pkg/strategy/entry.go /opt/trading-engine/cmd/engine/main.go 2>/dev/null | awk '{print \$1}' | sort | md5sum | awk '{print \$1}'" 2>/dev/null || echo "")
-if [[ "$LOCAL_MD5" == "$REMOTE_MD5" ]]; then
-    ok "code-path checksums match (engine binary is from current source)"
-else
-    warn "code drift: local=${LOCAL_MD5:0:16}... remote=${REMOTE_MD5:0:16}..."
-    warn "  → run ./deploy/sync.sh to push current source"
-fi
+ssh_remote "md5sum /opt/trading-engine/pkg/funding/funding.go /opt/trading-engine/pkg/strategy/engine.go /opt/trading-engine/pkg/strategy/entry.go /opt/trading-engine/cmd/engine/main.go 2>/dev/null | awk '{print \$1}' | sort | md5sum | awk '{print \$1}'"
+REMOTE_MD5=""
+[[ "$SSH_EXIT" -eq 0 ]] && REMOTE_MD5="$SSH_REPLY"
+# PD-2: empty == empty is TRUE in [[ ]] string compare. Without the
+# UNAVAILABLE branch, a double-failure (local source moved AND ssh broken)
+# silently reported "checksums match" while the operator believed the
+# binary was current and neither side could be checked. Canonical empty-
+# empty equality fail-open.
+case "$(compare_code_checksums "$LOCAL_MD5" "$REMOTE_MD5")" in
+    MATCH)
+        ok "code-path checksums match (engine binary is from current source)"
+        ;;
+    MISMATCH)
+        warn "code drift: local=${LOCAL_MD5:0:16}... remote=${REMOTE_MD5:0:16}..."
+        warn "  → run ./deploy/sync.sh to push current source"
+        ;;
+    UNAVAILABLE)
+        MD5_LOCAL_STATE="set"; [[ -z "$LOCAL_MD5" ]] && MD5_LOCAL_STATE="empty"
+        MD5_REMOTE_STATE="set"; [[ -z "$REMOTE_MD5" ]] && MD5_REMOTE_STATE="empty"
+        warn "could not compare code-path checksums (local=${MD5_LOCAL_STATE} remote=${MD5_REMOTE_STATE} ssh_exit=$SSH_EXIT) — code-vs-binary drift UNKNOWN"
+        ;;
+esac
 
 # ── 4. Per-engine tick freshness ──────────────────────────────────────────────
 echo ""
@@ -98,7 +188,7 @@ echo ""
 printf "  %-14s %-9s %-13s %-30s %s\n" "symbol" "state" "last_tick" "last_event" "uptime"
 printf "  %-14s %-9s %-13s %-30s %s\n" "------" "------" "---------" "----------" "------"
 
-CHECK_RESULTS=$(ssh -o BatchMode=yes -o ConnectTimeout=10 "${TARGET}" "now=\$(date -u +%s)
+ssh_remote "now=\$(date -u +%s)
 for sym in $SYMBOLS_LC; do
   active=\$(systemctl is-active paper-live@\${sym}.service 2>&1)
   last_hb=\$(grep '\"msg\":\"heartbeat\"' /var/log/paper-live/\${sym}.log 2>/dev/null | tail -1)
@@ -120,7 +210,18 @@ for sym in $SYMBOLS_LC; do
     uptime_min=0
   fi
   printf '%s|%s|%d|%s|%d\n' \"\$sym\" \"\$active\" \"\$age_s\" \"\$last_event\" \"\$uptime_min\"
-done")
+done"
+# PD-3: distinct ssh-failure path. Without this, ssh failure → empty
+# CHECK_RESULTS → 0 loop iterations → green "all engines have recent
+# tick activity" with literally zero data. Highest-stakes fail-open in
+# this script — operator believes the fleet is healthy when no check
+# actually ran.
+if [[ "$SSH_EXIT" -ne 0 ]]; then
+    warn "could not collect tick-freshness data on ${TARGET} (ssh exit=$SSH_EXIT) — fleet health UNKNOWN"
+    CHECK_RESULTS=""
+else
+    CHECK_RESULTS="$SSH_REPLY"
+fi
 
 STALE_COUNT=0
 NO_TICK_EVER=0
@@ -149,7 +250,10 @@ fi
 if [[ "$NO_TICK_EVER" -gt 0 ]]; then
     warn "$NO_TICK_EVER engine(s) reported zero ticks despite >10min uptime — possible bad WS connection"
 fi
-if [[ "$STALE_COUNT" -eq 0 && "$NO_TICK_EVER" -eq 0 ]]; then
+# PD-3 closure: only emit the green "all healthy" line if we ACTUALLY
+# inspected at least one engine. The empty-CHECK_RESULTS case (ssh
+# failure handled above) must NOT fall through to ok().
+if [[ "$STALE_COUNT" -eq 0 && "$NO_TICK_EVER" -eq 0 ]] && [[ -n "$CHECK_RESULTS" ]]; then
     ok "all engines have recent tick activity"
 fi
 
@@ -260,7 +364,7 @@ fi
 # check; pre-promotion it should always show 0 real-money engines.
 echo ""
 echo "8. Executor mode per engine"
-EXEC_REPORT=$(ssh -o BatchMode=yes -o ConnectTimeout=10 "${TARGET}" "real_count=0
+ssh_remote "real_count=0
 real_list=''
 testnet_count=0
 testnet_list=''
@@ -289,37 +393,51 @@ for sym in $SYMBOLS_LC; do
         testnet_list=\"\$testnet_list \$sym\"
     fi
 done
-echo \"\$real_count|\$real_list|\$testnet_count|\$testnet_list|\$missing_count|\$missing_list\"")
-IFS='|' read -r REAL_COUNT REAL_LIST TESTNET_COUNT TESTNET_LIST MISSING_COUNT MISSING_LIST <<<"$EXEC_REPORT"
-MISSING_COUNT="${MISSING_COUNT:-0}"
+echo \"\$real_count|\$real_list|\$testnet_count|\$testnet_list|\$missing_count|\$missing_list\""
 TOTAL=$(echo "$SYMBOLS_LC" | wc -w | tr -d ' ')
-if [[ "$MISSING_COUNT" != "0" ]]; then
-    # Loud warn — empty ExecStart on N engines means we cannot tell their
-    # executor mode at all. Section 1 may show those engines as "active" but
-    # this section's contract — "verify executor mode" — fails.
-    warn "$MISSING_COUNT / $TOTAL engines have empty ExecStart (systemctl failed):$MISSING_LIST"
-fi
-if [[ "$REAL_COUNT" == "0" && "$TESTNET_COUNT" == "0" && "$MISSING_COUNT" == "0" ]]; then
-    ok "all $TOTAL engines on stub (paper-money) — pre-STAGE_1 expected state"
-elif [[ "$REAL_COUNT" == "0" && "$TESTNET_COUNT" == "0" ]]; then
-    # All visible engines are stub but some couldn't be inspected. Don't
-    # report a green "all on stub" — the missing ones are unknowns.
-    :  # warn for $MISSING_COUNT was already emitted above
+# PD-4: distinct ssh-failure path. Without this, an ssh failure (or a
+# remote-script crash that produces empty stdout) leaves EXEC_REPORT
+# empty → IFS read produces empty REAL_COUNT/TESTNET_COUNT → the inner
+# `if [[ "$REAL_COUNT" != "0" ]]` is TRUE because "" != "0" → false-
+# positive "REAL-MONEY ACTIVE on / 16 engines:" panic banner with empty
+# values. Operator pages themselves about real-money on a paper-only
+# deploy; trust in the dashboard collapses.
+if [[ "$SSH_EXIT" -ne 0 ]] || [[ -z "$SSH_REPLY" ]]; then
+    warn "could not query executor modes on ${TARGET} (ssh exit=$SSH_EXIT, output empty=${SSH_REPLY:-y}) — executor state UNKNOWN"
 else
-    if [[ "$REAL_COUNT" != "0" ]]; then
-        # Real money is loud: emit an unmistakable banner. This is NOT a warning
-        # in the FAIL sense (real money on a promoted engine is the desired state
-        # post-STAGE_1), but it MUST be visible at every post_deploy_check.
-        echo "  🚨 REAL-MONEY ACTIVE on $REAL_COUNT / $TOTAL engines:$REAL_LIST"
-        echo "     Verify this matches your current STAGE_<N> promotion roster."
-        echo "     Per stage_promotion_runbook_decision_rule_2026-05-08.md, only"
-        echo "     ONE symbol promotes at a time and other symbols stay on stub."
+    EXEC_REPORT="$SSH_REPLY"
+    IFS='|' read -r REAL_COUNT REAL_LIST TESTNET_COUNT TESTNET_LIST MISSING_COUNT MISSING_LIST <<<"$EXEC_REPORT"
+    MISSING_COUNT="${MISSING_COUNT:-0}"
+    REAL_COUNT="${REAL_COUNT:-0}"
+    TESTNET_COUNT="${TESTNET_COUNT:-0}"
+    if [[ "$MISSING_COUNT" != "0" ]]; then
+        # Loud warn — empty ExecStart on N engines means we cannot tell their
+        # executor mode at all. Section 1 may show those engines as "active" but
+        # this section's contract — "verify executor mode" — fails.
+        warn "$MISSING_COUNT / $TOTAL engines have empty ExecStart (systemctl failed):$MISSING_LIST"
     fi
-    if [[ "$TESTNET_COUNT" != "0" ]]; then
-        # Testnet is play-money but operationally distinct from stub — orders
-        # leave the host. Surface for visibility but don't escalate.
-        echo "  ⓘ  TESTNET executor active on $TESTNET_COUNT / $TOTAL engines:$TESTNET_LIST"
-        echo "     (Layer 2 integration gate — orders go to testnet.binancefuture.com)"
+    if [[ "$REAL_COUNT" == "0" && "$TESTNET_COUNT" == "0" && "$MISSING_COUNT" == "0" ]]; then
+        ok "all $TOTAL engines on stub (paper-money) — pre-STAGE_1 expected state"
+    elif [[ "$REAL_COUNT" == "0" && "$TESTNET_COUNT" == "0" ]]; then
+        # All visible engines are stub but some couldn't be inspected. Don't
+        # report a green "all on stub" — the missing ones are unknowns.
+        :  # warn for $MISSING_COUNT was already emitted above
+    else
+        if [[ "$REAL_COUNT" != "0" ]]; then
+            # Real money is loud: emit an unmistakable banner. This is NOT a warning
+            # in the FAIL sense (real money on a promoted engine is the desired state
+            # post-STAGE_1), but it MUST be visible at every post_deploy_check.
+            echo "  🚨 REAL-MONEY ACTIVE on $REAL_COUNT / $TOTAL engines:$REAL_LIST"
+            echo "     Verify this matches your current STAGE_<N> promotion roster."
+            echo "     Per stage_promotion_runbook_decision_rule_2026-05-08.md, only"
+            echo "     ONE symbol promotes at a time and other symbols stay on stub."
+        fi
+        if [[ "$TESTNET_COUNT" != "0" ]]; then
+            # Testnet is play-money but operationally distinct from stub — orders
+            # leave the host. Surface for visibility but don't escalate.
+            echo "  ⓘ  TESTNET executor active on $TESTNET_COUNT / $TOTAL engines:$TESTNET_LIST"
+            echo "     (Layer 2 integration gate — orders go to testnet.binancefuture.com)"
+        fi
     fi
 fi
 
@@ -351,32 +469,41 @@ fi
 # runaway logs.
 echo ""
 echo "10. Disk space"
-DISK_REPORT=$(ssh -o BatchMode=yes -o ConnectTimeout=10 "${TARGET}" "free_mb=\$(df -BM / | tail -1 | awk '{print \$4}' | sed 's/M\$//')
+ssh_remote "free_mb=\$(df -BM / | tail -1 | awk '{print \$4}' | sed 's/M\$//')
 largest_bytes=\$(ls -l /var/log/paper-live/*.log 2>/dev/null | awk '{print \$5}' | sort -n | tail -1)
 largest_bytes=\${largest_bytes:-0}
-echo \"\$free_mb|\$largest_bytes\"")
-IFS='|' read -r FREE_MB LARGEST_BYTES <<<"$DISK_REPORT"
-FREE_MB="${FREE_MB:-0}"
-LARGEST_BYTES="${LARGEST_BYTES:-0}"
-LARGEST_MB=$(( LARGEST_BYTES / 1048576 ))
-
-if [[ "$FREE_MB" -lt 1024 ]]; then
-    warn "low disk space: ${FREE_MB}M free on / (engine journal writes will fail when full)"
-elif [[ "$FREE_MB" -lt 5120 ]]; then
-    echo "  ⓘ  ${FREE_MB}M free on / (warn threshold ≥1024M; ample ≥5120M)"
+echo \"\$free_mb|\$largest_bytes\""
+# PD-5: distinct ssh-failure path. Without this, ssh failure → empty
+# DISK_REPORT → IFS read produces empty FREE_MB → defaulted to "0" via
+# `:-0` → false-positive "low disk space: 0M free" warning. Operator
+# investigates a non-existent disk-full when reality is "ssh broken."
+if [[ "$SSH_EXIT" -ne 0 ]] || [[ -z "$SSH_REPLY" ]]; then
+    warn "could not query disk state on ${TARGET} (ssh exit=$SSH_EXIT) — disk headroom UNKNOWN"
 else
-    ok "${FREE_MB}M free on / (ample headroom)"
-fi
+    DISK_REPORT="$SSH_REPLY"
+    IFS='|' read -r FREE_MB LARGEST_BYTES <<<"$DISK_REPORT"
+    FREE_MB="${FREE_MB:-0}"
+    LARGEST_BYTES="${LARGEST_BYTES:-0}"
+    LARGEST_MB=$(( LARGEST_BYTES / 1048576 ))
 
-# Largest current log: rotation runs daily, so steady-state ≤ ~1d × ~10MB/day
-# per engine. >500MB in a single .log file means logging-rate is an order of
-# magnitude above expected — investigate before rotation hides it.
-if [[ "$LARGEST_BYTES" -gt 1073741824 ]]; then     # 1GB
-    warn "largest engine log file is ${LARGEST_MB}M (>1GB — investigate logging loop)"
-elif [[ "$LARGEST_BYTES" -gt 524288000 ]]; then     # 500MB
-    echo "  ⓘ  largest engine log file is ${LARGEST_MB}M (above typical; rotation will trim daily)"
-else
-    ok "largest engine log file is ${LARGEST_MB}M (within typical bounds)"
+    if [[ "$FREE_MB" -lt 1024 ]]; then
+        warn "low disk space: ${FREE_MB}M free on / (engine journal writes will fail when full)"
+    elif [[ "$FREE_MB" -lt 5120 ]]; then
+        echo "  ⓘ  ${FREE_MB}M free on / (warn threshold ≥1024M; ample ≥5120M)"
+    else
+        ok "${FREE_MB}M free on / (ample headroom)"
+    fi
+
+    # Largest current log: rotation runs daily, so steady-state ≤ ~1d × ~10MB/day
+    # per engine. >500MB in a single .log file means logging-rate is an order of
+    # magnitude above expected — investigate before rotation hides it.
+    if [[ "$LARGEST_BYTES" -gt 1073741824 ]]; then     # 1GB
+        warn "largest engine log file is ${LARGEST_MB}M (>1GB — investigate logging loop)"
+    elif [[ "$LARGEST_BYTES" -gt 524288000 ]]; then     # 500MB
+        echo "  ⓘ  largest engine log file is ${LARGEST_MB}M (above typical; rotation will trim daily)"
+    else
+        ok "largest engine log file is ${LARGEST_MB}M (within typical bounds)"
+    fi
 fi
 
 # ── 11. Drift detector cron freshness ─────────────────────────────────────────
@@ -426,6 +553,11 @@ else
         # the "registered but failing" variant separately.
         echo "  ⓘ  drift_check_history.jsonl empty/missing — first cron run pending"
         echo "     If this persists >7d, verify the plist actually invokes weekly_audit.sh"
+    elif ! command -v jq >/dev/null 2>&1; then
+        # PD-6: jq missing was previously silent fall-through — drift
+        # freshness verdict simply absent from output. The operator could
+        # not distinguish "freshness OK" from "couldn't check freshness."
+        warn "jq missing on this machine — drift_check freshness UNKNOWN (install jq or run on a machine that has it)"
     elif command -v jq >/dev/null 2>&1; then
         last_ts=$(tail -1 "$HISTORY" | jq -r '.ts')
         last_epoch=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "$last_ts" +%s 2>/dev/null || \
@@ -467,23 +599,32 @@ fi
 # >5 implies a real loop.
 echo ""
 echo "12. Restart-loop detection (last 1 hour)"
-RESTART_REPORT=$(ssh -o BatchMode=yes -o ConnectTimeout=10 "${TARGET}" "for sym in $SYMBOLS_LC; do
+ssh_remote "for sym in $SYMBOLS_LC; do
     n=\$(journalctl -u paper-live@\${sym}.service --since '1 hour ago' --no-pager 2>/dev/null | grep -c 'Started paper-live' || true)
     if [[ \$n -gt 2 ]]; then
         echo \"\$sym|\$n\"
     fi
-done")
-if [[ -z "$RESTART_REPORT" ]]; then
-    ok "no engines restarted >2 times in last hour"
+done"
+# PD-7: distinct ssh-failure path. Without this, ssh-or-journalctl
+# failure → empty RESTART_REPORT → green "no engines restarted" while
+# we never actually inspected the restart history. A real restart loop
+# during a window where ssh is broken would be invisible.
+if [[ "$SSH_EXIT" -ne 0 ]]; then
+    warn "could not query restart history on ${TARGET} (ssh exit=$SSH_EXIT) — restart-loop check UNKNOWN"
 else
-    while IFS='|' read -r sym n; do
-        [[ -z "$sym" ]] && continue
-        if [[ "$n" -gt 5 ]]; then
-            warn "$sym restarted $n times in last hour (>5 — restart LOOP, investigate now)"
-        else
-            warn "$sym restarted $n times in last hour (>2 — verify no crash-on-startup pattern)"
-        fi
-    done <<< "$RESTART_REPORT"
+    RESTART_REPORT="$SSH_REPLY"
+    if [[ -z "$RESTART_REPORT" ]]; then
+        ok "no engines restarted >2 times in last hour"
+    else
+        while IFS='|' read -r sym n; do
+            [[ -z "$sym" ]] && continue
+            if [[ "$n" -gt 5 ]]; then
+                warn "$sym restarted $n times in last hour (>5 — restart LOOP, investigate now)"
+            else
+                warn "$sym restarted $n times in last hour (>2 — verify no crash-on-startup pattern)"
+            fi
+        done <<< "$RESTART_REPORT"
+    fi
 fi
 
 # ── 13. Live-config compliance ────────────────────────────────────────────────

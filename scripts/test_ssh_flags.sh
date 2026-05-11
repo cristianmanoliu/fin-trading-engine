@@ -82,9 +82,11 @@ for file in "${OPERATIONAL_FILES[@]}"; do
             fi
         fi
 
-        # 4) `echo "...ssh ..."` / `printf "...ssh ..."` — the ssh is inside
-        #    the quoted format/message text, not invoked.
-        [[ "$line" =~ (echo|printf)[[:space:]]+\".*ssh[[:space:]] ]] && continue
+        # 4) `echo "...ssh ..."` / `printf "...ssh ..."` / `warn|ok|crit "...ssh ..."`
+        #    — the ssh is inside the quoted format/message text, not invoked.
+        #    Includes the post_deploy_check `warn "... (ssh exit=$SSH_EXIT) ..."`
+        #    diagnostic shape introduced by the PD-1/3/4/5/7 audit fixes.
+        [[ "$line" =~ (echo|printf|warn|ok|crit)[[:space:]]+\".*ssh[[:space:]] ]] && continue
 
         # 5) `VAR="...ssh ..."` — assignment with a string literal that
         #    happens to mention ssh (e.g. operator-friendly error message).
