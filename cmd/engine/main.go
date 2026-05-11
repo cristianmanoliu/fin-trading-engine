@@ -81,6 +81,27 @@ func main() {
 	if *targetRROverride > 0 {
 		cfg.Strategy.TargetRR = *targetRROverride
 	}
+
+	// TargetRR validation: detect the silent-fallback risk path. If
+	// cfg.Strategy.TargetRR ends up <= 0 after YAML load + CLI override,
+	// the strategy's entry-detector fallback fires (now aligned to 6.0
+	// across all check_* functions). Surfaced as WARN — not blocking —
+	// because the fallback IS the locked spec value, but the operator
+	// should know they're relying on fallback semantics rather than
+	// explicit config. Closes the silent-misconfig fail-open shape that
+	// would otherwise let an operator deploy thinking they had explicit
+	// 6:1 RR when actually the YAML+CLI didn't propagate any value.
+	if cfg.Strategy.TargetRR <= 0 {
+		slog.Warn("TargetRR is unset or non-positive — entry detector will fall back to 6.0 (locked spec)",
+			"symbol", cfg.Symbol, "config_value", cfg.Strategy.TargetRR,
+			"yaml_path", *cfgPath, "cli_override", *targetRROverride)
+		_ = notifier.SendStructured(context.Background(), notify.SeverityWarn,
+			fmt.Sprintf("CONFIG WARN on %s — TargetRR=%.2f (will fall back to 6.0 locked spec)\n"+
+				"YAML: %s\nCLI --target-rr override: %.2f\n"+
+				"Set target_rr explicitly in YAML or pass --target-rr to silence.",
+				cfg.Symbol, cfg.Strategy.TargetRR, *cfgPath, *targetRROverride))
+	}
+
 	if *signalTFOverride != "" {
 		switch *signalTFOverride {
 		case "5m", "30m", "1H", "2H", "4H", "1D":

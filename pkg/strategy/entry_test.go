@@ -2,6 +2,10 @@ package strategy
 
 import (
 	"math"
+	"os"
+	"path/filepath"
+	"regexp"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +18,55 @@ import (
 // like 100.60049999999998 when the algebraic answer is 100.6005.
 func approxEqual(a, b float64) bool {
 	return math.Abs(a-b) < 1e-9
+}
+
+// TestTargetRRFallbackConsistency pins that every TargetRR <= 0 fallback
+// in entry.go uses the same value (6.0). Pre-fix, checkMomentum (line
+// ~418) and checkEMACrossover (line ~916) used 2.0 while the 5 sibling
+// check_* functions used 6.0. The 2.0 sites were Option-C era defaults
+// that never got updated when the locked spec moved to 6:1 RR.
+//
+// Risk path the inconsistency enables: operator deploys without
+// --target-rr override AND YAML target_rr=0 → cfg.Strategy.TargetRR=0
+// → fallback fires → live strategy silently runs at 2.0 RR instead of
+// locked 6.0. Especially severe for checkEMACrossover (the live entry
+// path on the deployed-16 fleet).
+//
+// This test scans entry.go source for the fallback pattern and asserts
+// every site uses 6.0. A future change to a different fallback value
+// MUST update this test in lockstep — preventing the silent drift from
+// recurring.
+func TestTargetRRFallbackConsistency(t *testing.T) {
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("could not determine test file path")
+	}
+	entryGo := filepath.Join(filepath.Dir(thisFile), "entry.go")
+	src, err := os.ReadFile(entryGo)
+	if err != nil {
+		t.Fatalf("read entry.go: %v", err)
+	}
+
+	// Match the pattern `(rr|targetMult) = <number>` immediately after
+	// a `<= 0 {` test. Greedy-tolerant of intervening whitespace + blank
+	// lines so the test doesn't break on formatting changes.
+	pattern := regexp.MustCompile(`<=\s*0\s*\{\s*\n\s*(?:rr|targetMult)\s*=\s*([\d.]+)`)
+	matches := pattern.FindAllSubmatch(src, -1)
+	if len(matches) < 5 {
+		t.Fatalf("found only %d TargetRR fallback sites in entry.go — expected at "+
+			"least 5 (checkRSIBreakdown / checkMACDCross / checkEMACrossover plus "+
+			"two others). Pattern may have changed.", len(matches))
+	}
+
+	for i, m := range matches {
+		val := string(m[1])
+		if val != "6.0" {
+			t.Errorf("TargetRR fallback site #%d uses %s — must be 6.0 to match locked "+
+				"CLAUDE.md spec + the other %d sites. Pre-fix this allowed the live "+
+				"strategy to silently run at 2.0 RR if config didn't propagate.",
+				i+1, val, len(matches)-1)
+		}
+	}
 }
 
 // emaTestSetup primes an EntryDetector + BiasTracker with `numFlat` candles all

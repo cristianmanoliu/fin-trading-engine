@@ -415,9 +415,20 @@ func (e *EntryDetector) checkMomentum(last models.Candle, bias *BiasTracker) *mo
 		return nil
 	}
 
+	// TargetRR fallback aligned to 6.0 across all entry-detector checks
+	// (was 2.0 here pre-fix; the 5 sibling check_* functions all used 6.0).
+	// CLAUDE.md locks the candidate-strategy fixed RR at 6:1; matching the
+	// fallback means a misconfigured TargetRR=0 produces the closest
+	// approximation of locked semantics rather than a stale 2.0 (an
+	// Option-C era default that no longer reflects current spec). Real
+	// risk path: operator deploys without --target-rr override AND YAML
+	// has target_rr=0 → fallback fires. Pre-fix: silent 2.0 deployment.
+	// Post-fix: silent 6.0 deployment (matches locked spec). Defense in
+	// depth: cmd/engine should also Telegram-WARN at startup when
+	// TargetRR<=0, but that's a separate operator decision.
 	targetMult := e.cfg.TargetRR
 	if targetMult <= 0 {
-		targetMult = 2.0
+		targetMult = 6.0
 	}
 
 	var takeProfit float64
@@ -913,9 +924,15 @@ func (e *EntryDetector) checkEMACrossover(last models.Candle, bias *BiasTracker)
 		return nil
 	}
 
+	// TargetRR fallback aligned to 6.0 — see commentary in checkMomentum
+	// above. This is the LIVE STRATEGY's check (EMA crossover); a silent
+	// fallback to 2.0 here would be a strategy-altering bug if config
+	// ever misses both YAML target_rr AND --target-rr override (e.g.,
+	// fresh-clone-and-run without overrides). 6.0 matches CLAUDE.md
+	// locked spec and the 5 sibling check_* sites.
 	targetMult := e.cfg.TargetRR
 	if targetMult <= 0 {
-		targetMult = 2.0
+		targetMult = 6.0
 	}
 
 	var takeProfit float64
