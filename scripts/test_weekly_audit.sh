@@ -115,6 +115,27 @@ assert_eq "resolution exit 5 → INPUT_ERROR"     "$(_classify_python_exit 5 "$R
 assert_eq "resolution exit 6 → UNEXPECTED"      "$(_classify_python_exit 6 "$RESOLUTION_MODES" "$RESOLUTION_CONTINUE")" "UNEXPECTED"
 
 echo
+echo "T9: WEEKLY_AUDIT_VPS env override consistency"
+# T9 ssh-target-consistency: weekly_audit.sh's main flow had 3 hardcoded
+# references to root@178.105.24.230 (1 actual ssh call + 2 diagnostic
+# messages) with no env override. Operators wanting to test against a
+# staging VPS had to edit the file. Pin the fix: source-scan asserts no
+# `ssh ... root@178.105.24.230` (whitespace-separated literal) remains.
+WEEKLY_AUDIT_SOURCE="${SCRIPT_DIR}/weekly_audit.sh"
+HARDCODED_HITS=$(grep -nE 'ssh[^\n]*[[:space:]]root@178\.105\.24\.230' "$WEEKLY_AUDIT_SOURCE" | wc -l | tr -d ' ')
+assert_eq "no hardcoded ssh-target in weekly_audit" "$HARDCODED_HITS" "0"
+# Verify the new env-var binding exists.
+HAS_ENV=$(grep -c 'WEEKLY_AUDIT_VPS:-root@' "$WEEKLY_AUDIT_SOURCE")
+if [[ "$HAS_ENV" -ge 1 ]]; then
+    echo "  ✓ WEEKLY_AUDIT_VPS env var binding present"
+    PASS=$((PASS + 1))
+else
+    echo "  ✗ WEEKLY_AUDIT_VPS env var binding missing"
+    FAIL=$((FAIL + 1))
+    FAIL_LABELS+=("WEEKLY_AUDIT_VPS-env-binding")
+fi
+
+echo
 echo "Stage 8: _classify_python_exit (promotion_rehearsal contract)"
 # Stage 8 added 2026-05-11 PM wires promotion_rehearsal.sh into the
 # weekly cron so Layer 2 + Layer 3 attestation markers get monitored

@@ -191,19 +191,31 @@ def parse_live_metrics(snap: fpt.Snapshot) -> dict[str, float | int | None]:
     }
 
 
-def invoke_sibling(script_name: str, override: int | None) -> int | None:
+def invoke_sibling(script_name: str, override: int | None,
+                   sibling_args: list[str] | None = None) -> int | None:
     """Invoke a sibling decision script (kill_protocol_check or
     stage_promotion_check) and return its exit code. Override allows tests
     to inject a specific exit code without running the actual script.
-    Returns None if the script is missing — caller maps to OPERATOR_REVIEW."""
+    Returns None if the script is missing — caller maps to OPERATOR_REVIEW.
+
+    sibling_args propagates --vps / --live-source / --live-dir to the
+    sibling subprocess so a `forward_paper_resolution --live-source local`
+    invocation actually runs the LIMBO synthesis against local journals
+    (pre-fix, the sibling subprocesses used their default VPS regardless
+    of the parent's --live-source — same ssh-target-consistency shape
+    as Track 7's stage_promotion F1).
+    """
     if override is not None:
         return override
     path = SCRIPTS / script_name
     if not path.is_file():
         return None
+    cmd = ["python3", str(path)]
+    if sibling_args:
+        cmd.extend(sibling_args)
     try:
         result = subprocess.run(
-            ["python3", str(path)],
+            cmd,
             capture_output=True, text=True, timeout=120,
         )
     except (subprocess.TimeoutExpired, OSError):
@@ -246,9 +258,22 @@ def gather_inputs(args: argparse.Namespace) -> tuple[Inputs | None, str | None]:
     drift_path = Path(args.drift_history)
     drift_exit, drift_ts, drift_age = read_drift_state(drift_path, now)
 
-    # Sibling scripts (or test overrides).
-    kill_exit = invoke_sibling("kill_protocol_check.py", args.kill_exit)
-    promote_exit = invoke_sibling("stage_promotion_check.py", args.promote_exit)
+    # Sibling scripts (or test overrides). Propagate --vps / --live-source /
+    # --live-dir so sibling subprocesses honor the same data-source as the
+    # parent — closes the ssh-target-consistency shape where
+    # `forward_paper_resolution --live-source local` would still ssh to
+    # the production VPS via the unconfigured sibling subprocess.
+    sibling_args: list[str] = []
+    if args.live_source:
+        sibling_args.extend(["--live-source", args.live_source])
+    if args.vps:
+        sibling_args.extend(["--vps", args.vps])
+    if args.live_dir:
+        sibling_args.extend(["--live-dir", args.live_dir])
+    kill_exit = invoke_sibling("kill_protocol_check.py", args.kill_exit,
+                               sibling_args=sibling_args)
+    promote_exit = invoke_sibling("stage_promotion_check.py", args.promote_exit,
+                                  sibling_args=sibling_args)
 
     return Inputs(
         snapshot_path=snapshot_path,
@@ -446,6 +471,18 @@ def main() -> int:
                     help="Specific snapshot file to evaluate (default: latest in --snapshot-dir)")
     ap.add_argument("--snapshot-dir", default=str(DEFAULT_SNAPSHOT_DIR))
     ap.add_argument("--drift-history", default=str(DEFAULT_DRIFT_HISTORY))
+    # Pass-through to sibling decision scripts (kill_protocol_check +
+    # stage_promotion_check). Without these, the rehearsal/operator
+    # invoking with --live-source local would still ssh to production
+    # via the sibling subprocesses — ssh-target-consistency fail-open
+    # shape. Defaults to None so unset flags don't override siblings'
+    # own defaults.
+    ap.add_argument("--vps", default=None,
+                    help="Forwarded to sibling scripts (default: sibling's own default)")
+    ap.add_argument("--live-source", choices=("vps", "local"), default=None,
+                    help="Forwarded to sibling scripts (vps/local)")
+    ap.add_argument("--live-dir", default=None,
+                    help="Forwarded to sibling scripts")
     ap.add_argument("--kill-exit", type=int, default=None,
                     help="Override kill_protocol_check exit (testing)")
     ap.add_argument("--promote-exit", type=int, default=None,

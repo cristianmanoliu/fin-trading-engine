@@ -143,7 +143,13 @@ source "${REPO_ROOT}/scripts/lib/notify.sh"
 # _classify_validate_exit helper below, ssh-level failure (255 etc.) is
 # routed to a SSH_FAILURE WARN tier rather than the CRITICAL "found errors"
 # misclassification a transient network blip would otherwise produce.
-VALIDATE_OUTPUT=$(ssh -o BatchMode=yes -o ConnectTimeout=10 root@178.105.24.230 \
+# WEEKLY_AUDIT_VPS env override: previously the script hardcoded the VPS
+# target for the journal_validate ssh + diagnostic messages. Test
+# scenarios + alt-VPS-pointing all required editing the file. T9 ssh-
+# target-consistency sweep 2026-05-11 PM aligns this with the other ssh-
+# using scripts that already accept positional/env overrides.
+WEEKLY_AUDIT_VPS="${WEEKLY_AUDIT_VPS:-root@178.105.24.230}"
+VALIDATE_OUTPUT=$(ssh -o BatchMode=yes -o ConnectTimeout=10 "$WEEKLY_AUDIT_VPS" \
     '/opt/trading-engine/bin/journal_validate --dir /var/log/paper-live/journal --exclude archive 2>&1')
 VALIDATE_EXIT=$?
 VALIDATE_CLASS=$(_classify_validate_exit "$VALIDATE_EXIT")
@@ -163,7 +169,7 @@ case "$VALIDATE_CLASS" in
 "journal_validate found errors in live journals
 exit=$VALIDATE_EXIT
 last line: $(echo "$VALIDATE_OUTPUT" | tail -1)
-Run: ssh root@178.105.24.230 /opt/trading-engine/bin/journal_validate --dir /var/log/paper-live/journal --exclude archive"
+Run: ssh $WEEKLY_AUDIT_VPS /opt/trading-engine/bin/journal_validate --dir /var/log/paper-live/journal --exclude archive"
         ;;
     SSH_FAILURE)
         # ssh-level failure (connection refused / auth / signal / cmd-not-found).
@@ -175,7 +181,7 @@ Run: ssh root@178.105.24.230 /opt/trading-engine/bin/journal_validate --dir /var
 ssh exit=$VALIDATE_EXIT
 output: $(echo "$VALIDATE_OUTPUT" | tail -3)
 Investigate VPS connectivity, then re-run manually:
-  ssh root@178.105.24.230 /opt/trading-engine/bin/journal_validate --dir /var/log/paper-live/journal --exclude archive"
+  ssh $WEEKLY_AUDIT_VPS /opt/trading-engine/bin/journal_validate --dir /var/log/paper-live/journal --exclude archive"
         ;;
     UNEXPECTED|*)
         # Unexpected exit — fall-open guard. Don't silently swallow.

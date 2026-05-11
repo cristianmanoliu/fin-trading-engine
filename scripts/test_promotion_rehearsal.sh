@@ -205,6 +205,24 @@ rc=$?
 set -e
 assert_eq "$rc" "3" "--phase abc → INPUT_ERR"
 
+# ── T9 LIVE_ARGS propagation to Phase 1 (resolution.py) ────────────────────
+echo
+echo "── T9: LIVE_ARGS propagated to forward_paper_resolution invocation ──"
+# T9 ssh-target-consistency: pre-fix, run_phase_1 invoked resolution.py
+# without --live-source/--vps args, so even with --local the resolution's
+# subprocess calls to kill_protocol + stage_promotion still hit production.
+# Source-scan asserts LIVE_ARGS now flows into the Phase 1 invocation.
+REHEARSAL_SOURCE="$REHEARSAL"
+HAS_LIVE_ARGS=$(grep -c 'python3.*RESOLUTION_PY.*LIVE_ARGS' "$REHEARSAL_SOURCE")
+if [[ "$HAS_LIVE_ARGS" -ge 1 ]]; then
+    echo "  ✓ run_phase_1 passes LIVE_ARGS to resolution.py"
+    PASS=$((PASS + 1))
+else
+    echo "  ✗ run_phase_1 does NOT pass LIVE_ARGS to resolution.py"
+    FAIL=$((FAIL + 1))
+    FAIL_LINES+=("  ✗ T9.live_args_propagation: run_phase_1 missing LIVE_ARGS pass-through")
+fi
+
 # ── Final ───────────────────────────────────────────────────────────────────
 echo
 echo "── results ──"

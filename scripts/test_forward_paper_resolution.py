@@ -404,5 +404,76 @@ class CLISmokeTest(unittest.TestCase):
             self.assertEqual(payload["live_n_trades"], 9)
 
 
+class SiblingArgPropagationTest(unittest.TestCase):
+    """Pin the T9 ssh-target-consistency fix: invoke_sibling must propagate
+    --vps / --live-source / --live-dir to sibling subprocess calls so that
+    a `forward_paper_resolution --live-source local` invocation doesn't
+    silently ssh to the production VPS via unconfigured siblings.
+
+    Pre-fix, the sibling subprocesses were invoked with bare
+    `["python3", str(path)]` — no args propagated. The resolution
+    rehearsal claimed --local but actually still hit the VPS for the
+    kill_protocol and stage_promotion checks via subprocess.
+    """
+
+    def test_invoke_sibling_propagates_args(self):
+        """Monkey-patch subprocess.run, verify sibling_args appears in cmd."""
+        from unittest import mock
+        captured: list = []
+        def fake_run(*args, **kwargs):
+            captured.append((args, kwargs))
+            result = mock.Mock()
+            result.returncode = 0
+            return result
+        # Pretend the sibling script exists.
+        with mock.patch.object(fpr.subprocess, "run", side_effect=fake_run), \
+             mock.patch.object(fpr.Path, "is_file", return_value=True):
+            rc = fpr.invoke_sibling(
+                "kill_protocol_check.py", None,
+                sibling_args=["--live-source", "local",
+                              "--vps", "root@test-vps",
+                              "--live-dir", "/tmp/journal"],
+            )
+        self.assertEqual(rc, 0)
+        self.assertEqual(len(captured), 1)
+        cmd = captured[0][0][0]
+        # cmd should be: ["python3", "<path>", "--live-source", "local",
+        #                  "--vps", "root@test-vps", "--live-dir", "/tmp/journal"]
+        self.assertIn("--live-source", cmd)
+        self.assertIn("local", cmd)
+        self.assertIn("--vps", cmd)
+        self.assertIn("root@test-vps", cmd)
+        self.assertIn("--live-dir", cmd)
+        self.assertIn("/tmp/journal", cmd)
+
+    def test_invoke_sibling_no_args_omits_flags(self):
+        """When sibling_args is empty/None, the subprocess cmd is just
+        ['python3', path] — siblings fall back to their own defaults."""
+        from unittest import mock
+        captured: list = []
+        def fake_run(*args, **kwargs):
+            captured.append((args, kwargs))
+            result = mock.Mock()
+            result.returncode = 0
+            return result
+        with mock.patch.object(fpr.subprocess, "run", side_effect=fake_run), \
+             mock.patch.object(fpr.Path, "is_file", return_value=True):
+            fpr.invoke_sibling("kill_protocol_check.py", None, sibling_args=[])
+        cmd = captured[0][0][0]
+        self.assertEqual(len(cmd), 2,
+            f"empty sibling_args should yield bare ['python3', path], got {cmd}")
+        self.assertEqual(cmd[0], "python3")
+
+    def test_invoke_sibling_override_short_circuits(self):
+        """When override is provided, sibling is NOT invoked at all —
+        subprocess.run never called. Existing test contract preserved."""
+        from unittest import mock
+        with mock.patch.object(fpr.subprocess, "run") as mock_run:
+            rc = fpr.invoke_sibling("kill_protocol_check.py", 1,
+                                    sibling_args=["--live-source", "local"])
+        self.assertEqual(rc, 1)
+        mock_run.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

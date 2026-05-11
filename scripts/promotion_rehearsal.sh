@@ -344,7 +344,15 @@ fi
 run_phase_1() {
     set +e
     local out rc
-    out=$(python3 "$RESOLUTION_PY" --json 2>&1)
+    # Pass through --live-source / --vps / --live-dir so the LIMBO
+    # synthesis's sibling subprocesses honor the same data-source as
+    # the rehearsal. Pre-fix (T9 cross-script sweep find), Phase 1
+    # invoked resolution.py without these flags — meaning even when
+    # the operator ran `promotion_rehearsal --local`, the resolution's
+    # internal subprocess calls to kill_protocol_check + stage_promotion_check
+    # still used their VPS defaults. Same ssh-target-consistency shape
+    # as T7's stage_promotion F1.
+    out=$(python3 "$RESOLUTION_PY" "${LIVE_ARGS[@]}" --json 2>&1)
     rc=$?
     set -e
     PHASE_1_TIER=$(resolution_tier "$rc")
