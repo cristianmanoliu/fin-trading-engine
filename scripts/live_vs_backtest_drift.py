@@ -41,6 +41,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -103,10 +104,20 @@ def load_local_trades(journal_dir: Path) -> list[Trade]:
 
 
 def load_remote_trades(vps: str, remote_dir: str) -> list[Trade]:
-    """Tar+stream remote journal files via ssh, parse locally. No persistence."""
-    cmd = f'ssh {vps} "tar -cf - -C {remote_dir} . 2>/dev/null"'
+    """Tar+stream remote journal files via ssh, parse locally. No persistence.
+
+    Uses list-arg subprocess (no local shell) so a `vps` value containing
+    shell metacharacters cannot inject commands on the operator's local
+    machine. The remote command quotes `remote_dir` via shlex.quote so the
+    remote shell receives it as a single token even if the path contains
+    `;`, `$()`, `"`, or spaces. Same defense documented inline in
+    realized_cost_trajectory.py — pattern lock for shell-injection-via-
+    f-string after that script first received it.
+    """
+    remote_cmd = f"tar -cf - -C {shlex.quote(remote_dir)} . 2>/dev/null"
     with tempfile.TemporaryDirectory() as tmp:
-        result = subprocess.run(cmd, shell=True, check=True, capture_output=True)
+        result = subprocess.run(
+            ["ssh", vps, remote_cmd], check=True, capture_output=True)
         # Untar payload to tmp.
         subprocess.run(["tar", "-xf", "-", "-C", tmp], input=result.stdout, check=True)
         return load_local_trades(Path(tmp))

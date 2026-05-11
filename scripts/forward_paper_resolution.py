@@ -203,7 +203,7 @@ def invoke_sibling(script_name: str, override: int | None) -> int | None:
         return None
     try:
         result = subprocess.run(
-            ["python3", str(path), "--quiet"] if False else ["python3", str(path)],
+            ["python3", str(path)],
             capture_output=True, text=True, timeout=120,
         )
     except (subprocess.TimeoutExpired, OSError):

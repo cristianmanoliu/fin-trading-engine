@@ -94,6 +94,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -227,9 +228,13 @@ def load_journal(journal_dir: Path) -> list[Trade]:
 
 
 def fetch_remote(vps: str, remote_dir: str) -> list[Trade]:
-    cmd = f'ssh {vps} "tar -cf - -C {remote_dir} . 2>/dev/null"'
+    """Tar+stream remote journal files via ssh. List-arg subprocess + shlex
+    quoting of remote_dir prevents shell-injection-via-f-string on either
+    side; same defense as realized_cost_trajectory.fetch_remote."""
+    remote_cmd = f"tar -cf - -C {shlex.quote(remote_dir)} . 2>/dev/null"
     with tempfile.TemporaryDirectory() as tmp:
-        result = subprocess.run(cmd, shell=True, check=True, capture_output=True)
+        result = subprocess.run(
+            ["ssh", vps, remote_cmd], check=True, capture_output=True)
         subprocess.run(["tar", "-xf", "-", "-C", tmp], input=result.stdout, check=True)
         return load_journal(Path(tmp))
 
