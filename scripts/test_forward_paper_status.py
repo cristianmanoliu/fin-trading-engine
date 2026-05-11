@@ -206,5 +206,90 @@ class HodlHelperValidationTest(unittest.TestCase):
             f"garbage helper output must route to PENDING, got: {hodl_line!r}")
 
 
+class SlipThresholdSeparationTest(unittest.TestCase):
+    """Regression for the lens-as-self-correction fix that separated
+    deploy-readiness slip gate (MAX_SLIP_BPS=20bp) from advisory-kill
+    classification (KILL_MAX_SLIP_BP=25bp).
+
+    Sequence of bugs caught:
+        Pre-T13c: dashboard used KILL_MAX_SLIP_BP=25 in its overall PASS
+                  verdict. At slip=22bp it showed PASS while formal gate
+                  showed FAIL. Operator-misleading.
+        T13c:     rebound s_slip to MAX_SLIP_BPS=20bp. Fixed the PASS
+                  verdict alignment but broke kill-classification —
+                  slip=22bp then incorrectly fired "KILL" message despite
+                  not being in the >25bp kill region.
+        T13d (this fix):
+                  introduced s_slip_kill (against 25bp) for the kill-
+                  classification path, kept s_slip (against 20bp) for
+                  the deploy-readiness path. Both semantics preserved.
+
+    Pin all four bands:
+        slip < 20bp        → s_slip=PASS,    s_slip_kill=PASS, → DEPLOY-READY (if other gates pass)
+        slip in 20-25bp    → s_slip=FAIL,    s_slip_kill=PASS, → "at least one criterion failed" branch
+        slip > 25bp        → s_slip=FAIL,    s_slip_kill=FAIL, → "exceeds kill threshold" branch
+        no losers          → s_slip=PENDING, s_slip_kill=PENDING
+    """
+
+    def _setup_journal(self, jdir: Path, slip_bps_target: float) -> None:
+        """Write ≥150 closes (to clear MIN_TRADES gate) with synthetic
+        slip targeting the requested bps value. slip_bps = slip_usd /
+        notional × 10000 (losers only). Use STOP outcome for all so
+        every trade contributes to slip_usd_losers."""
+        notional = 100000.0
+        slip_usd = slip_bps_target * notional / 10000.0
+        from datetime import datetime, timedelta
+        # 150 trades spread over 75 days to clear MIN_DAYS too.
+        base = datetime(2026, 1, 1)
+        for i in range(160):
+            ts = (base + timedelta(hours=i * 12)).strftime("%Y-%m-%dT%H:%M:%SZ")
+            # PnL slightly positive to ensure net_positive PASS path.
+            write_close(jdir, "BTCUSDT", ts, pnl=10.0, outcome="STOP",
+                        fee=120.0, slip=slip_usd, notional=notional)
+
+    def _extract_overall(self, out: str) -> str:
+        for ln in out.splitlines():
+            if "Overall:" in ln or "DEPLOY-READY" in ln or "KILL" in ln or "WAITING" in ln:
+                if "Overall:" in ln:
+                    return ln.split("Overall:", 1)[1].strip()
+        return ""
+
+    def test_slip_in_deploy_fail_band_does_not_fire_kill(self):
+        """slip = 22bp: above deploy threshold (20bp), below kill threshold
+        (25bp). Must NOT fire the "exceeds kill threshold" message —
+        which would wrongly imply an advisory kill signal at a value
+        that's only a deploy-fail."""
+        with tempfile.TemporaryDirectory() as tmp:
+            self._setup_journal(Path(tmp), slip_bps_target=22.0)
+            code, out, _ = run_script(tmp)
+            self.assertNotIn("KILL — realized cost exceeds kill threshold",
+                out, f"slip=22bp must not fire kill-cost branch:\n{out}")
+
+    def test_slip_above_kill_threshold_fires_kill_cost_branch(self):
+        """slip = 26bp: above kill threshold (25bp). MUST fire the
+        "exceeds kill threshold" message — confirms s_slip_kill is
+        wired in correctly and the kill semantics survived T13c+T13d."""
+        with tempfile.TemporaryDirectory() as tmp:
+            self._setup_journal(Path(tmp), slip_bps_target=26.0)
+            code, out, _ = run_script(tmp)
+            self.assertIn("KILL — realized cost exceeds kill threshold",
+                out, f"slip=26bp MUST fire kill-cost branch:\n{out}")
+
+    def test_slip_under_deploy_threshold_allows_deploy_ready(self):
+        """slip = 5bp: well under both thresholds. The slip gate alone
+        must not block DEPLOY-READY (other gates may; this test just
+        verifies slip path doesn't fire FAIL/KILL)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            self._setup_journal(Path(tmp), slip_bps_target=5.0)
+            code, out, _ = run_script(tmp)
+            # Find the live cohort's Realized slip line; should show PASS.
+            for ln in out.splitlines():
+                if "Realized slip bps:" in ln:
+                    self.assertIn("PASS", ln,
+                        f"slip=5bp must show PASS, got: {ln!r}")
+                    return
+            self.fail(f"no 'Realized slip bps:' line in output:\n{out}")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

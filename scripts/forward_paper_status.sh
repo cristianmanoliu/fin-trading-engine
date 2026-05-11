@@ -421,15 +421,27 @@ echo "$DATA" | grep "^STRATEGY|" | while IFS='|' read -r _ label first_ts last_t
     fi
     if (( $(awk "BEGIN{print ($notional_losers > 0)}") )); then
         slip_bps_val=$(awk "BEGIN{printf \"%.2f\", $slip_usd_losers / $notional_losers * 10000}")
-        # Use DEPLOY threshold (20bp) not KILL threshold (25bp) so the
-        # dashboard's overall verdict aligns with the formal gate. Pre-fix
-        # this used KILL_MAX_SLIP_BP=25 → operator saw PASS at 22bp slip
-        # while the formal stage_promotion_check.py gate would FAIL at
-        # the same value (deploy criterion ≤20bp per CLAUDE.md).
+        # Two distinct semantics — keep separate variables so the
+        # deploy-readiness gate and the advisory-kill classification
+        # don't conflate:
+        #   s_slip:      against MAX_SLIP_BPS=20bp (DEPLOY criterion).
+        #                Used in the DEPLOY-READY overall verdict; matches
+        #                stage_promotion_check.py formal gate.
+        #   s_slip_kill: against KILL_MAX_SLIP_BP=25bp (advisory KILL
+        #                threshold from CLAUDE.md kill criteria). Used
+        #                only in the "KILL — realized cost exceeds kill
+        #                threshold" classification at the overall-verdict
+        #                block. Pre-fix s_slip was bound to 25bp and used
+        #                in both places; the previous fix rebound s_slip
+        #                to 20bp without separating kill-classification,
+        #                causing slip=22bp to wrongly fire KILL despite
+        #                not being in the >25bp kill region.
         s_slip=$(pass_or_fail "$slip_bps_val" "$MAX_SLIP_BPS" le)
+        s_slip_kill=$(pass_or_fail "$slip_bps_val" "$KILL_MAX_SLIP_BP" le)
     else
         slip_bps_val="n/a"
         s_slip="PENDING"
+        s_slip_kill="PENDING"
     fi
 
     # BTC-HODL benchmark — cumulative deploy criterion + rolling-30d kill
@@ -509,13 +521,29 @@ echo "$DATA" | grep "^STRATEGY|" | while IFS='|' read -r _ label first_ts last_t
     # Overall verdict — fee/slip and HODL kill criteria check at any data volume
     # since they're per-trade / per-window signals that don't need 60-day power
     # floor confirmation.
-    if [[ "$s_fee" == "FAIL" ]] || [[ "$s_slip" == "FAIL" ]]; then
+    #
+    # KILL branch fires on slip > 25bp (advisory kill threshold per CLAUDE.md).
+    # Uses s_slip_kill (not s_slip) so the 20-25bp band — which is a
+    # deploy-readiness FAIL but NOT a kill signal — routes to the
+    # deploy-fail branch below, not this kill-classification branch.
+    #
+    # Note: s_fee against $MAX_FEE_BPS=12bp matches BOTH the deploy criterion
+    # AND there's no distinct kill criterion for fee in CLAUDE.md, so the
+    # "kill" wording here is technically misleading for fee — left intact
+    # as pre-existing design (no value drift, just labeling). Operator
+    # may want to revisit the dashboard's KILL-vs-DEPLOY-FAIL taxonomy
+    # separately.
+    if [[ "$s_fee" == "FAIL" ]] || [[ "$s_slip_kill" == "FAIL" ]]; then
         overall="KILL — realized cost exceeds kill threshold"
     elif [[ "$s_hodl_window" == "FAIL" ]]; then
         overall="KILL — two consecutive 30d windows underperform BTC-HODL"
     elif [[ "$days_elapsed" -lt "$MIN_DAYS" ]] || [[ "$trades" -lt "$MIN_TRADES" ]]; then
         overall="WAITING (insufficient data)"
-    elif [[ "$s_pnl" == "FAIL" ]] || [[ "$s_wr" == "FAIL" ]] || [[ "$s_sym" == "FAIL" ]] || [[ "$s_hodl_cumul" == "FAIL" ]]; then
+    elif [[ "$s_pnl" == "FAIL" ]] || [[ "$s_wr" == "FAIL" ]] || [[ "$s_sym" == "FAIL" ]] || [[ "$s_hodl_cumul" == "FAIL" ]] || [[ "$s_slip" == "FAIL" ]]; then
+        # s_slip in the disjunction surfaces deploy-readiness failures in
+        # the 20-25bp slip band (above deploy threshold, below kill
+        # threshold). Pre-fix this band routed to WAITING silently —
+        # operator wouldn't see that slip exceeded deploy criterion.
         overall="KILL — at least one criterion failed"
     elif [[ "$s_pnl" == "PASS" ]] && [[ "$s_wr" == "PASS" ]] && [[ "$s_sym" == "PASS" ]] && [[ "$s_fee" == "PASS" ]] && [[ "$s_slip" == "PASS" ]] && [[ "$s_hodl_cumul" == "PASS" ]]; then
         overall="DEPLOY-READY — all criteria met"
