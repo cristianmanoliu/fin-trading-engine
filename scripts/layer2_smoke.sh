@@ -138,6 +138,18 @@ fi
 
 echo "✓ env vars present, testnet intent acknowledged"
 
+# L2-1: `timeout` is a GNU coreutils binary not present on bare macOS. The
+# smoke uses it to bound the engine run; without it the run would either
+# hang forever (no upper bound) or fail with rc=127 misclassified as
+# engine-crash. Pre-flight check fails loudly instead. Skipped under
+# DRY_RUN — that path simulates the engine without invoking timeout.
+if [[ "${LAYER2_SMOKE_DRY_RUN:-0}" != "1" ]] && ! command -v timeout >/dev/null 2>&1; then
+    die "$EXIT_SMOKE_FAIL_ENV" "timeout-missing" \
+        "The 'timeout' command is required to bound the engine smoke run but is not on PATH.
+On macOS:  brew install coreutils  (provides 'timeout' alongside gtimeout)
+On Linux:  already present in coreutils; check PATH."
+fi
+
 # ── Phase 2: connectivity to testnet ─────────────────────────────────────────
 
 echo "── checking connectivity to testnet.binancefuture.com ──"
@@ -204,6 +216,14 @@ else
     rc=$?
     set -e
     if [[ "$rc" != "124" && "$rc" != "0" ]]; then
+        # L2-5: SIGINT (operator Ctrl-C) returns rc=130 — distinct from
+        # engine-crash. Don't misclassify a deliberate operator interrupt
+        # as a crash diagnostic (same shape as cmd/backtest BD-4 fix).
+        if [[ "$rc" == "130" ]]; then
+            die "$EXIT_SMOKE_FAIL_ENV" "smoke-interrupted" \
+                "Smoke was interrupted (SIGINT, rc=130) before the ${DURATION_SEC}s window completed.
+This is operator-initiated cancellation, not an engine failure. Re-run when ready."
+        fi
         # Engine died before timeout — likely a fatal startup error.
         die "$EXIT_SMOKE_FAIL_OTHER" "engine-crashed-early" \
             "Engine exited with status $rc before the ${DURATION_SEC}s smoke window completed. Inspect $LOG_FILE for the cause."
@@ -213,13 +233,25 @@ echo "✓ engine ran for the smoke duration; analysing log"
 
 # ── Phase 5: log analysis ────────────────────────────────────────────────────
 
-# AUTH failure shape: 401/403 in any line, OR explicit auth-error slog
-if grep -qE '"status":401|"status":403|HTTP 401|HTTP 403|"msg":"auth.*error"|invalid.*api.*key' "$LOG_FILE"; then
+# AUTH failure shape: 401/403 in any line, OR explicit auth-error slog,
+# OR Binance's native error codes for credential rejection.
+#
+# L2-3: previously the grep matched only "status":401/403 / HTTP 401/403 /
+# auth-error / invalid-api-key. Binance Futures REST returns errors as
+# {"code":-2014,...} ("API-key format invalid") and {"code":-2015,...}
+# ("Invalid API-key, IP, or permissions for action"). Neither emits an
+# HTTP 401/403 in the slog body. An auth failure would then route through
+# the catch-all ERROR-level check below as SMOKE_FAIL_OTHER —
+# Telegram-tier dual sense: operator sees "engine-error-during-smoke"
+# and investigates code defects when the root cause is bad credentials.
+# Added explicit Binance-code patterns.
+if grep -qE '"status":401|"status":403|HTTP 401|HTTP 403|"msg":"auth.*error"|invalid.*api.*key|"code":-201[45]|API-key format invalid|Invalid API-key' "$LOG_FILE"; then
     die "$EXIT_SMOKE_FAIL_AUTH" "credential-rejected" \
-        "Engine log contains auth-failure markers (401/403 or auth-error). Likely causes:
+        "Engine log contains auth-failure markers (HTTP 401/403, Binance code -2014/-2015, or auth-error). Likely causes:
   (1) BINANCE_API_KEY / BINANCE_API_SECRET are mainnet creds, not testnet
   (2) Testnet API key has been disabled or expired
   (3) IP-allowlist on testnet is rejecting this host
+  (4) Key format malformed (extra whitespace, truncation, wrong copy-paste)
 Inspect $LOG_FILE for the exact response."
 fi
 
@@ -244,6 +276,23 @@ fi
 # Optional: count tick-source health indicators
 N_HEARTBEATS=$(grep -cE '"msg":"heartbeat"' "$LOG_FILE" || echo 0)
 HAS_BACKFILL=$(grep -cE '"msg":"backfill complete' "$LOG_FILE" || echo 0)
+
+# L2-4: gate PASS on backfill-complete, not just heartbeat. A failing
+# backfill still allows the engine to emit a "warming up (no ticks yet)"
+# heartbeat — same `"msg":"heartbeat` substring — so the heartbeat check
+# alone would PASS even when indicators never primed. At Layer 2 testnet,
+# unprimed EMA/BB/ATR means signals fire on noise; locking SMOKE_PASS
+# without backfill verification masks this.
+if [[ "$HAS_BACKFILL" -eq 0 ]]; then
+    die "$EXIT_SMOKE_FAIL_OTHER" "backfill-incomplete" \
+        "Engine emitted heartbeats but no 'backfill complete' log line was found in $LOG_FILE.
+This means indicator priming did not complete during the smoke window. At Layer 2 testnet,
+signals would fire on unprimed EMA/BB/ATR — masking real strategy behavior. Possible causes:
+  (1) Backfill HTTP request failed silently (check Warn-level slog lines in log)
+  (2) Smoke window too short for backfill to complete (try --duration 600)
+  (3) Engine startup hung between Subscribe and first heartbeat
+Investigate before treating Layer 2 as verified."
+fi
 
 # ── Smoke PASS ───────────────────────────────────────────────────────────────
 
