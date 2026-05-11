@@ -108,8 +108,15 @@ func parseJournalDir(dir string) ([]trade, error) {
 		return nil, fmt.Errorf("glob %s: %w", dir, err)
 	}
 	// Also pick up shadow subdirs (shadow/<label>/*.jsonl) so the tool
-	// covers full-fleet diffs in one pass.
-	shadowMatches, _ := filepath.Glob(filepath.Join(dir, "shadow", "*", "*.jsonl"))
+	// covers full-fleet diffs in one pass. Symmetric error handling with
+	// the primary glob — a permission-denied or other I/O error during
+	// the shadow walk used to be silently dropped (J3 finding), which
+	// would surface as missing trades on Layer 3 → false-positive
+	// signal divergence → wrongly-blocked promotion.
+	shadowMatches, err := filepath.Glob(filepath.Join(dir, "shadow", "*", "*.jsonl"))
+	if err != nil {
+		return nil, fmt.Errorf("glob %s/shadow: %w", dir, err)
+	}
 	matches = append(matches, shadowMatches...)
 	sort.Strings(matches) // deterministic order
 
@@ -125,8 +132,14 @@ func parseJournalDir(dir string) ([]trade, error) {
 }
 
 // parseJournalFile walks one journal file, pairing opens with closes.
-// Tolerates corrupt trailing lines (engine killed mid-flush) the same way
-// Stub.RecoverFromJournal does — silently skip + continue.
+// Tolerates corrupt lines (engine killed mid-flush, schema drift) by
+// counting them; emits a stderr warning if the corrupt count is
+// suspiciously high so silent format-change → empty-trade-list →
+// false-PASS doesn't slip past the gate. Sibling fix to the Stub
+// corrupt-counter pattern locked at 4154374. Scanner err is checked
+// at end-of-loop so a token-too-long line (>1MB) surfaces as an
+// I/O error rather than silently truncating the trade list — the
+// latter would produce false signal divergence on Layer 3.
 func parseJournalFile(path string) ([]trade, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -139,14 +152,20 @@ func parseJournalFile(path string) ([]trade, error) {
 
 	var trades []trade
 	var openEntry *journalEntry
+	totalLines, corruptLines := 0, 0
 	for sc.Scan() {
 		line := sc.Bytes()
 		if len(line) == 0 {
 			continue
 		}
+		totalLines++
 		var e journalEntry
 		if jerr := json.Unmarshal(line, &e); jerr != nil {
-			// Corrupt line — skip, mirrors Stub recovery tolerance.
+			// Corrupt line — skip, mirrors Stub recovery tolerance,
+			// but track count so an all-corrupt file (schema drift,
+			// disk corruption) surfaces a warning rather than an empty
+			// trade list silently passing as PASS.
+			corruptLines++
 			continue
 		}
 		switch e.Event {
@@ -174,6 +193,22 @@ func parseJournalFile(path string) ([]trade, error) {
 				openEntry = nil
 			}
 		}
+	}
+	// J1: scanner error must surface — token-too-long (>1MB single line)
+	// would otherwise leave the loop silently with the trades collected
+	// so far, propagating partial truncation as success. For the Layer 3
+	// parity gate this would manifest as false signal divergence (one
+	// side's truncation produces unmatched trades).
+	if err := sc.Err(); err != nil {
+		return nil, fmt.Errorf("scanner: %w", err)
+	}
+	// All-corrupt warning (Stub-pattern sibling at 4154374). totalLines
+	// counts only non-empty lines; corruptLines tracks failed JSON parses.
+	// Threshold: > 50% corrupt OR all-N-corrupt with N > 0.
+	if totalLines > 0 && (corruptLines == totalLines || float64(corruptLines)/float64(totalLines) > 0.5) {
+		fmt.Fprintf(os.Stderr,
+			"WARN: %s — %d/%d lines failed JSON parse (schema drift? disk corruption?)\n",
+			path, corruptLines, totalLines)
 	}
 	return trades, nil
 }

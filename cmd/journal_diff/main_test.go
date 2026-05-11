@@ -305,3 +305,69 @@ func TestParseJournalDir_PicksUpShadowSubdirs(t *testing.T) {
 		t.Errorf("expected BTCUSDT (live) + ETHUSDT (shadow); got %v", symbols)
 	}
 }
+
+func TestParseJournalFile_TokenTooLong_SurfacesError(t *testing.T) {
+	// J1 regression: a single line >1MB triggers bufio.Scanner's
+	// "token too long" error. Without checking sc.Err() at end of loop,
+	// the function silently returned partial trades — for Layer 3 this
+	// would manifest as false signal divergence on truncation.
+	dir := t.TempDir()
+	p := filepath.Join(dir, "BTCUSDT-2026-05.jsonl")
+	// Build a giant single line (>1MB). Scanner buffer max is 1024*1024.
+	huge := make([]byte, 0, 2*1024*1024)
+	huge = append(huge, []byte(`{"event":"open","symbol":"BTCUSDT","ts":"2026-05-08T08:00:00Z","reason":"`)...)
+	for i := 0; i < 2*1024*1024; i++ {
+		huge = append(huge, 'x')
+	}
+	huge = append(huge, []byte(`"}`)...)
+	if err := os.WriteFile(p, huge, 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := parseJournalFile(p)
+	if err == nil {
+		t.Fatal("expected scanner error on token-too-long line, got nil")
+	}
+}
+
+func TestParseJournalFile_AllCorruptLines_WarnsOnStderr(t *testing.T) {
+	// J2 regression: when every parseable line fails JSON parse (schema
+	// drift / disk corruption), the file silently produces zero trades
+	// with no diagnostic. Sibling of the Stub fix at 4154374. Capture
+	// stderr to verify the WARN line is emitted.
+	dir := t.TempDir()
+	p := filepath.Join(dir, "BTCUSDT-2026-05.jsonl")
+	if err := os.WriteFile(p, []byte("garbage 1\ngarbage 2\ngarbage 3\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// Capture stderr.
+	r, w, _ := os.Pipe()
+	oldStderr := os.Stderr
+	os.Stderr = w
+	defer func() { os.Stderr = oldStderr }()
+
+	trades, err := parseJournalFile(p)
+	w.Close()
+
+	out := make([]byte, 4096)
+	n, _ := r.Read(out)
+	stderr := string(out[:n])
+
+	if err != nil {
+		t.Fatalf("parseJournalFile err: %v", err)
+	}
+	if len(trades) != 0 {
+		t.Errorf("expected 0 trades from all-corrupt file, got %d", len(trades))
+	}
+	if !contains(stderr, "WARN") || !contains(stderr, "failed JSON parse") {
+		t.Errorf("expected stderr WARN about JSON-parse failures, got: %q", stderr)
+	}
+}
+
+func contains(s, substr string) bool {
+	for i := 0; i+len(substr) <= len(s); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}
