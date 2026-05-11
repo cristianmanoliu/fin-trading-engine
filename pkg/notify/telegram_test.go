@@ -671,3 +671,80 @@ func TestRateLimiter_GoroutineSafe(t *testing.T) {
 	}
 }
 
+
+// TestTruncateTelegramText pins the T10 fix — Telegram's 4096-char text
+// limit. Pre-fix, an oversized body returned HTTP 400 on every retry
+// and the alert silently dropped. Same silent-on-corrupt-input pattern
+// as the bash lib/notify.sh fix, locked here at the Go-side boundary.
+func TestTruncateTelegramText(t *testing.T) {
+	cases := []struct {
+		name     string
+		input    string
+		wantLen  int
+		wantSame bool
+		wantTail string
+	}{
+		{
+			name:     "short text unchanged",
+			input:    "hello",
+			wantLen:  5,
+			wantSame: true,
+		},
+		{
+			name:     "exactly 4096 runes unchanged",
+			input:    strings.Repeat("a", 4096),
+			wantLen:  4096,
+			wantSame: true,
+		},
+		{
+			name:     "4097 truncated to 4096",
+			input:    strings.Repeat("b", 4097),
+			wantLen:  4096,
+			wantSame: false,
+			wantTail: "[truncated]",
+		},
+		{
+			name:     "10000 truncated to 4096",
+			input:    strings.Repeat("c", 10000),
+			wantLen:  4096,
+			wantSame: false,
+			wantTail: "[truncated]",
+		},
+		{
+			name:     "preserves prefix when truncated",
+			input:    "BEGIN-OF-MSG" + strings.Repeat("d", 5000),
+			wantLen:  4096,
+			wantSame: false,
+			wantTail: "[truncated]",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := truncateTelegramText(tc.input)
+			gotLen := len([]rune(got))
+			if gotLen != tc.wantLen {
+				t.Errorf("rune len = %d, want %d", gotLen, tc.wantLen)
+			}
+			if tc.wantSame && got != tc.input {
+				t.Errorf("expected unchanged, got modified")
+			}
+			if !tc.wantSame && !strings.Contains(got, tc.wantTail) {
+				t.Errorf("expected truncation marker %q not present in %q",
+					tc.wantTail, got[max(len(got)-30, 0):])
+			}
+		})
+	}
+}
+
+// TestTruncateTelegramText_PreservesPrefix verifies the START of the
+// message is kept, not just the end (so the operator sees the most
+// important context — typically the subject line + first lines of body).
+func TestTruncateTelegramText_PreservesPrefix(t *testing.T) {
+	prefix := "🚨 [CRITICAL] subject line\nfirst important line\n"
+	bulk := strings.Repeat("filler ", 1000)
+	input := prefix + bulk
+	got := truncateTelegramText(input)
+	if !strings.HasPrefix(got, prefix) {
+		t.Errorf("truncation did not preserve message prefix; got start = %q", got[:min(len(prefix), len(got))])
+	}
+}

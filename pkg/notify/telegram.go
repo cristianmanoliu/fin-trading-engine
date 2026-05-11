@@ -17,6 +17,33 @@ import (
 
 const telegramAPIURL = "https://api.telegram.org/bot%s/sendMessage"
 
+// maxTelegramTextLen is the Telegram API hard limit on the `text`
+// parameter — 4096 characters after entity parsing (per
+// https://core.telegram.org/bots/api#sendmessage). A body exceeding
+// this is rejected with HTTP 400; the retry loop hits the same too-long
+// body each attempt; the alert silently drops. Same silent-on-corrupt-
+// input pattern as the bash side's _notify_truncate_text — same fix
+// applied here to lock the contract for every SendStructured caller.
+const maxTelegramTextLen = 4096
+
+// truncateTelegramText returns text truncated to maxTelegramTextLen
+// runes (≈ Telegram chars). Telegram counts UTF-16 code units after
+// entity parsing; for simplicity we count runes (Unicode code points)
+// which yields a slightly conservative truncation when the input
+// contains supplementary-plane characters (emoji surrogate pairs).
+// The conservatism is intentional — better to under-fill the message
+// by a few chars than to be rejected for over-size.
+func truncateTelegramText(text string) string {
+	runes := []rune(text)
+	if len(runes) <= maxTelegramTextLen {
+		return text
+	}
+	const marker = "\n…[truncated]"
+	markerRunes := []rune(marker)
+	keep := max(maxTelegramTextLen-len(markerRunes), 0)
+	return string(runes[:keep]) + marker
+}
+
 // Severity classifies an alert per the locked tier design (see
 // results/telegram_alert_design_decision_rule_2026-05-08.md). Each tier
 // has different rate limits and mute-hour behavior:
@@ -149,6 +176,10 @@ func (n *Notifier) sendStructuredAt(ctx context.Context, urlFmt string, severity
 	if suppressed > 0 {
 		msg += fmt.Sprintf("\n(%d additional events suppressed in last hour)", suppressed)
 	}
+	// Telegram-size truncation: see maxTelegramTextLen above. Without
+	// this, an oversized body returns HTTP 400 on every retry and the
+	// alert silently drops. Same family as bash lib/notify.sh fix.
+	msg = truncateTelegramText(msg)
 
 	return n.sendWithRetry(ctx, urlFmt, msg, severity)
 }

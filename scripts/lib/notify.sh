@@ -42,6 +42,39 @@ _notify_select_tier() {
     esac
 }
 
+# Telegram API hard limit on `text` parameter: 4096 chars after entity
+# parsing (per https://core.telegram.org/bots/api#sendmessage). A body
+# exceeding this is rejected with HTTP 400; curl exits non-zero; the
+# retry loop tries again with the same body; alert is silently dropped.
+# Same family as the silent-on-corrupt-input pattern (locked across 6
+# implementations as of 2026-05-11) applied to outbound API contracts:
+# malformed-by-size input maps to silently no-op.
+#
+# Most current callers use `tail -3` or `tail -1` to bound subprocess
+# output included in alert bodies. But: (a) future callers might forget
+# the tail-bound, and (b) `tail -3` of a script with absurdly long lines
+# can still exceed 4096. Truncate at the helper boundary so EVERY
+# notify_telegram invocation is safe by construction.
+readonly _NOTIFY_MAX_TEXT_LEN=4096
+
+# Truncate `text` to ≤4096 chars, appending a visible marker so the
+# operator knows truncation happened. Returns the (possibly-truncated)
+# text on stdout. Pure function — sourceable for tests.
+_notify_truncate_text() {
+    local text="$1"
+    local len=${#text}
+    if [[ "$len" -le "$_NOTIFY_MAX_TEXT_LEN" ]]; then
+        printf '%s' "$text"
+        return 0
+    fi
+    # Reserve space for the marker. The marker itself is short + ASCII
+    # so its length is stable; budget accordingly.
+    local marker=$'\n…[truncated]'
+    local marker_len=${#marker}
+    local keep=$(( _NOTIFY_MAX_TEXT_LEN - marker_len ))
+    printf '%s%s' "${text:0:$keep}" "$marker"
+}
+
 # Send a Telegram alert. Returns 0 always (calling script must not fail
 # because of a notification path failure).
 notify_telegram() {
@@ -60,6 +93,10 @@ notify_telegram() {
         text="${text}
 ${body}"
     fi
+    # Telegram-size truncation: see _NOTIFY_MAX_TEXT_LEN above. Without
+    # this, an oversized message returns HTTP 400 on every retry and
+    # the alert silently drops.
+    text=$(_notify_truncate_text "$text")
 
     local attempt delay=1
     for (( attempt=0; attempt < retries; attempt++ )); do

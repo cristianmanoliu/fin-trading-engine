@@ -90,6 +90,43 @@ out_exit=$?
 set -e
 assert_eq "unset-creds exit"     "$out_exit"  "0"
 
+# ─────────────────────────────────────────────────────────────────────
+# T10: _notify_truncate_text — Telegram 4096-char limit fail-open closure.
+# Pre-fix, an oversized message returned HTTP 400 on every retry → silent
+# alert drop. Same silent-on-corrupt-input shape applied to outbound API
+# contract.
+# ─────────────────────────────────────────────────────────────────────
+echo
+echo "T10: _notify_truncate_text (Telegram 4096-char limit)"
+
+# Short text → unchanged.
+SHORT="hello"
+RESULT=$(_notify_truncate_text "$SHORT")
+assert_eq "short text unchanged" "$RESULT" "$SHORT"
+
+# Exactly 4096 chars → unchanged (limit is inclusive per Telegram docs).
+EXACT=$(printf '%4096s' '' | tr ' ' 'a')
+RESULT=$(_notify_truncate_text "$EXACT")
+assert_eq "exactly-4096 unchanged length" "${#RESULT}" "4096"
+
+# 5000 chars → truncated to 4096 with marker.
+LONG=$(printf '%5000s' '' | tr ' ' 'b')
+RESULT=$(_notify_truncate_text "$LONG")
+assert_eq "5000-char truncated length" "${#RESULT}" "4096"
+assert_contains "5000-char has truncated marker" "$RESULT" "[truncated]"
+
+# Verify the START of the truncated text is preserved (not just the marker).
+LONG_START=$(printf 'BEGINBEGIN%4990s' '' | tr ' ' 'c')
+RESULT=$(_notify_truncate_text "$LONG_START")
+# After truncation, the result starts with "BEGINBEGIN" + many 'c's + marker.
+PREFIX="${RESULT:0:10}"
+assert_eq "truncated text preserves prefix" "$PREFIX" "BEGINBEGIN"
+
+# Edge: 4097 chars (just over). Should still truncate.
+JUST_OVER=$(printf '%4097s' '' | tr ' ' 'd')
+RESULT=$(_notify_truncate_text "$JUST_OVER")
+assert_eq "4097-char truncated to 4096" "${#RESULT}" "4096"
+
 # --- summary ---
 echo
 TOTAL=$((PASS + FAIL))
