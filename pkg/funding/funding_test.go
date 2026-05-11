@@ -289,3 +289,47 @@ func TestHistoricalProvider_LastTS(t *testing.T) {
 		t.Errorf("LastTS: want %v, got %v", want, got)
 	}
 }
+
+// TestLoadFromDir_NonExistentDir_ReturnsError pins the FD-2 fix.
+// Previously os.IsNotExist matched on both "dir missing" and "file missing in
+// dir," returning (nil, nil) for both. Operator-typo'd --funding-csv-dir then
+// silently fell through to the constant-rate fallback in cmd/backtest, locking
+// the wrong funding model into results/ verdicts. Same audit-pattern shape as
+// the 022098b silent-zero bug at a different layer.
+func TestLoadFromDir_NonExistentDir_ReturnsError(t *testing.T) {
+	fp, err := LoadFromDir("/tmp/this-dir-definitely-does-not-exist-funding-audit", "BTCUSDT")
+	if err == nil {
+		t.Fatalf("expected error on non-existent dir, got fp=%v err=nil", fp)
+	}
+	if fp != nil {
+		t.Errorf("expected nil fp on error, got %v", fp)
+	}
+}
+
+// TestLoadFromDir_DirIsFile_ReturnsError — if the path provided is a regular
+// file (not a directory), refuse rather than continue.
+func TestLoadFromDir_DirIsFile_ReturnsError(t *testing.T) {
+	dir := t.TempDir()
+	notADir := filepath.Join(dir, "actually-a-file")
+	if err := os.WriteFile(notADir, []byte("not a directory"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := LoadFromDir(notADir, "BTCUSDT")
+	if err == nil {
+		t.Fatal("expected error when --funding-csv-dir points at a regular file, got nil")
+	}
+}
+
+// TestLoadFromDir_ValidDirMissingSymbol_ReturnsNilNil — the legitimate
+// fallback case must continue to return (nil, nil) so the caller can opt in
+// to default-rate behavior for symbols that have no funding history.
+func TestLoadFromDir_ValidDirMissingSymbol_ReturnsNilNil(t *testing.T) {
+	dir := t.TempDir() // valid dir, but no BTCUSDT.csv inside
+	fp, err := LoadFromDir(dir, "BTCUSDT")
+	if err != nil {
+		t.Fatalf("valid dir with missing symbol file should return nil-nil, got err=%v", err)
+	}
+	if fp != nil {
+		t.Errorf("valid dir with missing symbol file should return nil fp, got %v", fp)
+	}
+}

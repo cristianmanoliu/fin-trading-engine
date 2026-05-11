@@ -181,8 +181,29 @@ func (h *Historical) ChargeFor(side models.Direction, notional float64, openTime
 }
 
 // LoadFromDir loads `data/funding/<SYMBOL>.csv` for the given symbol and returns a
-// Historical provider. Returns nil if the file does not exist (caller may fall back).
+// Historical provider. Returns (nil, nil) if the dir exists but the per-symbol
+// file is missing — legit "no funding history for this symbol, caller may fall
+// back to a default rate."
+//
+// FD-2: previously `os.IsNotExist` fired on both "dir doesn't exist" (operator
+// typo'd the --funding-csv-dir flag) AND "symbol file missing in valid dir"
+// (legit fallback case), returning (nil, nil) for both. cmd/backtest's
+// `if fp != nil` then routed both to a slog.Warn + constant-rate fallback —
+// operator who typo'd a path got a silent run with WRONG funding model,
+// and locked the resulting verdict into results/. Same shape as the
+// 022098b silent-zero bug, just at a different layer.
+//
+// Fix: validate dir existence explicitly. A missing dir is operator
+// misconfig → return error (caller exits 1). A missing symbol file
+// inside a valid dir stays as the legitimate fallback signal.
 func LoadFromDir(dir, symbol string) (*Historical, error) {
+	info, err := os.Stat(dir)
+	if err != nil {
+		return nil, fmt.Errorf("funding dir %q: %w", dir, err)
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("funding dir %q: not a directory", dir)
+	}
 	path := filepath.Join(dir, symbol+".csv")
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return nil, nil
