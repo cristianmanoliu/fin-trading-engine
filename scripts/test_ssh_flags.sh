@@ -31,6 +31,7 @@ OPERATIONAL_FILES=(
     "scripts/run_drift_check.sh"
     "scripts/paper_live_trades.sh"
     "scripts/stage_promotion.sh"
+    "scripts/lag_summary.sh"
 )
 
 PASS=0
