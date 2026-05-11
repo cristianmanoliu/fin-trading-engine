@@ -317,7 +317,7 @@ When forward-paper resolves: read the pre-reg file. The promotion or kill decisi
 
 Original 13 caveats reduced to 3 still-open after 2026-05-05 cost-survivor battery + follow-ups:
 
-- **REST polling lag (10s)** — adverse on entry + stop. Live-only; measure via journal cost-decomposition once fills accumulate.
+- **REST polling lag (10s)** — adverse on entry + stop. **Source-to-receipt lag is now instrumented per-tick** (commit `033ed02`, 2026-05-11): `models.Tick.LocalReceiptTS` set by `BinanceFutures` at receipt; `Heartbeat` keeps a 256-sample rolling ring; per-symbol heartbeat output now carries `lag_p50_ms` / `lag_p99_ms` / `lag_max_ms` / `lag_samples`. Operator one-liner: `jq -rc 'select(.msg=="heartbeat") | {ts:.time,p99:.lag_p99_ms}' /var/log/paper-live/<sym>.log | tail -20`. Realized fill-vs-modeled-slip still requires Layer 2 (BinanceLive cost-decomp) to characterize.
 - **Funding-CSV staleness drift** — picked up only on restart; weekly refresh caps drift at ~7d. Mitigated 2026-05-08: `cmd/engine` logs `slog.Warn` at startup if `LastTS()` >7d old; `post_deploy_check.sh` §9 surfaces it. Net funding ≈ $0 in steady state.
 - **No real-money execution test** — position sizing, exchange limits, margin reuse, concurrent-trade interaction unmodeled. Honest backtest projection $69–184k/yr depending on slip.
 
