@@ -1,6 +1,9 @@
 package strategy
 
 import (
+	"bytes"
+	"encoding/json"
+	"log/slog"
 	"math"
 	"os"
 	"path/filepath"
@@ -12,6 +15,39 @@ import (
 
 	"github.com/cristianmanoliu/trading-engine/pkg/models"
 )
+
+// captureSlog redirects slog.Default into a buffer for assertion. Restored on
+// test cleanup. Mirrors the helper in pkg/notify/telegram_test.go — kept local
+// (not extracted to a shared testutil package) to avoid cross-package test
+// dependencies; the surface is small and the two copies don't drift.
+func captureSlog(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var buf bytes.Buffer
+	old := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(old) })
+	return &buf
+}
+
+// findSuppressionEvent scans captured slog output for the first
+// "signal suppressed" record and returns its parsed fields. Returns nil if
+// no such record was emitted. Used by the suppression-observability tests.
+func findSuppressionEvent(t *testing.T, buf *bytes.Buffer) map[string]any {
+	t.Helper()
+	for line := range strings.SplitSeq(buf.String(), "\n") {
+		if line == "" {
+			continue
+		}
+		var rec map[string]any
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			continue
+		}
+		if rec["msg"] == "signal suppressed" {
+			return rec
+		}
+	}
+	return nil
+}
 
 // approxEqual reports whether a and b are within 1e-9 of each other.
 // Used because float arithmetic in the stop/target math produces values
@@ -325,6 +361,115 @@ func TestEMACrossoverWithFixedRR_TargetMatchesMultiplier(t *testing.T) {
 	gotMultiplier := (sig.TakeProfit - sig.EntryPrice) / stopDist
 	if gotMultiplier < 5.99 || gotMultiplier > 6.01 {
 		t.Errorf("TargetRR multiplier: got %v want 6.0 (±0.01)", gotMultiplier)
+	}
+}
+
+// ── EMA suppression observability — 2026-05-12 ──────────────────────────────
+// Closes the gate-informationality gap that turned the 2026-05-12 trade-rate
+// investigation into a 30-min drill. checkEMACrossover now emits a
+// "signal suppressed" slog event at each silent return-nil site, tagged with
+// the filter that blocked. Operators can now `grep -c "signal suppressed"` to
+// compute the actual cross detection rate vs the bias/side/d1/vol filter rates
+// — instead of retro-deriving via Binance EMA recomputation.
+// Memo: memory/trade_rate_investigation_2026-05-12.md.
+
+func TestEMASuppression_BiasMismatch_LogsReason(t *testing.T) {
+	// Bull cross + Short bias → cross detected, bias misaligned → suppress.
+	// Test mirrors TestEMABullishCrossover_ShortBias_NoSignal but additionally
+	// asserts the slog event is emitted with filter=bias_mismatch.
+	buf := captureSlog(t)
+	d, bias := emaTestSetup(t, models.Short)
+
+	d.AddCandle(models.Candle{Symbol: "BTCUSDT", Open: 100, High: 111, Low: 99.5, Close: 110})
+	sig := d.Evaluate(nil, 0, bias)
+	if sig != nil {
+		t.Fatalf("expected suppressed signal, got %+v", sig)
+	}
+
+	rec := findSuppressionEvent(t, buf)
+	if rec == nil {
+		t.Fatalf("expected 'signal suppressed' slog event, got:\n%s", buf.String())
+	}
+	if rec["filter"] != "bias_mismatch" {
+		t.Errorf("filter field: got %v want bias_mismatch", rec["filter"])
+	}
+	if rec["cross_side"] != "LONG" {
+		t.Errorf("cross_side field: got %v want LONG (bull cross direction)", rec["cross_side"])
+	}
+	if rec["bias"] != "SHORT" {
+		t.Errorf("bias field: got %v want SHORT", rec["bias"])
+	}
+}
+
+func TestEMASuppression_SideFilter_LogsReason(t *testing.T) {
+	// Bull cross + Long bias would normally emit Long. With SideFilter=Short
+	// it must be suppressed AND logged with filter=side_filter.
+	buf := captureSlog(t)
+	d := NewEntryDetector(EntryConfig{
+		EMAMode:       true,
+		TargetRR:      2.0,
+		StopBufferPct: 0.001,
+		SideFilter:    models.Short,
+	})
+	base := time.Date(2026, 5, 6, 0, 0, 0, 0, time.UTC)
+	for i := 0; i < 22; i++ {
+		d.AddCandle(models.Candle{
+			Symbol: "BTCUSDT", Open: 100, High: 100.5, Low: 99.5, Close: 100,
+			CloseTime: base.Add(time.Duration(i) * 5 * time.Minute),
+		})
+	}
+	bias := &BiasTracker{}
+	bias.Update(models.Candle{Open: 100, Close: 110}) // Long bias
+
+	d.AddCandle(models.Candle{Symbol: "BTCUSDT", Open: 100, High: 111, Low: 99.5, Close: 110})
+	sig := d.Evaluate(nil, 0, bias)
+	if sig != nil {
+		t.Fatalf("expected suppressed signal, got %+v", sig)
+	}
+
+	rec := findSuppressionEvent(t, buf)
+	if rec == nil {
+		t.Fatalf("expected 'signal suppressed' slog event, got:\n%s", buf.String())
+	}
+	if rec["filter"] != "side_filter" {
+		t.Errorf("filter field: got %v want side_filter", rec["filter"])
+	}
+	if rec["cross_side"] != "LONG" {
+		t.Errorf("cross_side field: got %v want LONG (bias-aligned side before filter)", rec["cross_side"])
+	}
+	if rec["side_filter"] != "SHORT" {
+		t.Errorf("side_filter field: got %v want SHORT", rec["side_filter"])
+	}
+}
+
+func TestEMASuppression_NoCross_NoLog(t *testing.T) {
+	// Flat price → no cross detected → MUST NOT emit suppression event. The
+	// suppression slog is only for cross-detected-but-filtered cases, not for
+	// every candle close. Without this guard, log volume explodes.
+	buf := captureSlog(t)
+	d, bias := emaTestSetup(t, models.Long)
+
+	d.AddCandle(models.Candle{Symbol: "BTCUSDT", Open: 100, High: 100.5, Low: 99.5, Close: 100})
+	_ = d.Evaluate(nil, 0, bias)
+
+	if rec := findSuppressionEvent(t, buf); rec != nil {
+		t.Errorf("unexpected suppression event on no-cross candle: %+v", rec)
+	}
+}
+
+func TestEMASuppression_PassThrough_NoLog(t *testing.T) {
+	// Cross + bias align + no side-filter → signal emitted → MUST NOT log
+	// suppression. Counter-test for TestEMASuppression_NoCross_NoLog.
+	buf := captureSlog(t)
+	d, bias := emaTestSetup(t, models.Long)
+
+	d.AddCandle(models.Candle{Symbol: "BTCUSDT", Open: 100, High: 111, Low: 99.5, Close: 110})
+	sig := d.Evaluate(nil, 0, bias)
+	if sig == nil {
+		t.Fatal("setup error: expected signal emission, got nil")
+	}
+	if rec := findSuppressionEvent(t, buf); rec != nil {
+		t.Errorf("unexpected suppression event on emitted signal: %+v", rec)
 	}
 }
 

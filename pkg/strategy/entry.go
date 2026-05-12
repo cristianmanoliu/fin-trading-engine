@@ -2,6 +2,7 @@ package strategy
 
 import (
 	"fmt"
+	"log/slog"
 	"math"
 	"time"
 
@@ -858,17 +859,44 @@ func (e *EntryDetector) checkEMACrossover(last models.Candle, bias *BiasTracker)
 		return nil
 	}
 
+	// Cross direction is now determined — what the trade WOULD be if no filter
+	// blocks. Used in suppression slog events so the operator can attribute
+	// each blocked cross to a specific filter (bias / side / d1 / vol) without
+	// re-deriving cross direction by hand. Without this, every suppression site
+	// was a silent `return nil` — the same gate-informationality gap that
+	// turned the 2026-05-12 trade-rate question into a 30-min investigation
+	// instead of a 30-second grep. Verdict cached at memory/
+	// trade_rate_investigation_2026-05-12.md.
+	var crossSide models.Direction
+	if bullishCross {
+		crossSide = models.Long
+	} else {
+		crossSide = models.Short
+	}
+
 	var side models.Direction
 	if bullishCross && bias.Direction() == models.Long {
 		side = models.Long
 	} else if bearishCross && bias.Direction() == models.Short {
 		side = models.Short
 	} else {
+		slog.Info("signal suppressed",
+			"filter", "bias_mismatch",
+			"cross_side", crossSide.String(),
+			"bias", bias.Direction().String(),
+			"ema_fast", curEma9, "ema_slow", curEma21,
+			"time", last.CloseTime)
 		return nil // not aligned with 4H bias
 	}
 
 	// Optional one-sided filter (longs-only or shorts-only experiments).
 	if e.cfg.SideFilter != models.Neutral && side != e.cfg.SideFilter {
+		slog.Info("signal suppressed",
+			"filter", "side_filter",
+			"cross_side", side.String(),
+			"side_filter", e.cfg.SideFilter.String(),
+			"ema_fast", curEma9, "ema_slow", curEma21,
+			"time", last.CloseTime)
 		return nil
 	}
 
@@ -877,15 +905,25 @@ func (e *EntryDetector) checkEMACrossover(last models.Candle, bias *BiasTracker)
 	// (conservative — no false positives during warmup).
 	if e.cfg.Confluence1DMode && e.confluenceEMAFast != nil && e.confluenceEMASlow != nil {
 		if !e.confluenceEMAFast.Primed() || !e.confluenceEMASlow.Primed() {
-			return nil
+			return nil // warmup — silent, expected
 		}
 		biasFast := e.confluenceEMAFast.Value()
 		biasSlow := e.confluenceEMASlow.Value()
 		// 1D bias DOWN (fast < slow) → only allow shorts. 1D bias UP → only allow longs.
 		if side == models.Short && biasFast >= biasSlow {
+			slog.Info("signal suppressed",
+				"filter", "d1_confluence",
+				"cross_side", side.String(),
+				"d1_fast", biasFast, "d1_slow", biasSlow,
+				"time", last.CloseTime)
 			return nil
 		}
 		if side == models.Long && biasFast <= biasSlow {
+			slog.Info("signal suppressed",
+				"filter", "d1_confluence",
+				"cross_side", side.String(),
+				"d1_fast", biasFast, "d1_slow", biasSlow,
+				"time", last.CloseTime)
 			return nil
 		}
 	}
@@ -899,6 +937,11 @@ func (e *EntryDetector) checkEMACrossover(last models.Candle, bias *BiasTracker)
 			threshold = 1.20
 		}
 		if e.realizedVol30d > threshold {
+			slog.Info("signal suppressed",
+				"filter", "vol_regime",
+				"cross_side", side.String(),
+				"realized_vol_30d", e.realizedVol30d, "threshold", threshold,
+				"time", last.CloseTime)
 			return nil
 		}
 	}
@@ -921,6 +964,11 @@ func (e *EntryDetector) checkEMACrossover(last models.Candle, bias *BiasTracker)
 
 	stopDist := math.Abs(last.Close - stopLoss)
 	if stopDist == 0 {
+		slog.Info("signal suppressed",
+			"filter", "stop_dist_zero",
+			"cross_side", side.String(),
+			"close", last.Close, "stop", stopLoss,
+			"time", last.CloseTime)
 		return nil
 	}
 
