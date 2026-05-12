@@ -332,11 +332,17 @@ class SlipThresholdSeparationTest(unittest.TestCase):
                   classification path, kept s_slip (against 20bp) for
                   the deploy-readiness path. Both semantics preserved.
 
-    Pin all four bands:
+    Pin all four bands (post-D4 taxonomy 2026-05-12):
         slip < 20bp        → s_slip=PASS,    s_slip_kill=PASS, → DEPLOY-READY (if other gates pass)
-        slip in 20-25bp    → s_slip=FAIL,    s_slip_kill=PASS, → "at least one criterion failed" branch
-        slip > 25bp        → s_slip=FAIL,    s_slip_kill=FAIL, → "exceeds kill threshold" branch
+        slip in 20-25bp    → s_slip=FAIL,    s_slip_kill=PASS, → "DEPLOY-FAIL — realized slip in 20-25bp band ..."
+        slip > 25bp        → s_slip=FAIL,    s_slip_kill=FAIL, → "KILL — advisory: realized slip exceeds 25bp historical kill edge"
         no losers          → s_slip=PENDING, s_slip_kill=PENDING
+
+    D4 (2026-05-12) split KILL vs DEPLOY-FAIL taxonomy: KILL is now
+    reserved for CLAUDE.md kill criteria explicitly (slip > 25bp,
+    consecutive 30d HODL underperformance). Other deploy-criterion FAIL
+    states route to DEPLOY-FAIL so the operator's mental model + the
+    auto_kill_execution flow alignment is preserved.
     """
 
     def _setup_journal(self, jdir: Path, slip_bps_target: float) -> None:
@@ -364,24 +370,75 @@ class SlipThresholdSeparationTest(unittest.TestCase):
 
     def test_slip_in_deploy_fail_band_does_not_fire_kill(self):
         """slip = 22bp: above deploy threshold (20bp), below kill threshold
-        (25bp). Must NOT fire the "exceeds kill threshold" message —
-        which would wrongly imply an advisory kill signal at a value
-        that's only a deploy-fail."""
+        (25bp). Must NOT fire any "KILL —" message (post-D4 taxonomy
+        reserves KILL for CLAUDE.md kill criteria) — should route to
+        the DEPLOY-FAIL band-specific message."""
         with tempfile.TemporaryDirectory() as tmp:
             self._setup_journal(Path(tmp), slip_bps_target=22.0)
             code, out, _ = run_script(tmp)
-            self.assertNotIn("KILL — realized cost exceeds kill threshold",
-                out, f"slip=22bp must not fire kill-cost branch:\n{out}")
+            # The OVERALL verdict line. Slip in band must NOT fire KILL.
+            # Look for the verdict line directly to avoid false-matching
+            # the "Notes" section.
+            verdict_line = next(
+                (ln for ln in out.splitlines() if ">>> VERDICT:" in ln),
+                "")
+            self.assertNotIn("KILL —", verdict_line,
+                f"slip=22bp must not fire any KILL verdict (D4 taxonomy: "
+                f"KILL reserved for CLAUDE.md kill criteria):\n{verdict_line}")
+            self.assertIn("DEPLOY-FAIL — realized slip in 20-25bp band",
+                verdict_line,
+                f"slip=22bp must route to the deploy-fail band-specific "
+                f"message; got: {verdict_line!r}")
 
-    def test_slip_above_kill_threshold_fires_kill_cost_branch(self):
+    def test_slip_above_kill_threshold_fires_advisory_kill(self):
         """slip = 26bp: above kill threshold (25bp). MUST fire the
-        "exceeds kill threshold" message — confirms s_slip_kill is
-        wired in correctly and the kill semantics survived T13c+T13d."""
+        "KILL — advisory: realized slip exceeds 25bp historical kill edge"
+        message — this IS a CLAUDE.md kill criterion."""
         with tempfile.TemporaryDirectory() as tmp:
             self._setup_journal(Path(tmp), slip_bps_target=26.0)
             code, out, _ = run_script(tmp)
-            self.assertIn("KILL — realized cost exceeds kill threshold",
-                out, f"slip=26bp MUST fire kill-cost branch:\n{out}")
+            verdict_line = next(
+                (ln for ln in out.splitlines() if ">>> VERDICT:" in ln),
+                "")
+            self.assertIn("KILL — advisory: realized slip exceeds 25bp",
+                verdict_line,
+                f"slip=26bp MUST fire the slip-cliff kill verdict (D4 "
+                f"keeps this as KILL — matches CLAUDE.md kill criterion):\n"
+                f"{verdict_line}")
+
+    def test_fee_fail_routes_to_deploy_fail_not_kill(self):
+        """D4 taxonomy pin: realized fee exceeding the 12bp deploy
+        threshold must route to DEPLOY-FAIL, NOT KILL. CLAUDE.md has
+        no fee kill criterion; pre-D4 the dashboard mislabeled a fee
+        FAIL as "KILL — realized cost exceeds kill threshold" which
+        would have triggered auto_kill_execution flow inappropriately
+        at Layer 2 testnet activation when real Binance fees come in
+        at 14bp+ for thin-volume symbols."""
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            from datetime import datetime, timedelta
+            base = datetime(2026, 1, 1)
+            # 160 closes, all losers, fee=15bp (above 12bp deploy threshold),
+            # slip=5bp (well below ALL slip thresholds).
+            notional = 100000.0
+            fee_15bp_usd = 15.0 * notional / 10000.0  # = 150
+            slip_5bp_usd = 5.0 * notional / 10000.0   # = 50
+            for i in range(160):
+                ts = (base + timedelta(hours=i * 12)).strftime("%Y-%m-%dT%H:%M:%SZ")
+                write_close(d, "BTCUSDT", ts, pnl=10.0, outcome="STOP",
+                            fee=fee_15bp_usd, slip=slip_5bp_usd,
+                            notional=notional)
+            code, out, _ = run_script(tmp)
+            verdict_line = next(
+                (ln for ln in out.splitlines() if ">>> VERDICT:" in ln),
+                "")
+            self.assertNotIn("KILL —", verdict_line,
+                f"fee 15bp must NOT fire KILL — no fee kill criterion in "
+                f"CLAUDE.md. Verdict: {verdict_line!r}")
+            self.assertIn("DEPLOY-FAIL — realized fee exceeds 12bp deploy threshold",
+                verdict_line,
+                f"fee 15bp must route to DEPLOY-FAIL with the fee-specific "
+                f"message. Got: {verdict_line!r}")
 
     def test_slip_under_deploy_threshold_allows_deploy_ready(self):
         """slip = 5bp: well under both thresholds. The slip gate alone

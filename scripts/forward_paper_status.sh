@@ -547,33 +547,60 @@ echo "$DATA" | grep "^STRATEGY|" | while IFS='|' read -r _ label first_ts last_t
         fi
     fi
 
-    # Overall verdict — fee/slip and HODL kill criteria check at any data volume
-    # since they're per-trade / per-window signals that don't need 60-day power
-    # floor confirmation.
+    # Overall verdict (D4 resolution 2026-05-12 — see
+    # results/kill_deploy_fail_taxonomy_2026-05-12.md). Five verdict
+    # classes, with precedence in this order:
     #
-    # KILL branch fires on slip > 25bp (advisory kill threshold per CLAUDE.md).
-    # Uses s_slip_kill (not s_slip) so the 20-25bp band — which is a
-    # deploy-readiness FAIL but NOT a kill signal — routes to the
-    # deploy-fail branch below, not this kill-classification branch.
+    #   1. KILL — advisory (CLAUDE.md kill criteria fire). Reserved for
+    #      criteria that EXPLICITLY appear in CLAUDE.md "## Kill the
+    #      strategy" section: slip > 25bp (s_slip_kill==FAIL) and the
+    #      two-consecutive-30d-windows HODL underperformance
+    #      (s_hodl_window==FAIL). These map to the auto_kill_execution
+    #      decision rule's threshold-fire condition.
     #
-    # Note: s_fee against $MAX_FEE_BPS=12bp matches BOTH the deploy criterion
-    # AND there's no distinct kill criterion for fee in CLAUDE.md, so the
-    # "kill" wording here is technically misleading for fee — left intact
-    # as pre-existing design (no value drift, just labeling). Operator
-    # may want to revisit the dashboard's KILL-vs-DEPLOY-FAIL taxonomy
-    # separately.
-    if [[ "$s_fee" == "FAIL" ]] || [[ "$s_slip_kill" == "FAIL" ]]; then
-        overall="KILL — realized cost exceeds kill threshold"
+    #   2. DEPLOY-FAIL — investigate. CLAUDE.md "## Deploy real money"
+    #      criteria fail but no kill criterion fires. Examples: fee >
+    #      12bp (no fee kill criterion exists), slip in 20-25bp band
+    #      (above deploy threshold but below the advisory kill cliff),
+    #      WR / single-sym / pro-rated PnL / cumul-HODL all FAIL. Means
+    #      "if you tried to promote today, the formal gate would FAIL"
+    #      — operator-actionable but NOT a kill signal.
+    #
+    #   3. WAITING — insufficient data. Below the 60d / 150-trade
+    #      statistical-power floor. Power-gated criteria (PnL, WR,
+    #      single-sym, HODL-cumul) carry status INSUFFICIENT / PENDING
+    #      until the floor; cost-stack + advisory-kill criteria evaluate
+    #      at any data volume.
+    #
+    #   4. DEPLOY-READY — all locked criteria PASS.
+    #
+    #   5. WAITING — catch-all for non-failing non-passing intermediate
+    #      states.
+    #
+    # Pre-D4 the dashboard routed s_fee==FAIL and the broader "any
+    # criterion failed" disjunction to messages starting with "KILL —"
+    # despite CLAUDE.md having no kill criterion for fees, single-sym,
+    # cumul-HODL, WR-under-floor, etc. Operator seeing "KILL — realized
+    # cost exceeds kill threshold" on a 14bp fee at promotion time
+    # would have triggered the auto_kill flow inappropriately. The
+    # taxonomy now reserves "KILL" for explicit CLAUDE.md kill criteria.
+    if [[ "$s_slip_kill" == "FAIL" ]]; then
+        overall="KILL — advisory: realized slip exceeds 25bp historical kill edge"
     elif [[ "$s_hodl_window" == "FAIL" ]]; then
-        overall="KILL — two consecutive 30d windows underperform BTC-HODL"
+        overall="KILL — advisory: two consecutive 30d windows underperform BTC-HODL"
+    elif [[ "$s_fee" == "FAIL" ]]; then
+        # Fee has no kill criterion in CLAUDE.md — deploy-readiness only.
+        overall="DEPLOY-FAIL — realized fee exceeds 12bp deploy threshold (investigate; no fee kill criterion)"
+    elif [[ "$s_slip" == "FAIL" ]]; then
+        # Slip in the 20-25bp deploy-fail band (s_slip_kill above already
+        # caught >25bp). Surface as DEPLOY-FAIL so the band doesn't
+        # silently fall through to WAITING; the kill-threshold case has
+        # already been handled above.
+        overall="DEPLOY-FAIL — realized slip in 20-25bp band (above deploy threshold, below 25bp kill cliff)"
     elif [[ "$days_elapsed" -lt "$MIN_DAYS" ]] || [[ "$trades" -lt "$MIN_TRADES" ]]; then
         overall="WAITING (insufficient data)"
-    elif [[ "$s_pnl" == "FAIL" ]] || [[ "$s_wr" == "FAIL" ]] || [[ "$s_sym" == "FAIL" ]] || [[ "$s_hodl_cumul" == "FAIL" ]] || [[ "$s_slip" == "FAIL" ]]; then
-        # s_slip in the disjunction surfaces deploy-readiness failures in
-        # the 20-25bp slip band (above deploy threshold, below kill
-        # threshold). Pre-fix this band routed to WAITING silently —
-        # operator wouldn't see that slip exceeded deploy criterion.
-        overall="KILL — at least one criterion failed"
+    elif [[ "$s_pnl" == "FAIL" ]] || [[ "$s_wr" == "FAIL" ]] || [[ "$s_sym" == "FAIL" ]] || [[ "$s_hodl_cumul" == "FAIL" ]]; then
+        overall="DEPLOY-FAIL — investigate criteria failing (PnL / WR / single-sym / cumul-HODL)"
     elif [[ "$s_pnl" == "PASS" ]] && [[ "$s_wr" == "PASS" ]] && [[ "$s_sym" == "PASS" ]] && [[ "$s_fee" == "PASS" ]] && [[ "$s_slip" == "PASS" ]] && [[ "$s_hodl_cumul" == "PASS" ]]; then
         overall="DEPLOY-READY — all criteria met"
     else
