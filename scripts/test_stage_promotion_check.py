@@ -111,34 +111,65 @@ class CriterionUnitTest(unittest.TestCase):
         c = sp.check_days(trades)
         self.assertEqual(c.status, "PASS")
 
-    def test_check_days_name_surfaces_first_trade_anchor(self):
-        """TIME-ANCHOR AMBIGUITY pin: pre-reg
-        real_money_protocol_decision_rule_2026-05-08.md line 134 anchors
-        elapsed-time on "forward-paper start" (deploy date); the LIMBO
-        rule (forward_paper_outcome_resolution_decision_rule_2026-05-10.md
-        line 47) anchors on "first close"; this implementation anchors on
-        FIRST TRADE timestamp. The discrepancy is small in current state
-        but compounds in a quiet-signal regime. Lock the implementation
-        choice into the criterion name so any operator reading the report
-        sees explicitly which anchor is in force. A future change to use
-        deploy-start as the anchor MUST update this test in lockstep so
-        doc-vs-code drift cannot recur silently."""
+    def test_check_days_name_surfaces_first_close_anchor(self):
+        """TIME-ANCHOR pin (D1 resolution 2026-05-12): the locked anchor
+        is first-close (matches forward_paper_outcome_resolution pre-reg
+        line 47 — "calendar days since live cohort's first close"). The
+        implementation has always loaded close events only via
+        load_journal; this pin asserts the operator-visible criterion
+        name matches the locked anchor.
+
+        See results/time_anchor_resolution_2026-05-12.md. Any future
+        change to a different anchor MUST update CLAUDE.md, the resolution
+        amendment doc, this test, the sibling pro-rated test,
+        forward_paper_status.sh's printf label, and
+        forward_paper_resolution.py's diagnostic message in lockstep."""
         old_ts = (datetime.now(timezone.utc) - timedelta(days=65)).strftime("%Y-%m-%dT%H:%M:%SZ")
         c = sp.check_days([sp.Trade(old_ts, "BTC", "STOP", -1, 0, 0, 0)])
-        self.assertIn("since first trade", c.name,
-            f"check_days name must surface the first-trade anchor explicitly; "
+        self.assertIn("since first close", c.name,
+            f"check_days name must surface the first-close anchor explicitly; "
             f"got: {c.name!r}")
 
-    def test_check_pro_rated_annual_name_surfaces_first_trade_anchor(self):
-        """Sibling pin to test_check_days_name_surfaces_first_trade_anchor.
-        check_pro_rated_annual shares the same anchor and the same pre-reg
-        ambiguity. Pin the explicit anchor in the criterion name."""
+    def test_check_pro_rated_annual_name_surfaces_first_close_anchor(self):
+        """Sibling pin to test_check_days_name_surfaces_first_close_anchor.
+        check_pro_rated_annual shares the same anchor — the pro-rating
+        denominator is first-close-anchored so numerator (sum of close
+        PnL) and denominator align."""
         old_ts = (datetime.now(timezone.utc) - timedelta(days=65)).strftime("%Y-%m-%dT%H:%M:%SZ")
         trades = [sp.Trade(old_ts, "BTC", "TARGET", 100, 0, 0, 0)] * 200
         c = sp.check_pro_rated_annual(trades)
-        self.assertIn("since first trade", c.name,
-            f"check_pro_rated_annual name must surface the first-trade anchor "
+        self.assertIn("since first close", c.name,
+            f"check_pro_rated_annual name must surface the first-close anchor "
             f"explicitly; got: {c.name!r}")
+
+    def test_load_journal_filters_to_close_events(self):
+        """IMPLEMENTATION pin (D1 resolution 2026-05-12): the first-close
+        anchor depends on load_journal returning close events only — if
+        the filter ever widens to include opens, every t.ts becomes
+        ambiguous and the time anchor silently regresses to first-event
+        (= first-open, days earlier than first-close on a held position).
+
+        Source-scan the function body for `event` and `close` together so
+        a refactor that drops the filter (e.g. switching to a generic
+        event loader) breaks CI before reaching production.
+
+        Pairs with test_check_days_name_surfaces_first_close_anchor — that
+        test pins the LABEL; this test pins the DATA PATH."""
+        import inspect
+        src = inspect.getsource(sp.load_journal)
+        self.assertIn('event', src,
+            "load_journal must filter on event field — without it the "
+            "first-close anchor silently regresses to first-open")
+        self.assertIn('close', src,
+            "load_journal must filter to close events — opens have a "
+            "different timestamp and would shift the anchor backward")
+        # Defensive: the filter must be in the form `event != "close"` or
+        # `event == "close"`. A bare reference to the words wouldn't
+        # actually filter. Check the structural pattern.
+        self.assertTrue(
+            'event") != "close"' in src or 'event") == "close"' in src,
+            f"load_journal must explicitly compare event to 'close'; "
+            f"source did not contain the expected guard. Inspect:\n{src}")
 
     def test_benchmark_notional_default_matches_locked_spec(self):
         """SPEC-vs-REALITY pin (D2 amendment 2026-05-12): CLAUDE.md
