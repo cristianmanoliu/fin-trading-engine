@@ -63,6 +63,7 @@ LOCKED: dict[str, tuple[float, str]] = {
     "MIN_WR_PCT":          (14,      "advisory kill criterion: WR <14% over ≥150 trades"),
     "TARGET_RR_FALLBACK":  (6.0,     "entry detector fallback when TargetRR<=0 (T14)"),
     "ALPHA_DRIFT":         (0.001,   "drift detector family-wise alpha (decision-grade kill)"),
+    "HISTORICAL_FLEET_RATE": (1.18,   "5y all-regime fleet trade rate (trades/day); baseline for forward_paper_timeline + drift_detector_time_to_detection"),
 }
 
 
@@ -152,6 +153,20 @@ SITES: dict[str, list[tuple[str, str]]] = {
     "ALPHA_DRIFT": [
         ("scripts/live_vs_backtest_drift.py",
          r"^ALPHA\s*=\s*([\d.]+)"),
+    ],
+    "HISTORICAL_FLEET_RATE": [
+        # forward_paper_timeline (2026-05-12 dual-projection): baseline scenario
+        # for STAGE_1 projection. If this drifts the operator's "if regime
+        # returns to historical" projection silently lies.
+        ("scripts/forward_paper_timeline.py",
+         r"^HISTORICAL_FLEET_RATE\s*=\s*([\d.]+)"),
+        # drift_detector_time_to_detection: Poisson-arrival simulator for
+        # drift-detector TTD calibration. Uses the SAME 1.18/d historical
+        # rate as forward_paper_timeline's baseline — they MUST agree or
+        # the locked α=0.001 calibration becomes invalid against today's
+        # historical-rate assumption.
+        ("scripts/drift_detector_time_to_detection.py",
+         r"^TRADES_PER_DAY\s*=\s*([\d.]+)"),
     ],
 }
 
@@ -305,6 +320,16 @@ class LockedValuesSanityTest(unittest.TestCase):
     def test_alpha_drift_is_001(self):
         self.assertEqual(LOCKED["ALPHA_DRIFT"][0], 0.001,
             "CLAUDE.md drift detector: 'α_family=0.001' (calibration verdict 2026-05-07)")
+
+    def test_historical_fleet_rate_is_1_18(self):
+        self.assertEqual(LOCKED["HISTORICAL_FLEET_RATE"][0], 1.18,
+            "CLAUDE.md: 'historical fleet trade rate of ~1.18 trades/day' "
+            "(also: docs/OPERATOR_HANDBOOK.md, docs/GLOSSARY.md, "
+            "results/kill_bar_calibration_verdict_2026-05-07.md). "
+            "Two code sites use this constant directly — see SITES above. "
+            "Pre-reg change required (it's the baseline for forward_paper_timeline "
+            "AND the Poisson arrival rate for drift_detector_time_to_detection's "
+            "α=0.001 calibration).")
 
 
 if __name__ == "__main__":
