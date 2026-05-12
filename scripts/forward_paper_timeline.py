@@ -66,8 +66,13 @@ FORWARD_PAPER_START = datetime(2026, 5, 5, 20, 6, tzinfo=timezone.utc)
 MIN_TRADES = 150
 MIN_DAYS = 60
 
-# Historical fleet rate for projection fallback when no trades observed yet.
+# Historical fleet rate. Used for (a) the baseline scenario in the dual-
+# projection render (always shown alongside observed/override) and (b) the
+# zero-trade fallback when no observations are available yet.
 # Per CLAUDE.md: "fleet rate 1.18 trades/day" (16 engines × ~0.074 trades/sym/day).
+# Locked by scripts/test_criterion_coverage.py — paired with
+# drift_detector_time_to_detection.py::TRADES_PER_DAY (same constant,
+# different variable name). Pre-reg change required to move this.
 HISTORICAL_FLEET_RATE = 1.18
 
 

@@ -31,7 +31,13 @@ from drift_detector_calibration import (  # noqa: E402
 # ── Locked parameters ────────────────────────────────────────────────────────
 ALPHA_FAMILY = 0.001       # locked from drift_detector_calibration_verdict
 N_MIN = 30                 # locked from detector code
-TRADES_PER_DAY = 1.18      # locked: historical fleet rate
+TRADES_PER_DAY = 1.18      # locked: historical fleet rate (paired with
+                           # forward_paper_timeline.py::HISTORICAL_FLEET_RATE
+                           # via scripts/test_criterion_coverage.py pin —
+                           # both sites MUST agree, pre-reg change required.
+                           # Changing here without there would invalidate
+                           # the locked α=0.001 calibration AND produce
+                           # inconsistent operator-facing projections.)
 HORIZON_DAYS = 365
 B_PATHS = 1_000
 
