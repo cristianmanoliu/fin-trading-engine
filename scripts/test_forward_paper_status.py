@@ -145,6 +145,114 @@ class TopSymsSortTest(unittest.TestCase):
                 f"appear before WINNERUSDT $5k. Got: {top_line!r}")
 
 
+class PartialCanonD3Test(unittest.TestCase):
+    """D3 resolution pin (2026-05-12 — see
+    results/partial_canon_resolution_2026-05-12.md): dashboard must count
+    only TERMINAL closes toward 'Trades closed' and 'wins'. PARTIAL
+    closes are reported in a separate line below the trades count when
+    nonzero, never silently rolled into the gate-aligned total.
+
+    Today (live config = single 6:1 RR, no B2/multi-TP) PARTIAL emission
+    is zero so the behavior is invisible. This test exercises the latent
+    code path by injecting fixture PARTIAL events directly. Without these
+    pins, a future re-enable of B2/multi-TP would silently inflate the
+    dashboard's trade count above the formal gate."""
+
+    def _write_partial(self, jdir: Path, symbol: str, ts: str, pnl: float,
+                       cohort: str = "live") -> None:
+        """Emit a PARTIAL close event WITHOUT a paired open. write_close
+        in this file emits open+close pairs; PARTIAL closes happen
+        mid-position so they appear without their own paired open."""
+        if cohort == "live":
+            target = jdir
+        else:
+            target = jdir / cohort
+        target.mkdir(parents=True, exist_ok=True)
+        ym = ts[:7]
+        path = target / f"{symbol}-{ym}.jsonl"
+        close_evt = json.dumps({
+            "event": "close", "symbol": symbol, "ts": ts,
+            "side": "LONG", "entry": 100, "exit": 105,
+            "outcome": "PARTIAL", "pnl_usd": pnl,
+            "fee_usd": 50.0, "slip_usd": 0.0, "notional_usd": 50000.0,
+        })
+        with path.open("a") as f:
+            f.write(close_evt + "\n")
+
+    def test_partial_closes_excluded_from_trade_count(self):
+        """Fixture: 2 TARGET + 1 STOP + 2 PARTIAL → trades=3, wins=2,
+        partials reported separately. Pre-D3 the dashboard would have
+        reported trades=5 with PARTIAL counted as wins (overstating
+        both count + WR)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            # 2 terminals TARGET
+            write_close(d, "BTCUSDT", "2026-05-08T01:00:00Z", +100.0,
+                        outcome="TARGET", slip=0.0)
+            write_close(d, "ETHUSDT", "2026-05-08T02:00:00Z", +200.0,
+                        outcome="TARGET", slip=0.0)
+            # 1 terminal STOP
+            write_close(d, "BNBUSDT", "2026-05-08T03:00:00Z", -100.0,
+                        outcome="STOP")
+            # 2 PARTIAL closes — no paired open (mid-position scale-outs)
+            self._write_partial(d, "SOLUSDT", "2026-05-08T04:00:00Z", +50.0)
+            self._write_partial(d, "SOLUSDT", "2026-05-08T05:00:00Z", +30.0)
+            code, out, err = run_script(str(d))
+            self.assertEqual(code, 0, f"stderr:\n{err}")
+            # Trades count must be 3 (terminals only), NOT 5.
+            self.assertIn("Trades closed:          3", out,
+                "Trades count must equal terminal closes only (3), not "
+                "all closes (5). Pre-D3 the dashboard counted PARTIAL "
+                "as a trade — inflating both count and WR.")
+            # Partial-closes notice must appear (2 partials).
+            self.assertIn("partial closes", out,
+                "Partial count must surface when nonzero")
+            self.assertIn("(+ 2 partial closes", out,
+                f"Expected '(+ 2 partial closes' indicator in output:\n{out}")
+
+    def test_no_partial_line_when_zero(self):
+        """Confirm the partials notice is suppressed when no PARTIAL events.
+        Pre-D3 there was no notice at all; D3 must not introduce a new
+        noisy line in the default no-PARTIAL state.
+
+        Anchors on the specific D3 marker ('(+ N partial closes;'), not
+        the generic phrase 'partial closes' which already appears in the
+        Notes section of the dashboard."""
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            write_close(d, "BTCUSDT", "2026-05-08T01:00:00Z", +100.0,
+                        outcome="TARGET", slip=0.0)
+            code, out, err = run_script(str(d))
+            self.assertEqual(code, 0, f"stderr:\n{err}")
+            self.assertNotIn("(+ ", out,
+                "D3 partial-count line must NOT appear when partials=0 — "
+                "would clutter the steady-state dashboard")
+            self.assertNotIn("partial closes; not counted in trades/wins", out,
+                "D3 partial-count notice must be suppressed when partials=0")
+
+    def test_partial_does_not_count_as_win(self):
+        """Direct WR pin: 1 TARGET + 3 PARTIAL → WR = 100% (1/1 of
+        terminals), NOT 100% (4/4 of all closes including partials).
+        Pre-D3 PARTIAL was counted as a win → WR overstated whenever
+        terminals were a mix and PARTIAL was on."""
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            write_close(d, "BTCUSDT", "2026-05-08T01:00:00Z", +200.0,
+                        outcome="TARGET", slip=0.0)
+            # Same position scaled out 3 times before terminal
+            self._write_partial(d, "BTCUSDT", "2026-05-08T00:30:00Z", +50.0)
+            self._write_partial(d, "BTCUSDT", "2026-05-08T00:45:00Z", +30.0)
+            self._write_partial(d, "BTCUSDT", "2026-05-08T00:50:00Z", +20.0)
+            code, out, err = run_script(str(d))
+            self.assertEqual(code, 0, f"stderr:\n{err}")
+            # WR is "1 / 100.0%" (1 win out of 1 terminal trade) — the
+            # exact format is "Wins / WR:              1 / 100.0%" so
+            # we look for "1 / 100.0%" substring.
+            self.assertIn("1 / 100.0%", out,
+                f"WR should be 100% (1 of 1 terminals = win), not "
+                f"diluted by PARTIAL count. Got output:\n{out}")
+
+
 class HodlHelperValidationTest(unittest.TestCase):
     """Helper-output validation regression. Replaces $HODL_HELPER with a
     fake script that emits the right number of fields but with garbage

@@ -79,8 +79,16 @@ remote_or_local() {
 }
 
 # Aggregate journal data on the (remote or local) host. Outputs:
-#   STRATEGY|<label>|<first_ts>|<last_ts>|<trades>|<wins>|<net_pnl>|<fee>|<slip>|<notional>|<notional_losers>
+#   STRATEGY|<label>|<first_ts>|<last_ts>|<trades>|<wins>|<net_pnl>|<fee>|<slip>|<notional>|<notional_losers>|<partials>
 #   STRATEGY|<label>|NODATA                                            (no closes — may still have OPEN records)
+#
+# <trades>/<wins> count TERMINAL closes only (STOP/TARGET/TIME) per D3
+# resolution 2026-05-12 (stage_promotion_check.py:load_journal is the
+# canonical "150 trades" tool; the dashboard now matches). <partials>
+# is a separate count of PARTIAL close events; zero today because live
+# config has no B2/multi-TP. <net_pnl>/<fee>/<slip>/<notional>/<notional_losers>
+# still accumulate from ALL close events (partial closes realize real
+# dollar PnL even though they don't terminate the position).
 #   SYMBOL|<label>|<symbol>|<sym_pnl>|<sym_trades>
 #   CLOSE|<label>|<ts>|<symbol>|<pnl>|<outcome>                        (per-close, fed to HODL helper)
 #   OPEN|<label>|<symbol>|<side>|<entry>|<stop>|<target>|<open_ts>     (currently-held — opens > closes)
@@ -115,24 +123,32 @@ aggregate() {
     # journals — no process substitution (which does not survive bash -s heredoc).
     cat "${files[@]}" | jq -r '"'"'select(.event=="open" or .event=="close") | [.event, .ts, .symbol, (.pnl_usd // 0), (.outcome // "STOP"), (.fee_usd // 0), (.slip_usd // 0), (.notional_usd // 0), (.side // ""), (.entry // 0), (.stop // 0), (.target // 0)] | @tsv'"'"' 2>/dev/null \
     | awk -F"\t" -v label="$label" '"'"'
-        BEGIN { first_ts=""; last_ts=""; total=0; wins=0; pnl=0
+        BEGIN { first_ts=""; last_ts=""; total=0; wins=0; partials=0; pnl=0
                 fee_usd=0; slip_usd_losers=0; notional=0; notional_losers=0 }
         $1 == "close" {
             # Emit per-close TSV record for downstream HODL comparator.
             printf "CLOSE|%s|%s|%s|%s|%s\n", label, $2, $3, $4, $5
             if (first_ts=="") first_ts=$2
             last_ts=$2
-            # PARTIAL handling drift (latent today; fires if a multi-leg strategy
-            # is ever deployed): this dashboard counts every close event toward
-            # total/wins (line 109 treats PARTIAL as a win, line 108 counts each
-            # PARTIAL as a separate trade). stage_promotion_check.py:load_journal
-            # SKIPS PARTIAL closes — counts only terminal positions for the
-            # "≥150 trades" formal gate. Today live config emits zero PARTIAL
-            # events so views agree; with B2/multi-TP enabled they would
-            # diverge (dashboard over-counts vs formal gate). Cross-referenced
-            # from stage_promotion_check.load_journal for symmetric visibility.
-            total++
-            if ($5=="TARGET" || $5=="PARTIAL") wins++
+            # PARTIAL canon (D3 resolution 2026-05-12): terminal positions
+            # only count toward total/wins, matching stage_promotion_check
+            # (formal gate). Partial closes accumulate PnL/fee/notional but
+            # do NOT increment total or wins — they share alpha-source with
+            # the entry, so multi-counting them would inflate trade-count
+            # CI without adding new decision-grade information. See
+            # results/partial_canon_resolution_2026-05-12.md.
+            #
+            # Today (live config = single 6:1 RR target, no multi-leg)
+            # this branch never fires the partials counter; the only
+            # behavioral change today is that the wins-on-PARTIAL line is
+            # gone (it was never fired anyway). The semantics matter when
+            # B2 or multi-TP is re-enabled.
+            if ($5 == "PARTIAL") {
+                partials++
+            } else {
+                total++
+                if ($5 == "TARGET") wins++
+            }
             pnl += $4
             fee_usd += $6
             notional += $8
@@ -164,10 +180,14 @@ aggregate() {
                         last_open_stop[s], last_open_target[s], last_open_ts[s]
                 }
             }
-            if (total==0) { printf "STRATEGY|%s|NODATA\n", label; exit }
-            printf "STRATEGY|%s|%s|%s|%d|%d|%.2f|%.2f|%.2f|%.2f|%.2f\n", \
+            # NODATA when neither terminals nor partials present. A mid-
+            # flight cohort with only partial closes still emits a STRATEGY
+            # line so the dashboard surfaces the PnL accumulation; total=0
+            # / wins=0 / partials>0 is a valid state with B2/multi-TP enabled.
+            if (total==0 && partials==0) { printf "STRATEGY|%s|NODATA\n", label; exit }
+            printf "STRATEGY|%s|%s|%s|%d|%d|%.2f|%.2f|%.2f|%.2f|%.2f|%d\n", \
                 label, first_ts, last_ts, total, wins, pnl, \
-                fee_usd, slip_usd_losers, notional, notional_losers
+                fee_usd, slip_usd_losers, notional, notional_losers, partials
             for (s in sym_pnl) printf "SYMBOL|%s|%s|%.2f|%d\n", label, s, sym_pnl[s], sym_count[s]
         }'"'"'
 }
@@ -244,7 +264,12 @@ echo "  Source: $VPS  ($JOURNAL_DIR)"
 echo "$SEP"
 
 # Iterate strategy lines
-echo "$DATA" | grep "^STRATEGY|" | while IFS='|' read -r _ label first_ts last_ts trades wins pnl fee_usd slip_usd_losers notional notional_losers; do
+echo "$DATA" | grep "^STRATEGY|" | while IFS='|' read -r _ label first_ts last_ts trades wins pnl fee_usd slip_usd_losers notional notional_losers partials; do
+    # Default partials to 0 when reading an older STRATEGY format (e.g.,
+    # a NODATA line or a regression scenario before D3 added the field).
+    # Bash `read` leaves unread fields empty; downstream printf would
+    # render "%d" against an empty string and abort under set -u.
+    partials="${partials:-0}"
     # Currently-held positions for this cohort (regardless of close status).
     open_pos_lines=$(echo "$DATA" | awk -F'|' -v lbl="$label" '$1=="OPEN" && $2==lbl {print}')
     open_count=0
@@ -559,7 +584,15 @@ echo "$DATA" | grep "^STRATEGY|" | while IFS='|' read -r _ label first_ts last_t
 
     printf "\n  ── %s ─%s\n" "$label" "$(printf '%0.s─' $(seq 1 $((70 - ${#label}))))"
     printf "    Days elapsed:        %4d / %d (since first close)  [%s]\n" "$days_elapsed" "$MIN_DAYS" "$s_days"
+    # Trades count is TERMINAL closes only (matches stage_promotion_check
+    # canonical gate per D3 resolution 2026-05-12). When PARTIAL emission
+    # is non-zero (B2/multi-TP enabled), surface the partial count under
+    # the terminal count so the operator can see both views without
+    # conflating them.
     printf "    Trades closed:       %4d / %d              [%s]\n" "$trades" "$MIN_TRADES" "$s_trades"
+    if (( partials > 0 )); then
+        printf "      (+ %d partial closes; not counted in trades/wins per D3 canon)\n" "$partials"
+    fi
     printf "    Wins / WR:           %4d / %s%%             [%s]\n" "$wins" "$wr_pct" "$s_wr"
     printf "    Net PnL:             \$%-12s              [%s]\n" "$pnl_int" "$s_pnl"
     printf "    Realized fee bps:    %-6s  / ≤%dbp                [%s]\n" "$fee_bps_val" "$MAX_FEE_BPS" "$s_fee"

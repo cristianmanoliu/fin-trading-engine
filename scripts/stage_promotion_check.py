@@ -215,17 +215,17 @@ def load_journal(journal_dir: Path) -> list[Trade]:
     """Load LIVE-cohort closes only (top-level *.jsonl, not shadow/*).
     Skips PARTIAL closes and pre-cost-decomp closes (notional==0).
 
-    PARTIAL handling drift with the dashboard (latent, fires only if a
-    PARTIAL-emitting strategy is deployed): scripts/forward_paper_status.sh
-    line 108-109 counts PARTIAL closes as separate trades AND as wins
-    in its per-cohort total/WR aggregation. This function (the formal
-    gate evaluator) excludes them. Today's live config (single 6:1 RR
-    target, no multi-leg exits) emits zero PARTIAL events so the
-    discrepancy is invisible. If a B2/multi-TP strategy is ever
-    deployed, the dashboard's "≥150 trades" view will fire before
-    this gate's "≥150 trades" criterion does — operator mental model
-    will diverge from the formal verdict. Cross-referenced from the
-    dashboard's awk block for symmetric discoverability."""
+    PARTIAL canon (D3 resolution 2026-05-12 — see
+    results/partial_canon_resolution_2026-05-12.md): terminal positions
+    only. Multiple PARTIAL exits from one entry share the same alpha
+    source — multi-counting them would inflate the trade-count CI
+    without adding new decision-grade information.
+
+    Mirrored at scripts/forward_paper_status.sh (the dashboard) which
+    now also counts terminals only for its 'Trades closed' surface and
+    reports partials as a separate line when nonzero. Cross-referenced
+    for symmetric discoverability — any future change to the canonical
+    handling MUST update both sites + the test pins in lockstep."""
     if not journal_dir.is_dir():
         return []
     out: list[Trade] = []
