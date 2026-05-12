@@ -176,7 +176,11 @@ class RenderTest(unittest.TestCase):
         out = fpt.render(p, quiet=False)
         self.assertIn("Forward-paper STAGE_1 promotion timeline", out)
         self.assertIn("Locked criteria", out)
-        self.assertIn("Binding gate:", out)
+        # "Rate scenarios:" replaces the pre-2026-05-12 "Binding gate:"
+        # header. Both scenarios (Primary + Baseline) appear inside this
+        # block with their own per-row binding= annotations.
+        self.assertIn("Rate scenarios:", out)
+        self.assertIn("binding=", out)
         self.assertIn("Earliest STAGE_1", out)
 
     def test_low_rate_warning_surfaces(self):
@@ -202,6 +206,142 @@ class RenderTest(unittest.TestCase):
         p = fpt.project(trades_closed=0, now=now)
         out = fpt.render(p)
         self.assertIn("zero observed trades", out.lower())
+
+
+class DualProjectionTest(unittest.TestCase):
+    """Dual-projection behavior added 2026-05-12 to address the regime-
+    rate gap. Primary scenario uses override/observed/historical (in
+    that order); baseline scenario is ALWAYS computed at HISTORICAL_FLEET_RATE
+    alongside, except when the primary IS historical (suppress duplicate).
+    Operator sees both scenarios + a spread metric so 'why isn't STAGE_1
+    firing yet at 0.17/d?' is answerable at-a-glance:
+    'observed projects 1218d out; historical baseline projects 120d out;
+    spread is +1098d.'
+
+    See memory/trade_rate_investigation_2026-05-12.md for the regime
+    rationale + memory/feedback_audit_to_enforcement_graduation.md for
+    the capability-build pivot."""
+
+    def test_baseline_populated_when_observed_differs_from_historical(self):
+        # Observed = 1.33/d (40 trades / 30 days) ≠ historical 1.18/d.
+        now = fpt.FORWARD_PAPER_START + timedelta(days=30)
+        p = fpt.project(trades_closed=40, now=now)
+        self.assertIsNotNone(p.primary_scenario)
+        self.assertIsNotNone(p.baseline_scenario)
+        self.assertEqual(p.primary_scenario.rate_source, "observed")
+        self.assertEqual(p.baseline_scenario.rate_source, "historical_fleet")
+        self.assertEqual(p.baseline_scenario.rate_per_day,
+                         fpt.HISTORICAL_FLEET_RATE)
+
+    def test_baseline_suppressed_when_zero_trade_fallback(self):
+        # Zero trades → primary IS historical → baseline suppressed
+        # (no informational value in a duplicate row).
+        now = fpt.FORWARD_PAPER_START + timedelta(days=10)
+        p = fpt.project(trades_closed=0, now=now)
+        self.assertEqual(p.rate_source, "historical_fleet")
+        self.assertIsNotNone(p.primary_scenario)
+        self.assertIsNone(p.baseline_scenario,
+            "baseline must be suppressed when primary IS historical "
+            "(zero-trade fallback)")
+        self.assertIsNone(p.spread_days)
+
+    def test_baseline_suppressed_when_override_equals_historical(self):
+        # Operator explicit --rate 1.18 → same suppression rule fires.
+        now = fpt.FORWARD_PAPER_START + timedelta(days=30)
+        p = fpt.project(trades_closed=40,
+                        override_rate=fpt.HISTORICAL_FLEET_RATE, now=now)
+        self.assertEqual(p.rate_source, "override")
+        self.assertEqual(p.used_rate_per_day, fpt.HISTORICAL_FLEET_RATE)
+        self.assertIsNone(p.baseline_scenario,
+            "baseline must be suppressed when override IS historical (same rate)")
+        self.assertIsNone(p.spread_days)
+
+    def test_baseline_populated_for_override_distinct_from_historical(self):
+        # Operator what-if --rate 2.0 ≠ historical → baseline visible.
+        now = fpt.FORWARD_PAPER_START + timedelta(days=30)
+        p = fpt.project(trades_closed=40, override_rate=2.0, now=now)
+        self.assertIsNotNone(p.baseline_scenario)
+        self.assertEqual(p.primary_scenario.rate_per_day, 2.0)
+        self.assertEqual(p.baseline_scenario.rate_per_day,
+                         fpt.HISTORICAL_FLEET_RATE)
+
+    def test_spread_days_math(self):
+        # 30 days elapsed, observed = 1.33/d (faster than historical 1.18/d).
+        # At 1.33/d, 150 trades fires at day ~113 → STAGE_1 ~day 113.
+        # At 1.18/d, 150 trades fires at day ~127 → STAGE_1 ~day 127.
+        # Spread should be ~-14 days (observed beats baseline by ~14d).
+        now = fpt.FORWARD_PAPER_START + timedelta(days=30)
+        p = fpt.project(trades_closed=40, now=now)
+        self.assertEqual(
+            p.spread_days,
+            p.primary_scenario.days_to_stage_1 - p.baseline_scenario.days_to_stage_1,
+            "spread_days must equal primary.days_to_stage_1 minus "
+            "baseline.days_to_stage_1")
+        # Sign check: observed is FASTER, so primary STAGE_1 < baseline STAGE_1
+        # → spread is NEGATIVE.
+        self.assertLess(p.spread_days, 0,
+            "observed 1.33/d > historical 1.18/d → primary should be "
+            "earlier than baseline → spread should be negative")
+
+    def test_spread_positive_when_observed_slower(self):
+        # Regime case (today): 5 trades in 30 days → 0.17/d, well below 1.18/d.
+        # Observed STAGE_1 projection is MUCH later than baseline.
+        now = fpt.FORWARD_PAPER_START + timedelta(days=30)
+        p = fpt.project(trades_closed=5, now=now)
+        self.assertGreater(p.spread_days, 0,
+            "observed << historical → primary STAGE_1 later than baseline "
+            "→ spread positive")
+        # Sanity: spread is materially large (>>0), not 1-2 days noise.
+        self.assertGreater(p.spread_days, 100,
+            "0.17/d vs 1.18/d should produce spread of hundreds of days")
+
+    def test_render_shows_both_scenario_rows_when_baseline_present(self):
+        # Standard regime case: observed rate slow → baseline visible.
+        now = fpt.FORWARD_PAPER_START + timedelta(days=30)
+        p = fpt.project(trades_closed=5, now=now)
+        out = fpt.render(p, quiet=False)
+        self.assertIn("Primary", out)
+        self.assertIn("Baseline", out)
+        self.assertIn("Spread:", out)
+        self.assertIn("LATER than baseline", out)
+        # Both scenarios' rate values should appear with /d annotations
+        self.assertIn("0.17/d", out)  # observed (5/30)
+        self.assertIn("1.18/d", out)  # historical
+
+    def test_render_shows_earlier_label_when_spread_negative(self):
+        # Faster-than-baseline case → "EARLIER than baseline" wording.
+        now = fpt.FORWARD_PAPER_START + timedelta(days=30)
+        p = fpt.project(trades_closed=40, now=now)  # 1.33/d > 1.18/d
+        out = fpt.render(p, quiet=False)
+        self.assertIn("EARLIER than baseline", out)
+        self.assertNotIn("LATER than baseline", out)
+
+    def test_render_suppresses_baseline_row_when_suppressed(self):
+        # Zero trades → baseline suppressed → render shows the suppression note.
+        now = fpt.FORWARD_PAPER_START + timedelta(days=10)
+        p = fpt.project(trades_closed=0, now=now)
+        out = fpt.render(p, quiet=False)
+        self.assertIn("baseline suppressed", out)
+        self.assertNotIn("Spread:", out,
+            "Spread line must not appear when baseline is None")
+
+    def test_quiet_includes_spread_annotation_when_baseline_present(self):
+        now = fpt.FORWARD_PAPER_START + timedelta(days=30)
+        p = fpt.project(trades_closed=5, now=now)  # observed slower
+        out = fpt.render(p, quiet=True)
+        self.assertIn("baseline 1.18/d", out)
+        self.assertIn("d spread", out)
+        # Specifically verify the spread sign appears.
+        self.assertRegex(out, r"\(\+\d+d spread\)",
+            "positive spread should render with explicit + sign")
+
+    def test_quiet_omits_spread_when_baseline_suppressed(self):
+        now = fpt.FORWARD_PAPER_START + timedelta(days=10)
+        p = fpt.project(trades_closed=0, now=now)  # primary IS historical
+        out = fpt.render(p, quiet=True)
+        self.assertNotIn("spread", out.lower(),
+            "quiet format must omit spread annotation when baseline is None")
+        self.assertNotIn("baseline", out.lower())
 
 
 class CLITest(unittest.TestCase):

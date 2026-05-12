@@ -72,17 +72,42 @@ HISTORICAL_FLEET_RATE = 1.18
 
 
 @dataclass
+class RateScenario:
+    """Trade-gate projection at a single trade rate. The calendar gate is
+    rate-invariant and lives on the parent Projection — only the trade-count
+    gate (n=MIN_TRADES reached) shifts with rate, so the binding-gate +
+    earliest-STAGE_1 outcome differs per scenario."""
+    rate_per_day: float
+    rate_source: str                    # "observed" | "historical_fleet" | "override"
+    trade_gate_date: datetime           # date n=MIN_TRADES reached at this rate
+    binding_gate: str                   # "calendar" | "trade-count"
+    earliest_stage_1: datetime          # max of (calendar_gate_date, trade_gate_date)
+    days_to_stage_1: int                # days from now to earliest_stage_1
+
+
+@dataclass
 class Projection:
     days_elapsed: int
     trades_closed: int
     observed_rate_per_day: float        # actual rate from data
-    used_rate_per_day: float            # rate used for projection (may be overridden)
+    used_rate_per_day: float            # rate used for primary projection (override/observed/historical fallback)
     rate_source: str                    # "observed" | "historical_fleet" | "override"
-    calendar_gate_date: datetime        # day MIN_DAYS from start
-    trade_gate_date: datetime           # date n=MIN_TRADES reached at used_rate
-    binding_gate: str                   # "calendar" | "trade-count"
-    earliest_stage_1: datetime          # max of the two
-    days_to_stage_1: int                # days from now to earliest_stage_1
+    calendar_gate_date: datetime        # day MIN_DAYS from start (rate-invariant)
+    trade_gate_date: datetime           # date n=MIN_TRADES reached at used_rate (mirrors primary.trade_gate_date)
+    binding_gate: str                   # "calendar" | "trade-count" (mirrors primary.binding_gate)
+    earliest_stage_1: datetime          # max of the two (mirrors primary.earliest_stage_1)
+    days_to_stage_1: int                # days from now to earliest_stage_1 (mirrors primary.days_to_stage_1)
+    # Dual-projection extension (2026-05-12):
+    # Always compute a parallel projection at HISTORICAL_FLEET_RATE so the
+    # operator can see "if regime persists vs if rate returns to baseline."
+    # Suppressed (None) when the primary rate IS historical (zero-trade
+    # fallback OR an explicit --rate 1.18 override) since the two scenarios
+    # would be identical. Motivated by trade_rate_investigation_2026-05-12:
+    # observed bear-regime rate is 0.17/d vs all-regime average 1.18/d, a 7×
+    # spread that makes single-rate projection misleading.
+    primary_scenario: RateScenario | None = None
+    baseline_scenario: RateScenario | None = None
+    spread_days: int | None = None      # primary.days_to_stage_1 - baseline.days_to_stage_1; None when no baseline
 
 
 def count_live_trades(journal_dir: Path) -> tuple[int, int]:
@@ -130,14 +155,46 @@ def fetch_remote_trades(vps: str, remote_dir: str) -> int:
         return closes
 
 
+def _scenario_at_rate(rate_per_day: float, rate_source: str,
+                      calendar_gate_date: datetime,
+                      now: datetime) -> RateScenario:
+    """Compute the (trade_gate_date, binding_gate, earliest_stage_1) outcome
+    given a fixed rate. Pulled out of project() so the same logic powers
+    both the primary and baseline scenarios without duplication."""
+    if rate_per_day > 0:
+        days_to_trade_gate = MIN_TRADES / rate_per_day
+    else:
+        days_to_trade_gate = float("inf")
+    trade_gate_date = FORWARD_PAPER_START + timedelta(days=days_to_trade_gate)
+
+    if trade_gate_date > calendar_gate_date:
+        binding_gate = "trade-count"
+        earliest = trade_gate_date
+    else:
+        binding_gate = "calendar"
+        earliest = calendar_gate_date
+
+    days_to_stage_1 = max(0, (earliest - now).days)
+    return RateScenario(
+        rate_per_day=rate_per_day,
+        rate_source=rate_source,
+        trade_gate_date=trade_gate_date,
+        binding_gate=binding_gate,
+        earliest_stage_1=earliest,
+        days_to_stage_1=days_to_stage_1,
+    )
+
+
 def project(trades_closed: int, override_rate: float | None = None,
             now: datetime | None = None) -> Projection:
     """Compute the projection given current state. Pure function — no I/O.
 
-    If override_rate is set, uses it directly. Otherwise computes the
-    observed rate from trades_closed / days_elapsed. If days_elapsed<1
-    or observed_rate is 0 (no trades yet), falls back to historical
-    fleet rate (1.18/day) per CLAUDE.md."""
+    Primary scenario picks one of {override > observed > historical}.
+    A baseline scenario at HISTORICAL_FLEET_RATE is always computed
+    alongside (suppressed when primary IS historical to avoid duplicate
+    rows). Operator sees both — closes the 'why isn't STAGE_1 firing
+    yet at observed 0.17/d?' confusion that single-rate projection
+    creates during low-trade-rate regimes."""
     if now is None:
         now = datetime.now(timezone.utc)
 
@@ -156,25 +213,23 @@ def project(trades_closed: int, override_rate: float | None = None,
         used_rate = HISTORICAL_FLEET_RATE
         rate_source = "historical_fleet"
 
-    # Calendar gate: day MIN_DAYS from start.
+    # Calendar gate is rate-invariant.
     calendar_gate_date = FORWARD_PAPER_START + timedelta(days=MIN_DAYS)
 
-    # Trade gate: at used_rate trades/day, days-to-MIN_TRADES = MIN_TRADES/used_rate.
-    if used_rate > 0:
-        days_to_trade_gate = MIN_TRADES / used_rate
-    else:
-        days_to_trade_gate = float("inf")
-    trade_gate_date = FORWARD_PAPER_START + timedelta(days=days_to_trade_gate)
+    primary = _scenario_at_rate(used_rate, rate_source, calendar_gate_date, now)
 
-    # Binding gate = the one that fires LATER (operator needs both).
-    if trade_gate_date > calendar_gate_date:
-        binding_gate = "trade-count"
-        earliest = trade_gate_date
+    # Baseline is suppressed when primary IS historical (same rate → same
+    # scenario, no informational value in the duplicate row). Equality is
+    # exact here because we either picked HISTORICAL_FLEET_RATE directly
+    # (zero-trade fallback) or the operator supplied --rate 1.18 verbatim.
+    if used_rate == HISTORICAL_FLEET_RATE:
+        baseline = None
+        spread = None
     else:
-        binding_gate = "calendar"
-        earliest = calendar_gate_date
-
-    days_to_stage_1 = max(0, (earliest - now).days)
+        baseline = _scenario_at_rate(
+            HISTORICAL_FLEET_RATE, "historical_fleet",
+            calendar_gate_date, now)
+        spread = primary.days_to_stage_1 - baseline.days_to_stage_1
 
     return Projection(
         days_elapsed=days_elapsed,
@@ -183,23 +238,51 @@ def project(trades_closed: int, override_rate: float | None = None,
         used_rate_per_day=used_rate,
         rate_source=rate_source,
         calendar_gate_date=calendar_gate_date,
-        trade_gate_date=trade_gate_date,
-        binding_gate=binding_gate,
-        earliest_stage_1=earliest,
-        days_to_stage_1=days_to_stage_1,
+        trade_gate_date=primary.trade_gate_date,
+        binding_gate=primary.binding_gate,
+        earliest_stage_1=primary.earliest_stage_1,
+        days_to_stage_1=primary.days_to_stage_1,
+        primary_scenario=primary,
+        baseline_scenario=baseline,
+        spread_days=spread,
+    )
+
+
+def _render_scenario_line(label: str, s: RateScenario) -> str:
+    """One-line scenario row: '  Primary  (0.14/d, observed)  trade gate
+    2029-09-15  binding=trade-count  STAGE_1 2029-09-15 (1218d)'."""
+    return (
+        f"    {label:<9}  ({s.rate_per_day:>5.2f}/d, {s.rate_source})  "
+        f"trade gate {s.trade_gate_date.strftime('%Y-%m-%d')}  "
+        f"binding={s.binding_gate}  "
+        f"STAGE_1 {s.earliest_stage_1.strftime('%Y-%m-%d')} "
+        f"({s.days_to_stage_1}d)"
     )
 
 
 def render(p: Projection, quiet: bool = False) -> str:
-    """Format the projection as paste-ready text. Returns a single string."""
+    """Format the projection as paste-ready text. Returns a single string.
+
+    Dual-projection (2026-05-12): when a baseline_scenario is present (i.e.
+    primary rate differs from HISTORICAL_FLEET_RATE), render shows BOTH
+    rows side-by-side with a spread-days annotation. Single-rate render
+    falls back when baseline is None (zero-trade fallback or explicit
+    historical override)."""
     if quiet:
-        return (
+        base = (
             f"forward-paper: day {p.days_elapsed} / "
             f"{p.trades_closed} trades / "
             f"rate={p.used_rate_per_day:.2f}/d ({p.rate_source}) / "
             f"binding={p.binding_gate} / "
             f"STAGE_1 earliest {p.earliest_stage_1.strftime('%Y-%m-%d')} "
-            f"({p.days_to_stage_1}d)")
+            f"({p.days_to_stage_1}d)"
+        )
+        if p.baseline_scenario is not None and p.spread_days is not None:
+            sign = "+" if p.spread_days >= 0 else ""
+            base += (f" / baseline {p.baseline_scenario.rate_per_day:.2f}/d → "
+                     f"{p.baseline_scenario.earliest_stage_1.strftime('%Y-%m-%d')} "
+                     f"({sign}{p.spread_days}d spread)")
+        return base
 
     sep = "─" * 70
     lines = [
@@ -212,18 +295,45 @@ def render(p: Projection, quiet: bool = False) -> str:
         f"  Days elapsed:        {p.days_elapsed:>5d}d",
         f"  Trades closed:       {p.trades_closed:>5d}  (live cohort, excludes PARTIAL)",
         f"  Observed rate:       {p.observed_rate_per_day:>5.2f} trades/day",
-        f"  Rate used for proj:  {p.used_rate_per_day:>5.2f} trades/day  ({p.rate_source})",
         "",
         "  Locked criteria (CLAUDE.md):",
-        f"    ≥{MIN_DAYS}d calendar elapsed       fires {p.calendar_gate_date.strftime('%Y-%m-%d')}",
-        f"    ≥{MIN_TRADES} trades at {p.used_rate_per_day:.2f}/d   fires {p.trade_gate_date.strftime('%Y-%m-%d')}",
+        f"    ≥{MIN_DAYS}d calendar elapsed       fires {p.calendar_gate_date.strftime('%Y-%m-%d')}  (rate-invariant)",
+        f"    ≥{MIN_TRADES} trades                  rate-dependent — see scenarios below",
         "",
-        f"  Binding gate: {p.binding_gate.upper()}",
-        f"  Earliest STAGE_1 ready: {p.earliest_stage_1.strftime('%Y-%m-%d')}  ({p.days_to_stage_1}d remaining)",
-        "",
+        "  Rate scenarios:",
     ]
 
-    # Add advisory notes for common cases.
+    # Primary always present. Baseline conditional on rate mismatch.
+    assert p.primary_scenario is not None, "project() must always populate primary_scenario"
+    lines.append(_render_scenario_line("Primary", p.primary_scenario))
+    if p.baseline_scenario is not None:
+        lines.append(_render_scenario_line("Baseline", p.baseline_scenario))
+        assert p.spread_days is not None
+        sign = "+" if p.spread_days >= 0 else ""
+        if p.spread_days > 0:
+            spread_note = ("observed projection is LATER than baseline — "
+                           "rate would need to recover to hit baseline timeline")
+        elif p.spread_days < 0:
+            spread_note = ("observed projection is EARLIER than baseline — "
+                           "current rate beats historical fleet average")
+        else:
+            spread_note = "observed and baseline projections coincide"
+        lines.append(f"    Spread:    {sign}{p.spread_days}d  ({spread_note})")
+    else:
+        lines.append(
+            "    (baseline suppressed — primary IS historical fleet rate; "
+            "single-rate projection)"
+        )
+    lines.append("")
+    lines.append(f"  Earliest STAGE_1 ready: {p.earliest_stage_1.strftime('%Y-%m-%d')}  ({p.days_to_stage_1}d remaining)")
+    lines.append("")
+
+    # Advisory notes (carried over from single-rate render). With dual
+    # projection visible above, these are reinforcement not the primary
+    # surface — but the regime-caveat is still load-bearing because
+    # without it operators can over-anchor on the baseline as "the right
+    # number" when in fact the current bear-regime is structurally
+    # different (per trade_rate_investigation_2026-05-12).
     if p.rate_source == "historical_fleet":
         lines.append("  Note: zero observed trades yet — projection uses historical")
         lines.append(f"  fleet rate {HISTORICAL_FLEET_RATE}/day. Re-run after first close for")
@@ -235,15 +345,12 @@ def render(p: Projection, quiet: bool = False) -> str:
             lines.append(f"  ({p.observed_rate_per_day:.2f}/d vs historical {HISTORICAL_FLEET_RATE}/d).")
             lines.append("  Trade-gate projection may slip if rate doesn't recover.")
             lines.append("")
-            # Regime caveat — added 2026-05-12 after the trade-rate investigation
-            # confirmed slow-EMA + per-candle bias gate is highly regime-sensitive.
-            # See memory/trade_rate_investigation_2026-05-12.md. Prevents
-            # over-anchoring on this projection during a bullish/sideways regime
-            # where the rate is structurally low.
             lines.append(f"  Regime caveat: {HISTORICAL_FLEET_RATE}/d is the 5y all-regime average;")
             lines.append("  the EMA+bias gate fires more in bear/trending markets than")
             lines.append("  sideways/bullish ones. Reassess after regime shift, not after")
-            lines.append("  fixed elapsed days.")
+            lines.append("  fixed elapsed days. Don't over-anchor on the baseline row above —")
+            lines.append("  it is a 'what if regime returns to historical' scenario, not a")
+            lines.append("  forecast.")
             lines.append("")
         elif p.observed_rate_per_day > HISTORICAL_FLEET_RATE * 1.3:
             lines.append("  Note: observed rate well above historical fleet rate.")
