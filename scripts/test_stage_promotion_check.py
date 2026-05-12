@@ -141,21 +141,26 @@ class CriterionUnitTest(unittest.TestCase):
             f"explicitly; got: {c.name!r}")
 
     def test_benchmark_notional_default_matches_locked_spec(self):
-        """SPEC-vs-REALITY DRIFT pin: CLAUDE.md ("Deploy real money..."
-        criterion 5) specifies $32k notional from the deployed-32 era.
-        Current deployed fleet is 16 engines × $1k = $16k. The locked
-        criterion was not updated when the fleet shrank, so the gate
-        fail-CLOSES relative to a fair comparison ($32k benchmark is 2×
-        what the strategy actually risks). Until the operator resolves
-        the spec-vs-reality question, default stays at $32k per pre-reg
-        discipline. Pin to lock that the default matches locked spec —
-        any change to the default MUST update the docstring + this test
-        in lockstep."""
-        self.assertEqual(sp.BENCHMARK_NOTIONAL, 32000.0,
+        """SPEC-vs-REALITY pin (D2 amendment 2026-05-12): CLAUDE.md
+        criterion 5 specifies $16k notional matching the deployed-16 fleet
+        × $1k stake reality. Pre-amendment the locked text said $32k —
+        carried over from the deployed-32 era without update when the
+        fleet shrank 2026-05-07. See
+        results/btc_hodl_notional_amendment_2026-05-12.md.
+
+        This test pins the default value. Any future change to the
+        locked notional MUST update: (1) CLAUDE.md text, (2) the constant
+        + docstring in stage_promotion_check.py, (3) forward_paper_status.sh,
+        (4) test_criterion_coverage.py LOCKED dict, (5) this test.
+        Pre-reg-amendment-of-locked-criterion changes require a dated
+        amendment file in results/ documenting the rationale."""
+        self.assertEqual(sp.BENCHMARK_NOTIONAL, 16000.0,
             f"BENCHMARK_NOTIONAL default must match CLAUDE.md locked spec "
-            f"($32k from deployed-32 era); got {sp.BENCHMARK_NOTIONAL}. "
-            f"If operator resolved the spec-vs-reality question, update both "
-            f"the docstring above the constant AND this test.")
+            f"($16k matching deployed-16 fleet reality, D2 amendment "
+            f"2026-05-12); got {sp.BENCHMARK_NOTIONAL}. "
+            f"If operator amended the locked criterion, update CLAUDE.md, "
+            f"the docstring above the constant, forward_paper_status.sh, "
+            f"test_criterion_coverage.py LOCKED, AND this test in lockstep.")
 
     def test_dashboard_slip_threshold_matches_gate_deploy_threshold(self):
         """DRIFT pin: scripts/forward_paper_status.sh's slip gate must use

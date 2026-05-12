@@ -117,24 +117,20 @@ MAX_SLIP_BPS = 20.0
 MAX_SINGLE_SYM_PCT = 40.0
 HONEST_ANNUAL_USD = 69000.0
 HONEST_FRACTION = 0.60
-# BTC-HODL benchmark notional. CLAUDE.md ("Deploy real money..." criteria
-# line 5) specifies $32k from the deployed-32 era (32 symbols × $1k stake).
-# CURRENT REALITY: deployed fleet is 16 engines × $1k = $16k notional. The
-# locked criterion was written before the deployed-32 → deployed-16 reduction
-# and was not updated. Honoring the locked spec value ($32k) means the gate
-# fail-CLOSES relative to a fair-comparison ($16k), making the bar 2× harder.
+# BTC-HODL benchmark notional. Amended 2026-05-12 (D2) to $16k matching
+# the current deployed-16 fleet × $1k stake reality — see
+# results/btc_hodl_notional_amendment_2026-05-12.md. Pre-amendment the
+# value was $32k carried over from the deployed-32 era; the fleet shrank
+# to 16 between ship date (2026-05-04) and pre-reg lock (2026-05-08), and
+# the locked text was not updated in that window.
 #
-# Operator may override via BENCHMARK_NOTIONAL env to reconcile with current
-# fleet size (mirrors scripts/forward_paper_status.sh which has the same
-# env override). Default stays at the locked $32k value pending operator
-# resolution of the spec-vs-reality question (pre-registration discipline:
-# locked criterion stands until rule-owner updates it).
-#
-# Dashboard ↔ gate consistency: pre-fix the dashboard had this env override
-# but the formal gate did not — operator could override the dashboard view
-# without the gate matching. Aligning here closes that operator-visible
-# inconsistency.
-BENCHMARK_NOTIONAL = float(os.environ.get("BENCHMARK_NOTIONAL", "32000"))
+# Apples-to-apples comparison: $16k in this altcoin strategy vs $16k in
+# BTC-HODL over the same window. Operator may inspect the historical-$32k
+# bar via `BENCHMARK_NOTIONAL=32000 stage_promotion_check.py` — useful for
+# post-promotion retrospectives or what-if analysis. Dashboard
+# (forward_paper_status.sh) mirrors the env override so the two stay
+# aligned regardless of operator override.
+BENCHMARK_NOTIONAL = float(os.environ.get("BENCHMARK_NOTIONAL", "16000"))
 
 # ── Modeled costs (Binance USDT-M Futures Regular tier, per CLAUDE.md) ─────
 # Round-trip taker fee: 5 bp/side × 2 sides = 10 bp.
@@ -380,7 +376,7 @@ def check_btc_hodl(trades: list[Trade]) -> Criterion:
 
     HODL helper emits TSV: cum_strategy cum_hodl cum_delta n_windows
     n_underperf_pairs kill_triggered warning."""
-    name = "5. PnL beats BTC-HODL ($32k notional)"
+    name = f"5. PnL beats BTC-HODL (${int(BENCHMARK_NOTIONAL/1000)}k notional)"
     if not trades:
         return Criterion(name, ">$0 vs HODL", "no trades", "PENDING")
 

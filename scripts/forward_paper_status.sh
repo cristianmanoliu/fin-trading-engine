@@ -47,10 +47,13 @@ MAX_SLIP_BPS=20  # Realized stop-side slip ≤ 20bp on losing-trade subsample (D
 # the actual cost-breakeven is ~81bp. NOT used for deploy-readiness PASS;
 # kept here for future advisory display.
 KILL_MAX_SLIP_BP=25
-# BTC-HODL benchmark notional: CLAUDE.md specifies $32k from the deployed-32
-# era. Current deployed is 16 engines × $1k stake = $16k. Override via env if
-# you want to reconcile with current notional. Kill-window threshold $5k absolute.
-BENCHMARK_NOTIONAL="${BENCHMARK_NOTIONAL:-32000}"
+# BTC-HODL benchmark notional. Amended 2026-05-12 (D2) to $16k matching the
+# deployed-16 fleet × $1k stake — see results/btc_hodl_notional_amendment_2026-05-12.md.
+# Pre-amendment $32k carried over from deployed-32 era (stale drafting). The
+# env override is preserved for post-promotion retrospectives + what-if
+# analysis. Kill-window threshold $5k absolute (separate amendment if it
+# should scale with notional; out of scope for D2).
+BENCHMARK_NOTIONAL="${BENCHMARK_NOTIONAL:-16000}"
 KILL_HODL_WINDOW_USD="${KILL_HODL_WINDOW_USD:-5000}"
 HODL_HELPER="$(cd "$(dirname "$0")" && pwd)/btc_hodl_benchmark.py"
 

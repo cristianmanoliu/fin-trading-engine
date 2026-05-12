@@ -31,7 +31,7 @@ treat warning as informational; numeric fields stay 0 in that case.
 
 Usage:
   cat closes.tsv | btc_hodl_benchmark.py \
-      --benchmark-notional 32000 \
+      --benchmark-notional 16000 \
       --kill-threshold-usd 5000
 
 Exit code: 0 on success or runtime warning (caller reads warning field

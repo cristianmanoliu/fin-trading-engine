@@ -58,7 +58,7 @@ LOCKED: dict[str, tuple[float, str]] = {
     "HONEST_ANNUAL_USD":   (69000.0, "deploy criterion 4: pro-rated annual base"),
     "HONEST_FRACTION":     (0.60,    "deploy criterion 4: 60% of pro-rated"),
     "MAX_SINGLE_SYM_PCT":  (40.0,    "deploy criterion 6: no single sym >40% PnL"),
-    "BENCHMARK_NOTIONAL":  (32000.0, "deploy criterion 5: BTC-HODL $32k notional (T13a pending)"),
+    "BENCHMARK_NOTIONAL":  (16000.0, "deploy criterion 5: BTC-HODL $16k notional (D2 amendment 2026-05-12 — deployed-16 fleet reality)"),
     "KILL_MAX_SLIP_BP":    (25,      "advisory kill criterion: slip >25bp"),
     "MIN_WR_PCT":          (14,      "advisory kill criterion: WR <14% over ≥150 trades"),
     "TARGET_RR_FALLBACK":  (6.0,     "entry detector fallback when TargetRR<=0 (T14)"),
@@ -282,10 +282,11 @@ class LockedValuesSanityTest(unittest.TestCase):
         self.assertEqual(LOCKED["MAX_SINGLE_SYM_PCT"][0], 40.0,
             "CLAUDE.md: 'No single symbol contributes >40% of cumulative live PnL'")
 
-    def test_benchmark_notional_is_32k(self):
-        self.assertEqual(LOCKED["BENCHMARK_NOTIONAL"][0], 32000.0,
-            "CLAUDE.md: '$32k notional' (T13a pending operator decision "
-            "about deployed-32 vs deployed-16 reality)")
+    def test_benchmark_notional_is_16k(self):
+        self.assertEqual(LOCKED["BENCHMARK_NOTIONAL"][0], 16000.0,
+            "CLAUDE.md (amended 2026-05-12 — D2): '$16k notional' matches "
+            "deployed-16 fleet × $1k stake reality. See "
+            "results/btc_hodl_notional_amendment_2026-05-12.md.")
 
     def test_kill_slip_threshold_is_25(self):
         self.assertEqual(LOCKED["KILL_MAX_SLIP_BP"][0], 25,
