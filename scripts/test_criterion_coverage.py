@@ -134,6 +134,20 @@ SITES: dict[str, list[tuple[str, str]]] = {
         # value remains 6.0.
         ("pkg/strategy/entry.go",
          r"(?:targetMult|rr)\s*=\s*6\.0\b"),
+        # cmd/engine spec-divergence detector (D5 — 2026-05-12). The
+        # `lockedTargetRR` constant gates the runtime WARN that fires when
+        # YAML/CLI propagation diverges from the locked candidate. Pin it
+        # to 6.0 so any future relock of the candidate strategy forces
+        # this site to move in lockstep with the LOCKED dict.
+        ("cmd/engine/main.go",
+         r"^const lockedTargetRR\s*=\s*([\d.]+)"),
+        # configs/default.yaml is what `go run ./cmd/engine` loads without
+        # --config. D5 (2026-05-12) refreshed it from Option-C-era 2.0 to
+        # match the locked 6.0 candidate. Per-symbol YAMLs (configs/btcusdt.yaml
+        # etc.) deliberately stay at 5.0 (Option-C historical reproducibility)
+        # and are NOT pinned here.
+        ("configs/default.yaml",
+         r"^\s*target_rr:\s*([\d.]+)"),
     ],
     "ALPHA_DRIFT": [
         ("scripts/live_vs_backtest_drift.py",

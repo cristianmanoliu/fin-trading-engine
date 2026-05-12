@@ -10,7 +10,7 @@ strategy:
   absorption_candles: 2       # consecutive absorption candles required
   stop_buffer_pct: 0.001      # 0.1% beyond wick extreme for stop
   min_rr: 1.0                 # minimum R:R filter (0 = disabled)
-  target_rr: 2.0              # fixed take-profit multiplier (0 = use VWAP)
+  target_rr: 6.0              # locked candidate strategy: 6:1 RR (CLAUDE.md). Was 2.0 from Option-C era; refreshed 2026-05-12 (D5) to match live deploy. Per-symbol YAMLs stay at 5.0 (Option-C historical reproducibility). 0 falls back to 6.0 in entry.go (T14).
   momentum_mode: false        # Option A: enter on 5m momentum candles in 4H bias direction
   vwap_deviation_mode: false  # Option B: fade price stretched from session VWAP
   vwap_deviation_pct: 0.003   # 0.3% away from VWAP to trigger a deviation entry

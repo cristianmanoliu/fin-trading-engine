@@ -78,28 +78,28 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Capture the YAML-loaded value BEFORE CLI override resolution so the
+	// divergence check can report both inputs. After this, cfg.Strategy.TargetRR
+	// is mutated to the effective post-override value used downstream.
+	yamlTargetRR := cfg.Strategy.TargetRR
 	if *targetRROverride > 0 {
 		cfg.Strategy.TargetRR = *targetRROverride
 	}
 
-	// TargetRR validation: detect the silent-fallback risk path. If
-	// cfg.Strategy.TargetRR ends up <= 0 after YAML load + CLI override,
-	// the strategy's entry-detector fallback fires (now aligned to 6.0
-	// across all check_* functions). Surfaced as WARN — not blocking —
-	// because the fallback IS the locked spec value, but the operator
-	// should know they're relying on fallback semantics rather than
-	// explicit config. Closes the silent-misconfig fail-open shape that
-	// would otherwise let an operator deploy thinking they had explicit
-	// 6:1 RR when actually the YAML+CLI didn't propagate any value.
-	if cfg.Strategy.TargetRR <= 0 {
-		slog.Warn("TargetRR is unset or non-positive — entry detector will fall back to 6.0 (locked spec)",
-			"symbol", cfg.Symbol, "config_value", cfg.Strategy.TargetRR,
-			"yaml_path", *cfgPath, "cli_override", *targetRROverride)
+	// Spec-divergence detection. Pre-D5 (2026-05-12) this only fired on
+	// final <= 0 (silent fallback to entry.go's 6.0 default). D5 extends to
+	// fire on ANY divergence from CLAUDE.md's locked 6.0 spec — catches the
+	// Option-C-era per-symbol YAML (target_rr: 5.0) leaking through when an
+	// operator forgets the --target-rr 6.0 CLI override. Forward-paper data
+	// is silently invalidated under that pathology.
+	//
+	// Non-blocking by design: even with divergence, the engine still runs.
+	// The WARN gives operators a chance to notice + kill before forward-paper
+	// data gets contaminated.
+	if msg := targetRRDivergence(yamlTargetRR, *targetRROverride, *cfgPath); msg != "" {
+		slog.Warn("TargetRR divergence", "symbol", cfg.Symbol, "details", msg)
 		_ = notifier.SendStructured(context.Background(), notify.SeverityWarn,
-			fmt.Sprintf("CONFIG WARN on %s — TargetRR=%.2f (will fall back to 6.0 locked spec)\n"+
-				"YAML: %s\nCLI --target-rr override: %.2f\n"+
-				"Set target_rr explicitly in YAML or pass --target-rr to silence.",
-				cfg.Symbol, cfg.Strategy.TargetRR, *cfgPath, *targetRROverride))
+			fmt.Sprintf("CONFIG WARN on %s — %s", cfg.Symbol, msg))
 	}
 
 	if *signalTFOverride != "" {
@@ -760,4 +760,50 @@ func validateExecutorArgs(executorMode, layer3JournalDir string) error {
 		}
 	}
 	return nil
+}
+
+// lockedTargetRR mirrors the CLAUDE.md candidate-strategy spec ("fixed 6:1
+// R:R take-profit") + the 7 entry.go fallback sites (T14 alignment) +
+// scripts/test_criterion_coverage.py's LOCKED["TARGET_RR_FALLBACK"]. If
+// the locked candidate ever changes, all four locations move in lockstep.
+const lockedTargetRR = 6.0
+
+// targetRRDivergence returns an operator-visible warning message when the
+// final TargetRR diverges from the CLAUDE.md locked spec, or empty when
+// the configuration matches.
+//
+// Two pathologies it surfaces:
+//
+//  1. final <= 0  — YAML loaded an empty/missing value AND no CLI override.
+//     entry.go's fallback fires (now 6.0 post-T14), so the live RR matches
+//     locked spec ANYWAY, but the operator's mental model assumed explicit
+//     config propagation. Worth surfacing as a config-hygiene WARN.
+//
+//  2. final != lockedTargetRR (and > 0) — operator is deliberately running
+//     a non-locked RR. Could be intentional research, OR an Option-C-era
+//     per-symbol YAML (target_rr: 5.0) leaking through because the deploy
+//     forgot the --target-rr 6.0 override. The latter would silently
+//     invalidate forward-paper data.
+//
+// Returning the warning text from a pure function (rather than calling
+// slog.Warn / notifier directly) lets the validate_test.go suite enumerate
+// the full matrix without setting up a logging context — and lets main()
+// keep all the side-effect plumbing in one place.
+func targetRRDivergence(yamlValue, cliOverride float64, yamlPath string) string {
+	final := yamlValue
+	if cliOverride > 0 {
+		final = cliOverride
+	}
+	if final <= 0 {
+		return fmt.Sprintf("TargetRR=%.2f (YAML %s, CLI --target-rr=%.2f) — will fall back to %.1f (locked spec). "+
+			"Set target_rr explicitly in YAML or pass --target-rr to silence.",
+			final, yamlPath, cliOverride, lockedTargetRR)
+	}
+	if final != lockedTargetRR {
+		return fmt.Sprintf("TargetRR=%.2f (YAML %s, CLI --target-rr=%.2f) — diverges from CLAUDE.md locked spec %.1f. "+
+			"Forward-paper data is invalidated if the deployed strategy uses a non-locked RR. "+
+			"Pass --target-rr=%.1f to align, or update the YAML.",
+			final, yamlPath, cliOverride, lockedTargetRR, lockedTargetRR)
+	}
+	return ""
 }

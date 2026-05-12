@@ -122,3 +122,82 @@ func TestValidateExecutorArgs_NoLayer3_NoCredCheck(t *testing.T) {
 		t.Errorf("stub mode without Layer 3 should not require creds, got: %v", err)
 	}
 }
+
+// TestTargetRRDivergence pins the full input matrix for the D5 (2026-05-12)
+// spec-divergence detector. The function is pure (no side effects, no
+// logger/notifier dependency) so the matrix is dense.
+//
+// Locked invariants verified:
+//
+//   - YAML 6.0 + no CLI → no warning (production path on configs/default.yaml)
+//   - YAML 6.0 + CLI 6.0 → no warning (production path on per-symbol YAMLs)
+//   - YAML 5.0 + no CLI → WARN (Option-C YAML leak; forward-paper invalidation risk)
+//   - YAML 5.0 + CLI 6.0 → no warning (deploy path: --target-rr 6.0 corrects)
+//   - YAML 2.0 + no CLI → WARN (pre-D5 default.yaml; backstops the D5 file fix)
+//   - YAML 0  + no CLI → WARN about fallback (T14's original silent-fallback path)
+//   - YAML 0  + CLI 6.0 → no warning (CLI propagates locked value)
+//   - YAML 6.0 + CLI 4.0 → WARN (operator deliberately running non-locked)
+//   - YAML negative → WARN about fallback (defensive — same shape as 0)
+//
+// Format invariants: WARN text must NAME the locked value (6.0) AND the
+// YAML path. Operators reading Telegram alerts need both to act.
+func TestTargetRRDivergence(t *testing.T) {
+	cases := []struct {
+		name     string
+		yamlVal  float64
+		cliVal   float64
+		wantWarn bool
+		contains []string // substrings that must appear in the warning when wantWarn is true
+	}{
+		{"yaml6_cli0_production_default", 6.0, 0, false, nil},
+		{"yaml6_cli6_production_per_symbol", 6.0, 6.0, false, nil},
+		{"yaml5_cli0_option_c_leak", 5.0, 0, true,
+			[]string{"5.00", "6.0", "diverges", "test.yaml"}},
+		{"yaml5_cli6_deploy_corrected", 5.0, 6.0, false, nil},
+		{"yaml2_cli0_pre_d5_default", 2.0, 0, true,
+			[]string{"2.00", "6.0", "diverges"}},
+		{"yaml0_cli0_silent_fallback", 0, 0, true,
+			[]string{"fall back", "6.0"}},
+		{"yaml0_cli6_cli_propagates", 0, 6.0, false, nil},
+		{"yaml6_cli4_operator_research", 6.0, 4.0, true,
+			[]string{"4.00", "6.0", "diverges"}},
+		{"yaml_negative", -1.0, 0, true,
+			[]string{"fall back", "6.0"}},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			msg := targetRRDivergence(c.yamlVal, c.cliVal, "test.yaml")
+			if c.wantWarn && msg == "" {
+				t.Fatalf("expected warning but got empty (yaml=%.2f cli=%.2f)",
+					c.yamlVal, c.cliVal)
+			}
+			if !c.wantWarn && msg != "" {
+				t.Fatalf("expected no warning but got: %q (yaml=%.2f cli=%.2f)",
+					msg, c.yamlVal, c.cliVal)
+			}
+			for _, sub := range c.contains {
+				if !strings.Contains(msg, sub) {
+					t.Errorf("warning missing required substring %q\n  got: %q", sub, msg)
+				}
+			}
+		})
+	}
+}
+
+// TestTargetRRDivergence_LockedValue is the belt-and-suspenders check
+// matching scripts/test_criterion_coverage.py's LockedValuesSanityTest.
+// If lockedTargetRR changes here without CLAUDE.md + LOCKED dict + per-symbol
+// YAML notes updating in lockstep, the silent-drift recurrence risk returns.
+func TestTargetRRDivergence_LockedValue(t *testing.T) {
+	if lockedTargetRR != 6.0 {
+		t.Fatalf("lockedTargetRR=%.2f but CLAUDE.md locks the candidate strategy at 6:1 RR. "+
+			"A change here requires synchronized updates to:\n"+
+			"  - CLAUDE.md '## Strategy status' Live config + locked RR text\n"+
+			"  - scripts/test_criterion_coverage.py LOCKED['TARGET_RR_FALLBACK']\n"+
+			"  - pkg/strategy/entry.go fallback constants (7 sites)\n"+
+			"  - configs/default.yaml target_rr (D5 — should match locked)\n"+
+			"  - This test",
+			lockedTargetRR)
+	}
+}
