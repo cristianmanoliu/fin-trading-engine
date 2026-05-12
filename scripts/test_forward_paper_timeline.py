@@ -186,6 +186,17 @@ class RenderTest(unittest.TestCase):
         out = fpt.render(p)
         self.assertIn("well below historical", out.lower())
 
+    def test_low_rate_includes_regime_caveat(self):
+        # Added 2026-05-12: low-rate note must carry the regime caveat so the
+        # operator doesn't over-anchor on the projected STAGE_1 date during a
+        # bullish/sideways regime where slow-EMA + bias gate is structurally
+        # selective. See memory/trade_rate_investigation_2026-05-12.md.
+        now = fpt.FORWARD_PAPER_START + timedelta(days=30)
+        p = fpt.project(trades_closed=15, now=now)  # 0.5/d (~42% of 1.18)
+        out = fpt.render(p).lower()
+        self.assertIn("regime caveat", out)
+        self.assertIn("all-regime average", out)
+
     def test_zero_trades_advisory(self):
         now = fpt.FORWARD_PAPER_START + timedelta(days=10)
         p = fpt.project(trades_closed=0, now=now)

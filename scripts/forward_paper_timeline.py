@@ -235,6 +235,16 @@ def render(p: Projection, quiet: bool = False) -> str:
             lines.append(f"  ({p.observed_rate_per_day:.2f}/d vs historical {HISTORICAL_FLEET_RATE}/d).")
             lines.append("  Trade-gate projection may slip if rate doesn't recover.")
             lines.append("")
+            # Regime caveat — added 2026-05-12 after the trade-rate investigation
+            # confirmed slow-EMA + per-candle bias gate is highly regime-sensitive.
+            # See memory/trade_rate_investigation_2026-05-12.md. Prevents
+            # over-anchoring on this projection during a bullish/sideways regime
+            # where the rate is structurally low.
+            lines.append(f"  Regime caveat: {HISTORICAL_FLEET_RATE}/d is the 5y all-regime average;")
+            lines.append("  the EMA+bias gate fires more in bear/trending markets than")
+            lines.append("  sideways/bullish ones. Reassess after regime shift, not after")
+            lines.append("  fixed elapsed days.")
+            lines.append("")
         elif p.observed_rate_per_day > HISTORICAL_FLEET_RATE * 1.3:
             lines.append("  Note: observed rate well above historical fleet rate.")
             lines.append("  Trade-gate projection may arrive sooner than expected.")
