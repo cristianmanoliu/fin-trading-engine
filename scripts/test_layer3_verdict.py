@@ -536,5 +536,130 @@ class Layer3TopologyRegressionTest(unittest.TestCase):
                 f"default shadow-exclusion broken.\nout:\n{out}")
 
 
+class JournalFieldsMatchWriterTest(unittest.TestCase):
+    """L3-extension (2026-05-12): the writer-equals-fixture lens (L2-7) applied
+    to the Layer 3 journal-schema contract.
+
+    The wrapper reads `select(.event=="open") | .ts` from journal files; the
+    test fixture (write_pair) generates JSON with hardcoded field names —
+    event/ts/symbol/side/entry/exit/stop/target/outcome/pnl_usd/reason — and
+    both are silently kept in sync with each other but NOT against the live
+    writer (pkg/execution/stub.go's journalEntry struct + the canonical
+    Event: "open"/"close" assignments in stub.go AND binance_live.go).
+
+    If a future refactor renames any field tag (e.g. `event` → `event_type`)
+    or any event value, write_pair() also uses the old name and the bash
+    tests still pass — but in production the wrapper's jq filter sees zero
+    matches against real journals, silently producing "no open events" → exit
+    3 with a misleading "schema may have changed" message instead of an
+    explicit drift alert.
+
+    Pattern family: writer-equals-fixture drift, locked first in
+    test_layer2_smoke.py::FixtureMsgVsEngineEmitTest. This is the second
+    paired implementation of the pin. Adjacent to writer-equals-model
+    (docs/AUDIT_LENS.md adjacent-pattern, 2026-05-10-pm)."""
+
+    STRUCT_SOURCE = REPO / "pkg" / "execution" / "stub.go"
+    EVENT_WRITERS = [
+        REPO / "pkg" / "execution" / "stub.go",
+        REPO / "pkg" / "execution" / "binance_live.go",
+    ]
+
+    # JSON field names referenced by EITHER write_pair() in this test file
+    # OR the layer3_verdict.sh jq filter. Each MUST exist as `json:"FIELD"`
+    # (or `json:"FIELD,omitempty"` etc.) in the journalEntry struct.
+    REQUIRED_FIELDS = [
+        "event",     # script jq + fixture (.event=="open")
+        "symbol",    # fixture, journal_diff key
+        "ts",        # script jq + fixture (.ts for oldest-open derivation)
+        "side",      # fixture
+        "entry",     # fixture
+        "exit",      # fixture (close events)
+        "stop",      # fixture
+        "target",    # fixture
+        "outcome",   # fixture (close events)
+        "pnl_usd",   # fixture (drives the threshold diff)
+        "reason",    # fixture
+    ]
+
+    @classmethod
+    def setUpClass(cls):
+        if not cls.STRUCT_SOURCE.exists():
+            raise unittest.SkipTest(f"writer source missing: {cls.STRUCT_SOURCE}")
+        cls.struct_text = cls.STRUCT_SOURCE.read_text(encoding="utf-8")
+        cls.writer_texts = {}
+        for p in cls.EVENT_WRITERS:
+            if not p.exists():
+                raise unittest.SkipTest(f"writer source missing: {p}")
+            cls.writer_texts[p.name] = p.read_text(encoding="utf-8")
+        cls.script_text = SCRIPT.read_text(encoding="utf-8")
+        cls.test_text = Path(__file__).read_text(encoding="utf-8")
+
+    def test_each_required_field_has_json_tag_in_writer(self):
+        """Every field name used by write_pair() OR the layer3_verdict.sh jq
+        filter must exist as a `json:"FIELD"` tag (or variant) in the
+        journalEntry struct."""
+        import re
+        for field in self.REQUIRED_FIELDS:
+            pattern = rf'json:"{re.escape(field)}(?:,|")'
+            self.assertRegex(
+                self.struct_text, pattern,
+                f"field {field!r} used by test fixture or layer3_verdict.sh "
+                f"but no `json:\"{field}\"` (or variant) tag found in "
+                f"{self.STRUCT_SOURCE.name} — writer-equals-fixture drift; "
+                f"the fixture stayed in sync with the script but the live "
+                f"writer renamed/removed the tag. Lockstep update required.",
+            )
+
+    def test_script_jq_filter_references_event_field(self):
+        """Confirm the script still reads the .event field. If a future refactor
+        switches to `.type` etc., this assertion + REQUIRED_FIELDS must update
+        in lockstep with the writer."""
+        self.assertIn(
+            'select(.event=="open")', self.script_text,
+            "layer3_verdict.sh jq filter no longer reads .event — "
+            "update REQUIRED_FIELDS + the writer in lockstep with the script.",
+        )
+
+    def test_event_value_open_is_emitted_by_every_writer(self):
+        """The literal Event: "open" assignment must appear in EACH writer
+        (Stub + BinanceLive). A rename in one but not both would surface
+        downstream as SIGNAL_DIVERGENCE (exit 2) rather than as the actual
+        cause (field-value drift), routing operators to the wrong diagnostic."""
+        for name, text in self.writer_texts.items():
+            self.assertRegex(
+                text, r'Event:\s*"open"',
+                f"{name} no longer assigns Event: \"open\" — the wrapper's "
+                f"jq filter `select(.event==\"open\")` would silently match "
+                f"zero rows from this writer's journal in production.",
+            )
+
+    def test_event_value_close_is_emitted_by_every_writer(self):
+        """Close-event literal must appear in EACH writer too — journal_diff
+        pairs open/close events by key; a rename of \"close\" breaks pairing
+        and surfaces as SIGNAL_DIVERGENCE with no signal-divergent trades."""
+        for name, text in self.writer_texts.items():
+            self.assertRegex(
+                text, r'Event:\s*"close"',
+                f"{name} no longer assigns Event: \"close\" — close-event "
+                f"pairing in journal_diff breaks silently against this "
+                f"writer's journal.",
+            )
+
+    def test_fixture_event_values_present_in_fixture(self):
+        """Belt-and-braces: the test fixture (write_pair) itself must still
+        emit the canonical event values. Pinning here means a fixture-only
+        rename (without updating the writer) also fires this test."""
+        self.assertIn(
+            '"event": "open"', self.test_text,
+            "test fixture write_pair() no longer emits \"event\": \"open\" "
+            "— rename in lockstep with the writer + script jq filter.",
+        )
+        self.assertIn(
+            '"event": "close"', self.test_text,
+            "test fixture write_pair() no longer emits \"event\": \"close\".",
+        )
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
