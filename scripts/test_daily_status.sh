@@ -107,6 +107,37 @@ assert_eq "$(aggregate_exit 3 1 1 1)" "1" "OPERATOR_REVIEW + DEGRADED → WARN (
 # LIMBO sentinel "-" (not invoked) shouldn't crash.
 assert_eq "$(aggregate_exit - - 1 1)" "0" "unset LIMBO/lag default → OK"
 
+# ── extract_stage_1_compact (added 2026-05-12 with timeline integration) ───
+echo
+echo "── extract_stage_1_compact ──"
+
+# Empty input → empty output (no false-positive 'STAGE_1=' appendage).
+assert_eq "$(extract_stage_1_compact "")" "" "empty input → empty output"
+
+# Basic quiet line WITHOUT baseline scenario (rate=historical case).
+basic_line="forward-paper: day 7 / 0 trades / rate=1.18/d (historical_fleet) / binding=trade-count / STAGE_1 earliest 2026-09-09 (120d)"
+assert_eq "$(extract_stage_1_compact "$basic_line")" "120d" \
+    "basic line → 120d"
+
+# Quiet line WITH baseline + spread suffix (observed-rate case). The
+# extractor must capture the PRIMARY scenario's days, not the baseline's,
+# even though both appear in the same line.
+dual_line="forward-paper: day 30 / 5 trades / rate=0.17/d (observed) / binding=trade-count / STAGE_1 earliest 2028-10-21 (870d) / baseline 1.18/d → 2026-09-09 (+773d spread)"
+assert_eq "$(extract_stage_1_compact "$dual_line")" "870d" \
+    "dual-projection line → primary 870d (not baseline 97d, not spread 773d)"
+
+# Malformed line missing STAGE_1 marker → empty output (defensive).
+malformed="some other tool output without the expected token"
+assert_eq "$(extract_stage_1_compact "$malformed")" "" \
+    "malformed line → empty (defensive)"
+
+# Line with STAGE_1 marker but unexpected paren content (operator wrote
+# a custom rate? regression where timeline emits a different format?)
+# → empty output, NOT a garbled annotation.
+bad_format="forward-paper: ... STAGE_1 earliest 2026-09-09 (TBD)"
+assert_eq "$(extract_stage_1_compact "$bad_format")" "" \
+    "non-numeric days → empty (won't append STAGE_1=TBD to footer)"
+
 # ── CLI parse + flow ────────────────────────────────────────────────────────
 echo
 echo "── CLI flag parsing ──"
@@ -131,6 +162,60 @@ rc=$?
 set -e
 assert_eq "$rc" "3" "--local + positional VPS → INPUT_ERR"
 assert_contains "$err" "mutually exclusive" "conflict diagnostic surfaces"
+
+# ── End-to-end QUIET integration (timeline ↔ daily_status, 2026-05-12) ────
+echo
+echo "── QUIET footer integrates STAGE_1=Nd ──"
+
+# Build a synthetic local journal so the timeline section has data to
+# project from. Then invoke daily_status --local --quiet and assert the
+# aggregate footer contains STAGE_1=Nd. Run in a tempdir so we don't
+# touch repo state.
+INT_DIR=$(mktemp -d)
+mkdir -p "$INT_DIR/logs/journal"
+python3 -c "
+import json
+import datetime as dt
+start = dt.datetime(2026, 5, 5, 20, 6)
+with open('$INT_DIR/logs/journal/BTCUSDT-2026-05.jsonl', 'w') as f:
+    for i in range(3):
+        ts_open = (start + dt.timedelta(days=i, hours=2)).strftime('%Y-%m-%dT%H:%M:%SZ')
+        ts_close = (start + dt.timedelta(days=i, hours=3)).strftime('%Y-%m-%dT%H:%M:%SZ')
+        f.write(json.dumps({'event':'open','symbol':'BTCUSDT','ts':ts_open,
+                            'side':'LONG','entry':100,'stop':99,'target':106}) + '\n')
+        f.write(json.dumps({'event':'close','symbol':'BTCUSDT','ts':ts_close,
+                            'side':'LONG','entry':100,'exit':106,
+                            'outcome':'TARGET','pnl_usd':100}) + '\n')
+"
+set +e
+quiet_out=$(cd "$INT_DIR" && bash "$DAILY_STATUS" --local --quiet 2>&1)
+quiet_rc=$?
+set -e
+rm -rf "$INT_DIR"
+
+# Don't assert exit code precisely — depends on LIMBO state which depends
+# on synthetic-vs-real-snapshot history; assertion is that STAGE_1=Nd
+# appears in the footer.
+assert_contains "$quiet_out" "STAGE_1=" \
+    "QUIET footer includes STAGE_1=Nd when timeline projects successfully"
+assert_contains "$quiet_out" "daily_status:" \
+    "QUIET footer still has daily_status: prefix"
+
+# Negative case: no journal data → timeline exits 3 (input error) →
+# extract_stage_1_compact returns empty → no STAGE_1= appended. Run
+# from a tempdir with NO logs/ to exercise this path.
+EMPTY_DIR=$(mktemp -d)
+set +e
+empty_out=$(cd "$EMPTY_DIR" && bash "$DAILY_STATUS" --local --quiet 2>&1)
+set -e
+rmdir "$EMPTY_DIR"
+if [[ "$empty_out" == *"STAGE_1="* ]]; then
+    FAIL=$((FAIL + 1))
+    FAIL_LINES+=("  ✗ empty-journal case: footer should NOT contain STAGE_1= when timeline can't project, but got: $empty_out")
+else
+    PASS=$((PASS + 1))
+    echo "  ✓ no-journal-data → footer omits STAGE_1= (defensive)"
+fi
 
 # ── Final ───────────────────────────────────────────────────────────────────
 echo

@@ -12,8 +12,10 @@
 #   2. lag_summary --quiet      — fleet-wide source-to-receipt p99 one-liner
 #   3. realized_cost_trajectory — per-trade fee/slip trend
 #   4. forward_paper_trajectory — multi-snapshot trend (if ≥2 snapshots)
-#   5. aggregate footer         — single-line verdict mirroring the LIMBO
-#                                  rule + the lag tier
+#   5. forward_paper_timeline   — STAGE_1 dual-projection (observed + baseline)
+#   6. LIMBO resolution         — final go/no-go verdict
+#   ── aggregate footer         — single-line verdict mirroring the LIMBO
+#                                  rule + the lag tier + STAGE_1=Nd compact
 #
 # Lens-as-design-tool: every section invocation has explicit failure
 # semantics. A section that fails to invoke (binary missing / ssh down)
@@ -119,6 +121,39 @@ aggregate_exit() {
     echo "$worst"
 }
 
+# Extract the STAGE_1 days-remaining substring from a timeline --quiet
+# line for the compact aggregate footer annotation. The quiet format is:
+#   forward-paper: day 7 / 0 trades / rate=1.18/d (historical_fleet) / \
+#     binding=trade-count / STAGE_1 earliest 2026-09-09 (120d) [/ baseline ...]
+# We want just "STAGE_1=120d" — strip the date + match the (Nd) parens.
+# Returns empty string if the line doesn't match (unexpected format).
+#
+# Pure string-helper — no I/O, no env state. Lives above the BASH_SOURCE
+# guard so test_daily_status.sh can exercise it directly.
+extract_stage_1_compact() {
+    local quiet="$1"
+    [[ -z "$quiet" ]] && return
+    # Cut at "STAGE_1 earliest " then take the (Nd) parens that follow.
+    # `${var#*pattern}` works on both BSD bash 3.2 (macOS) and GNU bash 4+
+    # (Linux CI) so no GNU-only constructs needed. If "STAGE_1 earliest "
+    # isn't present, the # operator leaves the string unchanged — which
+    # means the regex sanity-check at the end catches the bad form.
+    if [[ "$quiet" != *"STAGE_1 earliest "* ]]; then
+        return
+    fi
+    local tail
+    tail="${quiet#*STAGE_1 earliest }"
+    # Now tail starts with "YYYY-MM-DD (Nd) ..." — extract the (Nd).
+    # Drop everything before "(", drop trailing ")" + anything after.
+    local in_parens="${tail#*\(}"
+    local days="${in_parens%%\)*}"
+    # Sanity-check: should be "Nd" form. Reject if it has whitespace
+    # or doesn't end in 'd'.
+    if [[ "$days" =~ ^[0-9]+d$ ]]; then
+        echo "$days"
+    fi
+}
+
 # Test entry-point guard: when sourced (BASH_SOURCE != $0), stop here so
 # tests can call helpers directly without invoking the main flow.
 if [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
@@ -154,6 +189,7 @@ LAG_SUMMARY="${SCRIPT_DIR}/lag_summary.sh"
 RESOLUTION_PY="${SCRIPT_DIR}/forward_paper_resolution.py"
 COST_TRAJECTORY_PY="${SCRIPT_DIR}/realized_cost_trajectory.py"
 SNAPSHOT_TRAJECTORY_PY="${SCRIPT_DIR}/forward_paper_trajectory.py"
+TIMELINE_PY="${SCRIPT_DIR}/forward_paper_timeline.py"
 
 # Required helpers — refuse to start if missing. These are part of the
 # script's source-of-truth contract; their absence is a packaging error
@@ -261,6 +297,56 @@ run_snapshot_trajectory() {
     esac
 }
 
+# Run forward_paper_timeline.py and capture both verbose output (for the
+# section render) and the quiet one-liner (for the QUIET aggregate footer's
+# STAGE_1=Nd annotation). Local mode passes --journal-dir; VPS mode passes
+# --vps (the script defaults --journal-dir to /var/log/paper-live/journal,
+# the canonical VPS path).
+#
+# Soft-fail: timeline is informational not a gate. If the helper is missing
+# or the journal-dir is unreadable, the section renders a diagnostic but
+# does NOT escalate aggregate_exit — distinct from the cost/traj sections
+# which DO surface to aggregate_exit because their failure shapes are
+# "helper missing" (packaging error) and "ssh down" (operator-fixable
+# infra). Timeline failure on a fresh-deploy ("no journal yet") is a
+# routine state, not an alarm.
+TIMELINE_VERBOSE=""
+TIMELINE_QUIET=""
+run_timeline() {
+    if [[ ! -f "$TIMELINE_PY" ]]; then
+        TIMELINE_VERBOSE="(timeline helper missing — skipping projection)"
+        TIMELINE_QUIET=""
+        return
+    fi
+    local args=()
+    if [[ "$LOCAL_MODE" == "1" ]]; then
+        args=(--journal-dir ./logs/journal)
+    else
+        args=(--vps "$VPS_TARGET")
+    fi
+    local rc=0
+    set +e
+    TIMELINE_VERBOSE=$(python3 "$TIMELINE_PY" "${args[@]}" 2>&1)
+    rc=$?
+    set -e
+    if [[ "$rc" != "0" ]]; then
+        # Render exists but the projection couldn't be computed (input
+        # error, no journals, etc.). Keep verbose for the section + clear
+        # quiet so the aggregate footer skips the STAGE_1=Nd annotation
+        # instead of appending a garbled value.
+        TIMELINE_QUIET=""
+        return
+    fi
+    # Quiet pass: same args plus --quiet for the one-liner.
+    set +e
+    TIMELINE_QUIET=$(python3 "$TIMELINE_PY" "${args[@]}" --quiet 2>/dev/null)
+    rc=$?
+    set -e
+    if [[ "$rc" != "0" ]]; then
+        TIMELINE_QUIET=""
+    fi
+}
+
 # Re-run forward_paper_resolution to get the LIMBO exit code directly
 # (forward_paper_status invokes it internally but doesn't propagate the
 # exit code; we need it for the aggregate footer + script exit code).
@@ -286,6 +372,7 @@ run_resolution() {
 if [[ "$QUIET" == "1" ]]; then
     run_lag_summary
     run_resolution
+    run_timeline
     AGG=$(aggregate_exit "$LIMBO_EXIT" "$LAG_EXIT" 1 1)
     case "$AGG" in
         0) verdict="OK" ;;
@@ -293,7 +380,11 @@ if [[ "$QUIET" == "1" ]]; then
         2) verdict="KILL" ;;
         3) verdict="INPUT_ERR" ;;
     esac
-    echo "daily_status: ${verdict} — LIMBO=$(limbo_label "$LIMBO_EXIT") lag=$(lag_label "$LAG_EXIT")"
+    # Append STAGE_1=Nd when timeline produced a valid quiet line.
+    stage_1_compact=$(extract_stage_1_compact "$TIMELINE_QUIET")
+    stage_1_suffix=""
+    [[ -n "$stage_1_compact" ]] && stage_1_suffix=" STAGE_1=${stage_1_compact}"
+    echo "daily_status: ${verdict} — LIMBO=$(limbo_label "$LIMBO_EXIT") lag=$(lag_label "$LAG_EXIT")${stage_1_suffix}"
     exit "$AGG"
 fi
 
@@ -324,7 +415,14 @@ echo "── 4. Multi-snapshot trajectory ──"
 run_snapshot_trajectory
 
 echo
-echo "── 5. LIMBO resolution ──"
+echo "── 5. STAGE_1 timeline projection ──"
+run_timeline
+if [[ -n "$TIMELINE_VERBOSE" ]]; then
+    echo "$TIMELINE_VERBOSE"
+fi
+
+echo
+echo "── 6. LIMBO resolution ──"
 run_resolution
 echo "  Verdict: $(limbo_label "$LIMBO_EXIT")"
 if [[ -n "$LIMBO_REASONS" ]]; then
