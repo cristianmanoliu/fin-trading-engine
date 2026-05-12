@@ -95,6 +95,17 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# L2-6: cmd/engine has NO --symbol CLI flag; symbol is sourced from the YAML
+# config's `symbol:` key. The harness's original `--symbol $SYMBOL` (pre-fix)
+# made cmd/engine exit rc=2 ("flag provided but not defined") within the
+# first 100ms — misclassified by phase 4 as "engine-crashed-early" / SMOKE_FAIL_OTHER.
+# Resolve SYMBOL → configs/<lowercased-symbol>.yaml here so the rest of the
+# script can reference a real config path. `tr` for lowercasing because macOS
+# default bash is 3.2 (no ${var,,}). Missing-config dies as SMOKE_FAIL_ENV
+# (operator misconfig), not _BUILD/_OTHER (which would mis-signal Telegram tier).
+SYMBOL_LOWER=$(echo "$SYMBOL" | tr '[:upper:]' '[:lower:]')
+SYMBOL_CONFIG="${ROOT}/configs/${SYMBOL_LOWER}.yaml"
+
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 die() {
@@ -144,6 +155,15 @@ This gate exists because mainnet credentials in this script would send real orde
 fi
 
 echo "✓ env vars present, testnet intent acknowledged"
+
+if [[ ! -f "$SYMBOL_CONFIG" ]] && [[ "${LAYER2_SMOKE_DRY_RUN:-0}" != "1" ]]; then
+    die "$EXIT_SMOKE_FAIL_ENV" "missing-symbol-config" \
+        "No per-symbol YAML at ${SYMBOL_CONFIG} for symbol $SYMBOL.
+cmd/engine sources the symbol from cfg.Symbol (the YAML's symbol: key); there is no --symbol CLI flag.
+Expected file: configs/${SYMBOL_LOWER}.yaml (e.g. configs/btcusdt.yaml for BTCUSDT).
+List available: ls configs/*.yaml | grep -v symbols.yaml"
+fi
+echo "✓ per-symbol config: $SYMBOL_CONFIG"
 
 # L2-1: `timeout` is a GNU coreutils binary not present on bare macOS. The
 # smoke uses it to bound the engine run; without it the run would either
@@ -203,7 +223,7 @@ echo "    log: $LOG_FILE"
 echo "    duration: ${DURATION_SEC}s"
 
 if [[ "${LAYER2_SMOKE_DRY_RUN:-0}" == "1" ]]; then
-    echo "  (DRY_RUN — would invoke: $ENGINE_BIN --config configs/default.yaml --symbol $SYMBOL --executor binance_live_testnet)"
+    echo "  (DRY_RUN — would invoke: $ENGINE_BIN --config $SYMBOL_CONFIG --executor binance_live_testnet)"
     # LAYER2_SMOKE_INJECT_LOG: when set under DRY_RUN, copy that file's
     # contents into the analysis target instead of writing the clean
     # synthetic log. Lets the test suite exercise the analysis-phase
@@ -217,11 +237,20 @@ if [[ "${LAYER2_SMOKE_DRY_RUN:-0}" == "1" ]]; then
         fi
         cp "${LAYER2_SMOKE_INJECT_LOG}" "$LOG_FILE"
     else
-        # Simulate a clean log for the analysis phase below
+        # Simulate a clean log for the analysis phase below.
+        # L2-7: msg fields MUST match the engine's actual emit points:
+        # - pkg/marketdata/binance.go:220 → "kline backfill complete"
+        # - pkg/marketdata/heartbeat.go   → "heartbeat"
+        # - cmd/engine/main.go (testnet path) → "TESTNET EXECUTOR ACTIVE — orders will be sent to Binance TESTNET (no real capital)"
+        # If a fixture msg drifts from real, DRY_RUN passes while the real
+        # smoke fails (or vice versa). Pattern observation: writer-equals-fixture
+        # drift, same family as gate-informationality (docs/AUDIT_LENS.md).
+        # Pin: test_layer2_smoke.py asserts the fixture strings appear in
+        # the live engine source.
         cat > "$LOG_FILE" <<EOF
-{"level":"INFO","msg":"backfill complete","symbol":"$SYMBOL"}
+{"level":"INFO","msg":"kline backfill complete","symbol":"$SYMBOL","hours":96,"klines":5760,"pages":4,"ticks":23040}
 {"level":"INFO","msg":"heartbeat","symbol":"$SYMBOL","ticks_since_last":3,"last_tick_age":5000000000}
-{"level":"INFO","msg":"TESTNET EXECUTOR ACTIVE — orders will be sent to Binance TESTNET (no real capital)"}
+{"level":"WARN","msg":"TESTNET EXECUTOR ACTIVE — orders will be sent to Binance TESTNET (no real capital)","symbol":"$SYMBOL"}
 EOF
     fi
 else
@@ -230,8 +259,7 @@ else
     # non-zero = engine crashed before the timer fired.
     set +e
     timeout "${DURATION_SEC}s" "$ENGINE_BIN" \
-        --config "${ROOT}/configs/default.yaml" \
-        --symbol "$SYMBOL" \
+        --config "$SYMBOL_CONFIG" \
         --executor binance_live_testnet \
         > "$LOG_FILE" 2>&1
     rc=$?
@@ -304,7 +332,7 @@ fi
 # runs. Same family as the locked silent-on-corrupt-input pattern.
 # Pinned by `test_no_backfill_exits_6` in test_layer2_smoke.py.
 N_HEARTBEATS=$(grep -cE '"msg":"heartbeat"' "$LOG_FILE" || true)
-HAS_BACKFILL=$(grep -cE '"msg":"backfill complete' "$LOG_FILE" || true)
+HAS_BACKFILL=$(grep -cE '"msg":"kline backfill complete' "$LOG_FILE" || true)
 
 # L2-4: gate PASS on backfill-complete, not just heartbeat. A failing
 # backfill still allows the engine to emit a "warming up (no ticks yet)"
@@ -340,8 +368,13 @@ echo "  $SUMMARY"
 echo "  Log:        $LOG_FILE"
 echo ""
 echo "  Layer 2 plumbing is verified. To accumulate fill data for the"
-echo "  cost-decomp informationality check, run a longer window:"
-echo "    $ENGINE_BIN --config configs/default.yaml --symbol $SYMBOL --executor binance_live_testnet"
+echo "  cost-decomp informationality check, run a longer window with the"
+echo "  locked production CLI overrides (CLAUDE.md 'Live config'):"
+echo "    $ENGINE_BIN --config $SYMBOL_CONFIG --executor binance_live_testnet \\"
+echo "      --signal-tf 4H --side-filter short --target-rr 6.0 --max-hold-hours 504 \\"
+echo "      --funding-csv-dir data/funding --fee-bps 10 --stop-slippage-bps 5"
 echo "  (background it; observe for 24-72h until at least one signal fires)"
+echo "  Without these overrides the run uses btcusdt.yaml's target_rr 5.0 — the"
+echo "  Option-C historical artifact — and produces non-production-faithful fills."
 echo ""
 exit "$EXIT_SMOKE_PASS"

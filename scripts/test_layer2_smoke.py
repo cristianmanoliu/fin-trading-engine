@@ -217,5 +217,132 @@ class LogAnalysisFailureModeTest(unittest.TestCase):
         self.assertIn("inject-log-missing", err)
 
 
+class SymbolConfigResolutionTest(unittest.TestCase):
+    """L2-6 (2026-05-12 first-real-run finding): cmd/engine has no --symbol
+    flag — symbol is sourced from the YAML's symbol: key. SYMBOL → config
+    mapping must (a) succeed for known per-symbol YAMLs, (b) fail loudly
+    via SMOKE_FAIL_ENV when no YAML exists for the requested symbol."""
+
+    def test_btcusdt_resolves_to_per_symbol_yaml(self):
+        """Happy path: BTCUSDT has configs/btcusdt.yaml; smoke reaches phase 4."""
+        code, out, err = run_smoke("BTCUSDT", env_extra={
+            "BINANCE_API_KEY": "fake",
+            "BINANCE_API_SECRET": "fake",
+            "LAYER2_SMOKE_ACKNOWLEDGE_TESTNET": "YES",
+            "LAYER2_SMOKE_DRY_RUN": "1",
+        })
+        self.assertEqual(code, 0, err)
+        self.assertIn("configs/btcusdt.yaml", out)
+        self.assertIn("per-symbol config:", out)
+
+    def test_unknown_symbol_exits_3_with_diagnostic(self):
+        """Failure path (non-DRY_RUN): if SYMBOL has no per-symbol YAML,
+        die with SMOKE_FAIL_ENV (exit 3) BEFORE invoking cmd/engine.
+        Pre-fix: --symbol $SYMBOL was passed to cmd/engine, which has no
+        such flag, so the engine exited rc=2 ("flag provided but not
+        defined") within 100ms — misclassified by phase 4 as
+        engine-crashed-early (exit 6, CRITICAL Telegram tier).
+        Note: this test uses non-DRY_RUN to exercise the existence check
+        (which is bypassed under DRY_RUN to keep the env-only test path)."""
+        code, _, err = run_smoke("NEVERUSDT", env_extra={
+            "BINANCE_API_KEY": "fake",
+            "BINANCE_API_SECRET": "fake",
+            "LAYER2_SMOKE_ACKNOWLEDGE_TESTNET": "YES",
+            # NOT setting LAYER2_SMOKE_DRY_RUN — the existence check is
+            # bypassed under DRY_RUN. Phase 1.5 (the new check) runs
+            # before the timeout-pre-flight (phase 1 end), so this fails
+            # cleanly even on systems without GNU timeout.
+        })
+        self.assertEqual(code, 3, err)
+        self.assertIn("missing-symbol-config", err)
+
+
+class FixtureMsgVsEngineEmitTest(unittest.TestCase):
+    """L2-7 (2026-05-12 first-real-run finding): the DRY_RUN synthetic log
+    had `"msg":"backfill complete"` but the engine emits
+    `"msg":"kline backfill complete"` (pkg/marketdata/binance.go:220).
+    The HAS_BACKFILL grep matched the fixture (DRY_RUN PASS) but NOT the
+    real engine log (real smoke FAIL even when backfill succeeded).
+
+    Pin: each msg field in the DRY_RUN heredoc MUST appear as a substring
+    in the live engine source. If a future engine refactor renames a msg
+    field, the heredoc and grep pattern must both be updated in lockstep,
+    or this test fails. Symmetric pin: the HAS_BACKFILL/N_HEARTBEATS
+    regexes in the analysis phase also live in the engine source.
+
+    Pattern family: writer-equals-fixture drift, adjacent to
+    writer-equals-model (docs/AUDIT_LENS.md adjacent-pattern, 2026-05-10-pm)."""
+
+    REPO_GO_SOURCES = [
+        REPO / "pkg" / "marketdata" / "binance.go",
+        REPO / "pkg" / "marketdata" / "heartbeat.go",
+        REPO / "cmd" / "engine" / "main.go",
+    ]
+
+    @classmethod
+    def setUpClass(cls):
+        cls.all_go_source = "\n".join(
+            p.read_text(encoding="utf-8") for p in cls.REPO_GO_SOURCES if p.exists()
+        )
+        if not cls.all_go_source:
+            raise unittest.SkipTest(
+                f"Engine Go sources not readable: {cls.REPO_GO_SOURCES}"
+            )
+
+    def _smoke_text(self) -> str:
+        return SCRIPT.read_text(encoding="utf-8")
+
+    def test_synthetic_kline_backfill_complete_matches_engine_emit(self):
+        """The exact substring used in the DRY_RUN heredoc + the
+        HAS_BACKFILL grep regex must appear in pkg/marketdata/binance.go."""
+        smoke = self._smoke_text()
+        self.assertIn(
+            '"msg":"kline backfill complete"',
+            smoke,
+            "synthetic DRY_RUN log no longer emits kline-backfill-complete",
+        )
+        self.assertIn(
+            '"msg":"kline backfill complete',
+            smoke,
+            "HAS_BACKFILL grep no longer references kline-backfill-complete",
+        )
+        # The engine emits this via slog.Info("kline backfill complete", ...)
+        # which renders as `"msg":"kline backfill complete"` in JSON output.
+        self.assertIn(
+            "kline backfill complete",
+            self.all_go_source,
+            "engine source no longer contains 'kline backfill complete' — "
+            "smoke gate regex would silently no-op. Update heredoc + grep "
+            "+ this assertion in lockstep.",
+        )
+
+    def test_synthetic_heartbeat_matches_engine_emit(self):
+        """Canonical heartbeat msg comes from snapshotForLog returning the
+        literal string "heartbeat" (heartbeat.go around line 203).
+        The variable indirection means there's no `slog.Info("heartbeat...`
+        call — the assertion anchors on the returned-string idiom instead."""
+        smoke = self._smoke_text()
+        self.assertIn('"msg":"heartbeat"', smoke)
+        self.assertIn(
+            '"heartbeat", args',
+            self.all_go_source,
+            "canonical heartbeat msg-string return not found in engine source "
+            "(expected: `return slog.Level..., \"heartbeat\", args, ...` in heartbeat.go)",
+        )
+
+    def test_synthetic_testnet_executor_active_matches_engine_emit(self):
+        """The TESTNET EXECUTOR ACTIVE WARN is the operator-visible
+        confirmation that orders route to testnet. The string is a
+        contract between cmd/engine and any monitoring/audit tooling."""
+        smoke = self._smoke_text()
+        marker = "TESTNET EXECUTOR ACTIVE — orders will be sent to Binance TESTNET (no real capital)"
+        self.assertIn(marker, smoke)
+        self.assertIn(
+            marker,
+            self.all_go_source,
+            "engine source no longer contains the testnet-executor-active marker",
+        )
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
