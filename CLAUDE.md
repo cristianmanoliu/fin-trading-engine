@@ -104,6 +104,14 @@ ssh root@178.105.24.230 'tail -f /var/log/paper-live/btcusdt.log'
 ssh root@178.105.24.230 '. /etc/paper-live/env && DRY_RUN=1 /opt/trading-engine/scripts/daily_digest.sh'
 ```
 
+**Funding-CSV auto-refresh** (VPS cron, Sunday 03:00 UTC). Incrementally downloads Binance funding rates for deployed-16 symbols, validates no CSV is stale (>24h), sends Telegram on success/failure. Engines pick up new data on next restart. Log: `/var/log/paper-live/funding_refresh.log`.
+```bash
+# Install on VPS (one-time)
+ssh root@178.105.24.230 'bash /opt/trading-engine/deploy/install_funding_cron.sh'
+# Manual run (from local machine)
+bash scripts/funding_refresh_cron.sh
+```
+
 **Local paper-live scripts** (for running locally without VPS):
 ```bash
 ./scripts/paper_live_start.sh   # builds bin/engine, launches 8 background processes
@@ -308,9 +316,10 @@ When forward-paper resolves: read the pre-reg file. The promotion or kill decisi
 
 ## Known unmodeled risks
 
-3 still-open (from original 13):
+2 still-open (from original 13):
 
 - **REST polling lag (10s)** — adverse on entry + stop. Instrumented per-tick (`Tick.LocalReceiptTS` → `Heartbeat` rolling ring → `lag_summary.sh` / `post_deploy_check.sh §4`). Tiers: ≤1s OK / ≤15s TYPICAL / ≤30s DEGRADED / >30s HIGH. Real fill-vs-model still requires Layer 2.
-- **Funding-CSV staleness** — picked up on restart only; weekly refresh caps at ~7d. `post_deploy_check.sh §9` surfaces it.
 - **No real-money execution test** — sizing, limits, margin reuse, concurrent trades unmodeled. Projection $69–184k/yr depending on slip.
+
+Closed: **Funding-CSV staleness** — mitigated by `scripts/funding_refresh_cron.sh` (VPS cron, Sunday 03:00 UTC). `post_deploy_check.sh §9` still surfaces staleness if cron fails.
 
