@@ -1060,6 +1060,7 @@ func (r *OrderRouter) SendOrder(ctx context.Context, intent OrderIntent) (OrderR
 		params.Set("price", strconv.FormatFloat(intent.LimitPrice, 'f', -1, 64))
 		params.Set("timeInForce", "IOC")
 	}
+	params.Set("newOrderRespType", "RESULT")
 	params.Set("recvWindow", strconv.FormatInt(recvWin, 10))
 	params.Set("timestamp", strconv.FormatInt(time.Now().UnixMilli(), 10))
 
