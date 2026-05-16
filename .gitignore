@@ -57,3 +57,4 @@ go.work.sum
 #   field embeds absolute paths so it isn't portable. Regenerates from cron.
 results/drift_runs/
 results/drift_check_history.jsonl
+NEXT.md
