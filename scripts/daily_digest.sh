@@ -382,6 +382,40 @@ verdict_days=$live_days
 MSG+=$'\n'
 MSG+="Verdict: WAITING (day ${verdict_days}/${MIN_DAYS}, ${verdict_trades}/${MIN_TRADES} trades)"
 
+# ── Trade-rate staleness check ──────────────────────────────────────────────
+# If no journal event (open or close) across ALL live symbols for >48h,
+# fire a separate WARN. Catches silent engine deaths between weekly audits.
+STALE_HOURS=48
+STALE_THRESHOLD_S=$(( STALE_HOURS * 3600 ))
+
+newest_event_ts=""
+if [[ ${#live_files[@]} -gt 0 ]]; then
+    newest_event_ts=$(cat "${live_files[@]}" \
+        | jq -r '.ts // empty' 2>/dev/null \
+        | sort | tail -1)
+fi
+
+if [[ -n "$newest_event_ts" ]]; then
+    NOW_EPOCH_STALE=$(date -u +%s)
+    newest_epoch=$(date -d "${newest_event_ts}" +%s 2>/dev/null || \
+                   date -u -j -f "%Y-%m-%dT%H:%M:%SZ" "${newest_event_ts%%.*}Z" +%s 2>/dev/null || \
+                   echo "$NOW_EPOCH_STALE")
+    gap_h=$(( (NOW_EPOCH_STALE - newest_epoch) / 3600 ))
+
+    if [[ $gap_h -ge $STALE_HOURS ]]; then
+        stale_msg="No journal events across all 16 live symbols for ${gap_h}h (threshold: ${STALE_HOURS}h).
+Last event: ${newest_event_ts}
+Possible causes: all engines down, no signals firing (regime-dependent), journal write failure.
+Check: ssh root@178.105.24.230 'systemctl status paper-live@*.service'"
+        MSG+=$'\n'"TRADE RATE: STALE (${gap_h}h silent)"
+        if [[ "$DRY_RUN" != "1" ]]; then
+            notify_telegram WARN "daily_digest: fleet silent ${gap_h}h" "$stale_msg"
+        fi
+    fi
+elif [[ ${#live_files[@]} -eq 0 ]]; then
+    MSG+=$'\n'"TRADE RATE: no journals found"
+fi
+
 # ── Output ───────────────────────────────────────────────────────────────────
 if [[ "$DRY_RUN" == "1" ]]; then
     echo "$MSG"
