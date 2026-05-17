@@ -1,0 +1,36 @@
+══════════════════════════════════════════════════════════════════════════════
+  LAG SUMMARY  2026-05-17T06:14:14Z  →  root@178.105.24.230
+══════════════════════════════════════════════════════════════════════════════
+
+  Per-engine source-to-receipt lag (latest heartbeat):
+
+  symbol         p50_ms    p99_ms    max_ms    samples   tier
+  ------         ------    ------    ------    -------   ----
+  roseusdt       n/a       n/a       n/a       0         NO_DATA
+  bchusdt        n/a       n/a       n/a       0         NO_DATA
+  grtusdt        n/a       n/a       n/a       0         NO_DATA
+  1inchusdt      n/a       n/a       n/a       0         NO_DATA
+  adausdt        n/a       n/a       n/a       0         NO_DATA
+  kavausdt       n/a       n/a       n/a       0         NO_DATA
+  1000shibusdt   n/a       n/a       n/a       0         NO_DATA
+  ensusdt        n/a       n/a       n/a       0         NO_DATA
+  xlmusdt        n/a       n/a       n/a       0         NO_DATA
+  imxusdt        n/a       n/a       n/a       0         NO_DATA
+  etcusdt        n/a       n/a       n/a       0         NO_DATA
+  runeusdt       n/a       n/a       n/a       0         NO_DATA
+  avaxusdt       n/a       n/a       n/a       0         NO_DATA
+  aptusdt        n/a       n/a       n/a       0         NO_DATA
+  dotusdt        n/a       n/a       n/a       0         NO_DATA
+  filusdt        n/a       n/a       n/a       0         NO_DATA
+
+  Fleet rollup:
+    OK        : 0 engines
+    TYPICAL   : 0 engines
+    DEGRADED  : 0 engines
+    HIGH      : 0 engines
+    NO_DATA   : 16 engines
+
+    Max p99 across fleet: n/a (no engines reported lag samples)
+
+  >>> VERDICT: HEALTHY (no degraded engines)
+══════════════════════════════════════════════════════════════════════════════

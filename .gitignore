@@ -58,3 +58,7 @@ go.work.sum
 results/drift_runs/
 results/drift_check_history.jsonl
 NEXT.md
+resume-claude.sh
+
+# Superpowers plugin artifacts (plans/specs generated during sessions)
+docs/superpowers/
