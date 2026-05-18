@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
-# daily_digest.sh — compact Telegram summary of forward-paper status.
+# daily_digest.sh — rich Telegram summary of forward-paper status.
 #
-# Runs on VPS via cron at 09:00 UTC. Summarises all cohorts (live +
-# shadows) in a single message: per-cohort trades/WR/PnL + open
-# positions + best R-multiple highlight (>2.0R). Sources lib/notify.sh
-# for delivery.
+# Runs on VPS via cron at 09:00 UTC. Produces a single-message digest with:
+#   - LIVE: trades (with delta from yesterday), W/L, PnL, named wins,
+#     open positions with entry prices, WR vs backtest, power-floor countdown
+#   - Shadows: comparison table with divergence detection
+#   - New-trade narrative (trades since last digest)
+#
+# Persists a snapshot after each run so the next run can compute deltas.
 #
 # Usage:
 #   DRY_RUN=1 JOURNAL_DIR=./logs/journal ./scripts/daily_digest.sh
@@ -12,6 +15,7 @@
 #
 # Environment:
 #   JOURNAL_DIR      — journal root (default: /var/log/paper-live/journal)
+#   SNAPSHOT_DIR     — where to persist daily snapshots (default: /var/log/paper-live/digest_snapshots)
 #   DRY_RUN=1        — print to stdout instead of sending Telegram
 #   FETCH_PRICES=1   — force price fetch even in DRY_RUN (default: skip in DRY_RUN)
 #
@@ -27,10 +31,17 @@ LIB="${SCRIPT_DIR}/lib/notify.sh"
 source "$LIB"
 
 JOURNAL_DIR="${JOURNAL_DIR:-/var/log/paper-live/journal}"
+SNAPSHOT_DIR="${SNAPSHOT_DIR:-/var/log/paper-live/digest_snapshots}"
 DRY_RUN="${DRY_RUN:-0}"
 FETCH_PRICES="${FETCH_PRICES:-0}"
 
 TODAY="$(date -u '+%Y-%m-%d')"
+
+# Forward-paper reference values
+BACKTEST_WR="20.6"
+MIN_TRADES=150
+MIN_DAYS=60
+FORWARD_START="2026-05-05"
 
 # ── Validate JOURNAL_DIR ─────────────────────────────────────────────────────
 if [[ ! -d "$JOURNAL_DIR" ]]; then
@@ -43,10 +54,12 @@ if [[ ! -d "$JOURNAL_DIR" ]]; then
     exit 1
 fi
 
+# ── Ensure snapshot dir exists ───────────────────────────────────────────────
+mkdir -p "$SNAPSHOT_DIR"
+
 # ── Check for any journal files ──────────────────────────────────────────────
 shopt -s nullglob
 all_journals=( "${JOURNAL_DIR}"/*-*.jsonl )
-# Also check shadow subdirectories
 if [[ -d "${JOURNAL_DIR}/shadow" ]]; then
     for _sd in "${JOURNAL_DIR}/shadow"/*/; do
         [[ -d "$_sd" ]] && all_journals+=( "${_sd}"*-*.jsonl )
@@ -64,56 +77,12 @@ no journal data found in $JOURNAL_DIR"
     exit 0
 fi
 
-# ── Helper: parse one cohort's journal files ─────────────────────────────────
-# Outputs tab-separated: trades wins pnl_usd open_sides
-# open_sides is a space-separated list of SIDE values for open positions.
-parse_cohort() {
-    local -a files=("$@")
-    if [[ ${#files[@]} -eq 0 ]]; then
-        echo "0	0	0	"
-        return
-    fi
-    cat "${files[@]}" \
-    | jq -r 'select(.event=="open" or .event=="close")
-              | [.event, (.pnl_usd // 0), (.outcome // ""), (.side // "")]
-              | @tsv' 2>/dev/null \
-    | awk -F'\t' '
-        BEGIN { total=0; wins=0; pnl=0 }
-        $1=="close" {
-            outcome=$3
-            if (outcome=="PARTIAL") next
-            total++
-            if (outcome=="TARGET") wins++
-            pnl += $2
-            closes[$4]++   # track symbol side on close — we only need open positions
-        }
-        $1=="open" {
-            opens_side[NR] = $4
-            opens_count++
-        }
-        END {
-            # Collect open sides (opens without matching close)
-            # We approximate: count of open events vs close events
-            # (journals are SYMBOL-specific so open > close = open position)
-            open_sides=""
-            # emit open events that have no paired close — simplified:
-            # if opens_count > total, difference is open positions
-            extra = opens_count - total
-            if (extra < 0) extra = 0
-            for (i = 1; i <= opens_count && extra > 0; i++) {
-                side = opens_side[i]
-                open_sides = (open_sides == "") ? side : open_sides " " side
-                extra--
-            }
-            printf "%d\t%d\t%.2f\t%s\n", total, wins, pnl, open_sides
-        }
-    '
-}
-
-# ── Better per-symbol parsing that tracks open vs closed per-symbol ──────────
+# ── Helper: parse one cohort's journal files (full detail) ──────────────────
 # Produces:
-#   STATS: trades wins pnl_usd
-#   OPEN:  symbol side
+#   STATS\ttrades\twins\tpnl_usd
+#   OPEN\tsymbol\tside\tentry\tstop\ttarget
+#   WIN\tsymbol\tpnl_usd\tts\tmfe_r
+#   NEWTRADE\tsymbol\tside\tpnl_usd\toutcome\tts\tmfe_r
 parse_cohort_full() {
     local -a files=("$@")
     if [[ ${#files[@]} -eq 0 ]]; then
@@ -122,7 +91,7 @@ parse_cohort_full() {
     cat "${files[@]}" \
     | jq -r 'select(.event=="open" or .event=="close")
               | [.event, (.symbol // ""), (.pnl_usd // 0), (.outcome // ""), (.side // ""),
-                 (.entry // 0), (.stop // 0), (.target // 0)]
+                 (.entry // 0), (.stop // 0), (.target // 0), (.ts // ""), (.mfe_r // 0)]
               | @tsv' 2>/dev/null \
     | awk -F'\t' '
         BEGIN { total=0; wins=0; pnl=0 }
@@ -140,9 +109,13 @@ parse_cohort_full() {
             closes[sym]++
             if (outcome!="PARTIAL") {
                 total++
-                if (outcome=="TARGET") wins++
+                if (outcome=="TARGET") {
+                    wins++
+                    printf "WIN\t%s\t%s\t%s\t%s\n", sym, $3, $9, $10
+                }
                 pnl += $3
             }
+            printf "NEWTRADE\t%s\t%s\t%s\t%s\t%s\t%s\n", sym, $5, $3, outcome, $9, $10
         }
         END {
             printf "STATS\t%d\t%d\t%.2f\n", total, wins, pnl
@@ -168,7 +141,6 @@ fetch_price() {
 }
 
 # ── Compute R-multiple ───────────────────────────────────────────────────────
-# Returns empty string on error.
 compute_r() {
     local side="$1" entry="$2" stop="$3" price="$4"
     awk -v side="$side" -v entry="$entry" -v stop="$stop" -v price="$price" '
@@ -180,99 +152,32 @@ compute_r() {
     }'
 }
 
-# ── Format open positions line ───────────────────────────────────────────────
-# Takes open_data lines (OPEN\tsym\tside\tentry\tstop\ttarget)
-format_open_line() {
-    local open_data="$1"
-    local do_fetch="$2"  # 1 = fetch prices
-
-    local n_open=0 n_long=0 n_short=0 best_r="" best_sym="" best_side=""
-    local sym_list=""
-
-    while IFS=$'\t' read -r tag sym side entry stop target; do
-        [[ "$tag" != "OPEN" ]] && continue
-        n_open=$(( n_open + 1 ))
-        # Track symbol names for display
-        sym_list="${sym_list}${sym}(${side}) "
-        if [[ "$side" == "LONG" ]]; then
-            n_long=$(( n_long + 1 ))
-        elif [[ "$side" == "SHORT" ]]; then
-            n_short=$(( n_short + 1 ))
-        fi
-        if [[ "$do_fetch" == "1" ]] && [[ -n "$sym" ]]; then
-            price=$(fetch_price "$sym")
-            if [[ -n "$price" ]]; then
-                r=$(compute_r "$side" "$entry" "$stop" "$price")
-                if [[ -n "$r" ]]; then
-                    # Track best R > 2.0
-                    is_better=$(awk -v r="$r" -v best="${best_r:-0}" \
-                        'BEGIN{print (r+0 > best+0 && r+0 > 2.0) ? 1 : 0}')
-                    if [[ "$is_better" == "1" ]]; then
-                        best_r="$r"
-                        best_sym="$sym"
-                        best_side="$side"
-                    fi
-                fi
-            fi
-        fi
-    done <<< "$open_data"
-
-    if [[ "$n_open" -eq 0 ]]; then
-        return
-    fi
-
-    # Build open line — show count breakdown + symbol list
-    local parts=""
-    if [[ "$n_long" -gt 0 ]] && [[ "$n_short" -gt 0 ]]; then
-        parts="${n_long} LONG, ${n_short} SHORT"
-    elif [[ "$n_long" -gt 0 ]]; then
-        parts="${n_long} LONG"
-    elif [[ "$n_short" -gt 0 ]]; then
-        parts="${n_short} SHORT"
-    fi
-
-    local open_line="  Open: ${n_open} (${parts}) [${sym_list% }]"
-    if [[ -n "$best_r" ]]; then
-        open_line="${open_line} | best ${best_sym} ${best_side} R=${best_r}"
-    fi
-    echo "$open_line"
-}
-
-# ── Compute days elapsed and trade count from live cohort ────────────────────
-get_live_stats_for_verdict() {
-    local -a files=("$@")
-    if [[ ${#files[@]} -eq 0 ]]; then
-        echo "0	0"
-        return
-    fi
-    cat "${files[@]}" \
-    | jq -r 'select(.event=="close") | [.ts, (.outcome // "")] | @tsv' 2>/dev/null \
-    | awk -F'\t' '
-        BEGIN { first_ts=""; total=0 }
-        {
-            outcome=$2
-            if (outcome!="PARTIAL") {
-                total++
-                if (first_ts=="") first_ts=$1
-            }
-        }
-        END { printf "%s\t%d\n", first_ts, total }
-    '
-}
-
 # ── Determine if we should fetch prices ─────────────────────────────────────
 do_fetch="0"
 if [[ "$DRY_RUN" != "1" ]] || [[ "$FETCH_PRICES" == "1" ]]; then
     do_fetch="1"
 fi
 
+# ── Load yesterday's snapshot ────────────────────────────────────────────────
+YESTERDAY="$(date -u -d "yesterday" '+%Y-%m-%d' 2>/dev/null || \
+             date -u -v-1d '+%Y-%m-%d' 2>/dev/null || echo "")"
+PREV_SNAPSHOT="${SNAPSHOT_DIR}/digest_${YESTERDAY}.json"
+prev_live_trades=0; prev_live_pnl=0
+prev_shadow_data=""
+if [[ -n "$YESTERDAY" ]] && [[ -f "$PREV_SNAPSHOT" ]]; then
+    prev_live_trades=$(jq -r '.live_trades // 0' "$PREV_SNAPSHOT" 2>/dev/null || echo 0)
+    prev_live_pnl=$(jq -r '.live_pnl // 0' "$PREV_SNAPSHOT" 2>/dev/null || echo 0)
+    prev_shadow_data=$(jq -r '.shadows // empty' "$PREV_SNAPSHOT" 2>/dev/null || echo "")
+fi
+
 # ── Process live cohort ──────────────────────────────────────────────────────
-shopt -s nullglob
 live_files=( "${JOURNAL_DIR}"/*-*.jsonl )
 
 live_raw=""
 live_trades=0; live_wins=0; live_pnl=0
 live_open_data=""
+live_win_data=""
+live_new_trades=""
 
 if [[ ${#live_files[@]} -gt 0 ]]; then
     live_raw=$(parse_cohort_full "${live_files[@]}")
@@ -283,80 +188,161 @@ if [[ ${#live_files[@]} -gt 0 ]]; then
         live_pnl=$(echo    "$stats_line" | awk -F'\t' '{print $4}')
     fi
     live_open_data=$(echo "$live_raw" | grep "^OPEN" || true)
+    live_win_data=$(echo "$live_raw" | grep "^WIN" || true)
+    live_new_trades=$(echo "$live_raw" | grep "^NEWTRADE" || true)
 fi
 
-# ── Get live first-close timestamp for verdict ───────────────────────────────
-live_first_ts=""
-live_days=0
-if [[ ${#live_files[@]} -gt 0 ]]; then
-    live_ts_data=$(get_live_stats_for_verdict "${live_files[@]}")
-    live_first_ts=$(echo "$live_ts_data" | awk -F'\t' '{print $1}')
-    if [[ -n "$live_first_ts" ]]; then
-        NOW_EPOCH=$(date -u +%s)
-        first_epoch=$(date -d "${live_first_ts}" +%s 2>/dev/null || \
-                      date -u -j -f "%Y-%m-%dT%H:%M:%SZ" "${live_first_ts%%.*}Z" +%s 2>/dev/null || \
-                      echo "$NOW_EPOCH")
-        live_days=$(( (NOW_EPOCH - first_epoch) / 86400 ))
-    fi
-fi
+# ── Compute days elapsed ────────────────────────────────────────────────────
+NOW_EPOCH=$(date -u +%s)
+start_epoch=$(date -d "${FORWARD_START}" +%s 2>/dev/null || \
+              date -u -j -f "%Y-%m-%d" "${FORWARD_START}" +%s 2>/dev/null || \
+              echo "$NOW_EPOCH")
+live_days=$(( (NOW_EPOCH - start_epoch) / 86400 ))
 
-# ── Build live section ───────────────────────────────────────────────────────
-build_cohort_section() {
-    local label="$1"
-    local trades="$2" wins="$3" pnl="$4"
-    local open_data="$5"
-    local do_fetch_arg="$6"
-
-    local header="$label"
-
-    local pnl_int
-    pnl_int=$(awk -v p="$pnl" 'BEGIN{printf "%+.0f", p}')
-
-    if [[ "$trades" -eq 0 ]] && [[ -z "$open_data" ]]; then
-        printf "%s\n  no trades yet\n" "$header"
-        return
-    fi
-
-    if [[ "$trades" -gt 0 ]]; then
-        local wr_pct
-        wr_pct=$(awk -v w="$wins" -v t="$trades" 'BEGIN{printf "%.1f", w*100/t}')
-        printf "%s\n  %d trades | WR %s%% | PnL \$%s\n" \
-            "$header" "$trades" "$wr_pct" "$pnl_int"
-    else
-        printf "%s\n  0 trades closed\n" "$header"
-    fi
-
-    if [[ -n "$open_data" ]]; then
-        format_open_line "$open_data" "$do_fetch_arg"
-    fi
-}
-
-MSG="Daily Digest — ${TODAY}"
+# ── Build LIVE section ──────────────────────────────────────────────────────
+MSG="Forward-Paper Digest — ${TODAY} (day ${live_days})"
 MSG+=$'\n'
 
-# Live section
-live_section=$(build_cohort_section "LIVE" "$live_trades" "$live_wins" "$live_pnl" \
-    "$live_open_data" "$do_fetch")
-MSG+=$'\n'"$live_section"
+# Closed trades with delta
+delta_trades=""
+if [[ "$prev_live_trades" -gt 0 ]]; then
+    new_count=$(( live_trades - prev_live_trades ))
+    if [[ "$new_count" -gt 0 ]]; then
+        delta_trades=" (+${new_count} new)"
+    elif [[ "$new_count" -eq 0 ]]; then
+        delta_trades=" (unchanged)"
+    fi
+fi
+
+losses=$(( live_trades - live_wins ))
+live_pnl_int=$(awk -v p="$live_pnl" 'BEGIN{printf "%+.0f", p}')
+
+MSG+=$'\n'"LIVE"
+MSG+=$'\n'"  Trades: ${live_trades}${delta_trades} (${live_wins}W/${losses}L)"
+MSG+=$'\n'"  PnL: \$${live_pnl_int}"
+
+# PnL delta from yesterday
+if [[ "$prev_live_trades" -gt 0 ]]; then
+    pnl_delta=$(awk -v now="$live_pnl" -v prev="$prev_live_pnl" 'BEGIN{printf "%+.0f", now-prev}')
+    MSG+=" (24h: \$${pnl_delta})"
+fi
+
+# Win rate vs backtest
+if [[ "$live_trades" -gt 0 ]]; then
+    wr_pct=$(awk -v w="$live_wins" -v t="$live_trades" 'BEGIN{printf "%.1f", w*100/t}')
+    MSG+=$'\n'"  WR: ${wr_pct}% (backtest: ${BACKTEST_WR}%, n=${live_trades} is noise)"
+fi
+
+# Named wins
+if [[ -n "$live_win_data" ]]; then
+    win_list=""
+    while IFS=$'\t' read -r _tag sym pnl_usd ts mfe_r; do
+        [[ "$_tag" != "WIN" ]] && continue
+        pnl_fmt=$(awk -v p="$pnl_usd" 'BEGIN{printf "%+.0f", p}')
+        win_list="${win_list}${sym} \$${pnl_fmt}, "
+    done <<< "$live_win_data"
+    if [[ -n "$win_list" ]]; then
+        MSG+=$'\n'"  Wins: ${win_list%, }"
+    fi
+fi
+
+# Open positions with entry prices and R-multiples
+if [[ -n "$live_open_data" ]]; then
+    open_count=0
+    open_lines=""
+    while IFS=$'\t' read -r _tag sym side entry stop target; do
+        [[ "$_tag" != "OPEN" ]] && continue
+        open_count=$(( open_count + 1 ))
+        r_str=""
+        if [[ "$do_fetch" == "1" ]] && [[ -n "$sym" ]]; then
+            price=$(fetch_price "$sym")
+            if [[ -n "$price" ]]; then
+                r=$(compute_r "$side" "$entry" "$stop" "$price")
+                [[ -n "$r" ]] && r_str=" R=${r}"
+            fi
+        fi
+        open_lines="${open_lines}    ${sym} ${side} @ ${entry}${r_str}"$'\n'
+    done <<< "$live_open_data"
+    if [[ "$open_count" -gt 0 ]]; then
+        MSG+=$'\n'"  Open: ${open_count}"
+        MSG+=$'\n'"${open_lines%$'\n'}"
+    fi
+fi
+
+# New trades since yesterday (narrative)
+if [[ -n "$live_new_trades" ]] && [[ -n "$YESTERDAY" ]]; then
+    new_narrative=""
+    while IFS=$'\t' read -r _tag sym side pnl_usd outcome ts mfe_r; do
+        [[ "$_tag" != "NEWTRADE" ]] && continue
+        trade_date="${ts:0:10}"
+        if [[ "$trade_date" == "$TODAY" ]] || [[ "$trade_date" == "$YESTERDAY" ]]; then
+            pnl_fmt=$(awk -v p="$pnl_usd" 'BEGIN{printf "%+.0f", p}')
+            mfe_str=""
+            if [[ -n "$mfe_r" ]] && [[ "$mfe_r" != "0" ]]; then
+                mfe_str=" MFE=${mfe_r}R"
+            fi
+            new_narrative="${new_narrative}  ${sym} ${side} ${outcome} \$${pnl_fmt}${mfe_str}"$'\n'
+        fi
+    done <<< "$live_new_trades"
+    if [[ -n "$new_narrative" ]]; then
+        MSG+=$'\n'"New (24h):"
+        MSG+=$'\n'"${new_narrative%$'\n'}"
+    fi
+fi
+
+# Power-floor countdown
+days_remaining=$(( MIN_DAYS - live_days ))
+(( days_remaining < 0 )) && days_remaining=0
+trades_remaining=$(( MIN_TRADES - live_trades ))
+(( trades_remaining < 0 )) && trades_remaining=0
+
+if [[ "$live_days" -gt 0 ]] && [[ "$live_trades" -gt 0 ]]; then
+    rate=$(awk -v t="$live_trades" -v d="$live_days" 'BEGIN{r=t/d; if(r<=0) r=0.01; printf "%.2f", r}')
+    days_for_trades=$(awk -v tr="$trades_remaining" -v r="$rate" 'BEGIN{printf "%.0f", tr/r}')
+else
+    rate="0.00"
+    days_for_trades="?"
+fi
+
+binding="$days_remaining"
+binding_label="days"
+if [[ "$days_for_trades" != "?" ]] && [[ "$days_for_trades" -gt "$binding" ]]; then
+    binding="$days_for_trades"
+    binding_label="trades"
+fi
+
+if [[ "$binding" -gt 0 ]]; then
+    gate_epoch=$(( NOW_EPOCH + binding * 86400 ))
+    gate_date=$(date -u -r "$gate_epoch" '+%Y-%m-%d' 2>/dev/null || \
+                date -u -d "@$gate_epoch" '+%Y-%m-%d' 2>/dev/null || echo "?")
+    MSG+=$'\n'"Countdown: ${live_trades}/${MIN_TRADES} trades, day ${live_days}/${MIN_DAYS}"
+    MSG+=" (~${gate_date}, bound by ${binding_label})"
+fi
 
 # ── Process shadow cohorts ───────────────────────────────────────────────────
 shadow_base="${JOURNAL_DIR}/shadow"
+shadow_json_parts=""
+
 if [[ -d "$shadow_base" ]]; then
+    MSG+=$'\n'
+    MSG+=$'\n'"SHADOWS"
+
+    # Collect shadow data for comparison
+    declare -A shadow_trades shadow_pnl shadow_wins
+
     for label_dir in "${shadow_base}"/*/; do
         [[ -d "$label_dir" ]] || continue
         label_name=$(basename "$label_dir")
-        # Uppercase + dashes → spaces (alt5-15-336 → ALT5 15 336)
         label_upper=$(echo "$label_name" | tr '[:lower:]' '[:upper:]' | tr '-' ' ')
 
         shadow_files=( "${label_dir}"*-*.jsonl )
-
         if [[ ${#shadow_files[@]} -eq 0 ]]; then
-            MSG+=$'\n'"${label_upper}"$'\n'"  no trades yet"$'\n'
+            MSG+=$'\n'"  ${label_upper}: no trades yet"
             continue
         fi
 
         shadow_raw=$(parse_cohort_full "${shadow_files[@]}")
-        s_trades=0; s_wins=0; s_pnl=0; s_open_data=""
+        s_trades=0; s_wins=0; s_pnl=0; s_open_count=0
 
         stats_line=$(echo "$shadow_raw" | grep "^STATS" | head -1)
         if [[ -n "$stats_line" ]]; then
@@ -364,30 +350,98 @@ if [[ -d "$shadow_base" ]]; then
             s_wins=$(echo   "$stats_line" | awk -F'\t' '{print $3}')
             s_pnl=$(echo    "$stats_line" | awk -F'\t' '{print $4}')
         fi
-        s_open_data=$(echo "$shadow_raw" | grep "^OPEN" || true)
+        s_open_count=$(echo "$shadow_raw" | grep -c "^OPEN" || echo 0)
 
-        shadow_section=$(build_cohort_section "$label_upper" \
-            "$s_trades" "$s_wins" "$s_pnl" "$s_open_data" "$do_fetch")
-        MSG+=$'\n'"$shadow_section"
+        shadow_trades[$label_name]=$s_trades
+        shadow_pnl[$label_name]=$s_pnl
+        shadow_wins[$label_name]=$s_wins
+
+        s_pnl_int=$(awk -v p="$s_pnl" 'BEGIN{printf "%+.0f", p}')
+        s_wr=""
+        if [[ "$s_trades" -gt 0 ]]; then
+            s_wr=$(awk -v w="$s_wins" -v t="$s_trades" 'BEGIN{printf "%.0f", w*100/t}')
+            s_wr="${s_wr}%"
+        fi
+
+        MSG+=$'\n'"  ${label_upper}: ${s_trades} trades WR=${s_wr} PnL=\$${s_pnl_int} open=${s_open_count}"
+
+        # Build JSON for snapshot
+        shadow_json_parts="${shadow_json_parts}\"${label_name}\":{\"trades\":${s_trades},\"pnl\":${s_pnl},\"wins\":${s_wins}},"
     done
+
+    # Divergence detection: compare alt5-15-336 vs alt5-15-504
+    t336="${shadow_trades[alt5-15-336]:-0}"
+    t504="${shadow_trades[alt5-15-504]:-0}"
+    p336="${shadow_pnl[alt5-15-336]:-0}"
+    p504="${shadow_pnl[alt5-15-504]:-0}"
+    if [[ "$t336" -gt 0 ]] && [[ "$t504" -gt 0 ]]; then
+        if [[ "$t336" == "$t504" ]]; then
+            pnl_match=$(awk -v a="$p336" -v b="$p504" 'BEGIN{print (a==b)?"yes":"no"}')
+            if [[ "$pnl_match" == "yes" ]]; then
+                MSG+=$'\n'"  336 vs 504: identical (no trade >336h yet)"
+            else
+                MSG+=$'\n'"  336 vs 504: DIVERGED (trades=${t336} but PnL differs)"
+            fi
+        else
+            MSG+=$'\n'"  336 vs 504: DIVERGED (${t336} vs ${t504} trades)"
+        fi
+    fi
 fi
 
-# ── Verdict line ─────────────────────────────────────────────────────────────
-MIN_TRADES=150
-MIN_DAYS=60
+# ── Testnet engine (Layer 2) ────────────────────────────────────────────────
+TESTNET_DIR="${JOURNAL_DIR}/testnet"
+TESTNET_LOG="${TESTNET_LOG:-/var/log/paper-live/testnet-btcusdt.log}"
 
-verdict_trades=$live_trades
-verdict_days=$live_days
+testnet_status=""
+if [[ -d "$TESTNET_DIR" ]]; then
+    testnet_files=( "${TESTNET_DIR}"/*-*.jsonl )
+    if [[ ${#testnet_files[@]} -gt 0 ]]; then
+        testnet_raw=$(parse_cohort_full "${testnet_files[@]}")
+        t_stats=$(echo "$testnet_raw" | grep "^STATS" | head -1)
+        if [[ -n "$t_stats" ]]; then
+            t_trades=$(echo "$t_stats" | awk -F'\t' '{print $2}')
+            t_wins=$(echo "$t_stats" | awk -F'\t' '{print $3}')
+            t_pnl=$(echo "$t_stats" | awk -F'\t' '{print $4}')
+            t_pnl_int=$(awk -v p="$t_pnl" 'BEGIN{printf "%+.0f", p}')
+            testnet_status="${t_trades} trades (${t_wins}W) PnL=\$${t_pnl_int}"
+        fi
+        t_open=$(echo "$testnet_raw" | grep "^OPEN" || true)
+        if [[ -n "$t_open" ]]; then
+            while IFS=$'\t' read -r _tag sym side entry stop target; do
+                [[ "$_tag" != "OPEN" ]] && continue
+                testnet_status="${testnet_status} | open: ${sym} ${side} @ ${entry}"
+            done <<< "$t_open"
+        fi
+    fi
+fi
+
+if [[ -z "$testnet_status" ]]; then
+    # No journal data — check if the engine is at least running
+    if [[ -f "$TESTNET_LOG" ]]; then
+        last_hb=$(grep "heartbeat" "$TESTNET_LOG" 2>/dev/null | tail -1)
+        if [[ -n "$last_hb" ]]; then
+            hb_ts=$(echo "$last_hb" | jq -r '.time // empty' 2>/dev/null | head -c 19)
+            lag_p50=$(echo "$last_hb" | jq -r '.lag_p50_ms // empty' 2>/dev/null)
+            testnet_status="running (no signals yet) last_hb=${hb_ts:-?}"
+            [[ -n "$lag_p50" ]] && testnet_status="${testnet_status} lag_p50=${lag_p50}ms"
+        else
+            testnet_status="log exists but no heartbeats"
+        fi
+    else
+        testnet_status="not running (no log)"
+    fi
+fi
 
 MSG+=$'\n'
-MSG+="Verdict: WAITING (day ${verdict_days}/${MIN_DAYS}, ${verdict_trades}/${MIN_TRADES} trades)"
+MSG+=$'\n'"TESTNET"
+MSG+=$'\n'"  BTCUSDT: ${testnet_status}"
+
+# ── Verdict line ─────────────────────────────────────────────────────────────
+MSG+=$'\n'
+MSG+="Verdict: WAITING (day ${live_days}/${MIN_DAYS}, ${live_trades}/${MIN_TRADES} trades)"
 
 # ── Trade-rate staleness check ──────────────────────────────────────────────
-# If no journal event (open or close) across ALL live symbols for >48h,
-# fire a separate WARN. Catches silent engine deaths between weekly audits.
 STALE_HOURS=48
-STALE_THRESHOLD_S=$(( STALE_HOURS * 3600 ))
-
 newest_event_ts=""
 if [[ ${#live_files[@]} -gt 0 ]]; then
     newest_event_ts=$(cat "${live_files[@]}" \
@@ -396,11 +450,10 @@ if [[ ${#live_files[@]} -gt 0 ]]; then
 fi
 
 if [[ -n "$newest_event_ts" ]]; then
-    NOW_EPOCH_STALE=$(date -u +%s)
     newest_epoch=$(date -d "${newest_event_ts}" +%s 2>/dev/null || \
                    date -u -j -f "%Y-%m-%dT%H:%M:%SZ" "${newest_event_ts%%.*}Z" +%s 2>/dev/null || \
-                   echo "$NOW_EPOCH_STALE")
-    gap_h=$(( (NOW_EPOCH_STALE - newest_epoch) / 3600 ))
+                   echo "$NOW_EPOCH")
+    gap_h=$(( (NOW_EPOCH - newest_epoch) / 3600 ))
 
     if [[ $gap_h -ge $STALE_HOURS ]]; then
         stale_msg="No journal events across all 16 live symbols for ${gap_h}h (threshold: ${STALE_HOURS}h).
@@ -415,6 +468,21 @@ Check: ssh root@178.105.24.230 'systemctl status paper-live@*.service'"
 elif [[ ${#live_files[@]} -eq 0 ]]; then
     MSG+=$'\n'"TRADE RATE: no journals found"
 fi
+
+# ── Save today's snapshot ────────────────────────────────────────────────────
+SNAPSHOT_FILE="${SNAPSHOT_DIR}/digest_${TODAY}.json"
+shadow_json="{"
+if [[ -n "$shadow_json_parts" ]]; then
+    shadow_json="${shadow_json}${shadow_json_parts%,}}"
+else
+    shadow_json="{}"
+fi
+cat > "$SNAPSHOT_FILE" <<SNAP
+{"live_trades":${live_trades},"live_pnl":${live_pnl},"live_wins":${live_wins},"date":"${TODAY}","shadows":${shadow_json}}
+SNAP
+
+# ── Snapshot cleanup (keep 30 days) ──────────────────────────────────────────
+find "$SNAPSHOT_DIR" -name "digest_*.json" -mtime +30 -delete 2>/dev/null || true
 
 # ── Output ───────────────────────────────────────────────────────────────────
 if [[ "$DRY_RUN" == "1" ]]; then
