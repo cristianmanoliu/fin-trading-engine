@@ -1,21 +1,22 @@
-# 2026-05-19 research synthesis — six pre-registered sweeps
+# 2026-05-19 research synthesis — seven pre-registered sweeps
 
-**Status:** Operator-facing synthesis. NOT a deployment authorization. The 6 individual sweep docs are the data of record; this synthesizes their findings for cross-reference and future-session navigation.
+**Status:** Operator-facing synthesis. NOT a deployment authorization. The 7 individual sweep docs are the data of record; this synthesizes their findings for cross-reference and future-session navigation.
 
 ## TL;DR
 
-Six pre-registered walk-forward sweeps run during operator-requested research while waiting for forward-paper data. **No finding triggered any deployment.** LIVE config is mechanically defensible against every test class.
+Seven pre-registered walk-forward sweeps run during operator-requested research while waiting for forward-paper data. **No finding triggered any deployment.** LIVE config is mechanically defensible against every test class.
 
 | # | Sweep | Cells | Headline finding |
 |---:|---|---:|---|
-| 1 | EMA × Timeframe | 11 | 1 cell (4H 5/21) nominally beats LIVE +34%; 1D weaker than 4H; MACD-classic mid-pack |
+| 1 | EMA × Timeframe | 11 | 1 cell (4H 5/21) nominally beats LIVE +34%; 1D weaker than 4H; MACD-period EMAs mid-pack |
 | 2 | 1D Bias Confluence | 5 | Clean refutation — all 4 variants lose −23% to −59% |
-| 3 | Vol Regime Filter | 6 | Tight loses, loose ties; May-7 SUPPORTIVE doesn't replicate at slip=5 |
+| 3 | Vol Regime Filter | 6 | Tight loses, loose ties; May-7 SUPPORTIVE doesn't replicate at slip=5 (fragility lesson #1) |
 | 4 | Side Filter | 3 | STRONG confirmation of shorts-only; longs catastrophic in W3 (−$380k) |
 | 5 | Multi-Level TP | 6 | Variance-reduction trade-off; all positive; cell 3 (4R/0.5) best at −18% |
-| 6 | Trailing Stop | 6 | Loose trail (3R) least-bad at −9%; tight trail breaks W3; trail beats MLTP at loose thresholds |
+| 6 | Trailing Stop | 6 | Loose trail (3R) least-bad at −9%; tight trail breaks W3; trail beats MLTP at loose (cross-mechanism insight) |
+| 7 | Alt Signals (MACD+RSI) | 3 | Cat A REJECT preserved at slip=5; W1 (not W3) is the alt-signals breaking point (fragility lesson #3) |
 
-**Total measurements:** 37 cells × 3 windows × 57 symbols = ~110 backtest runs in ~6 hours wall-clock.
+**Total measurements:** 40 cells × 3 windows × 57 symbols = ~117 backtest runs in ~6.5 hours wall-clock.
 
 ## Cross-cutting findings
 
@@ -40,11 +41,13 @@ Five of the six sweeps tested mechanisms that affect W3 amplitude. The pattern i
 | #5 (MLTP) | Exit mechanism (partial) | +$65k → +$28k to −$10k (stable) |
 | #6 (trail) | Exit mechanism (full) | +$65k → +$52k to −$154k (tight kills, loose survives) |
 
-**Pattern:** The 2025-2026 walk-forward year punishes ANY tight-threshold modification of the LIVE strategy. The two mechanisms that DON'T catastrophically break W3 are:
+**Pattern:** The 2025-2026 walk-forward year punishes any tight-threshold ENTRY-FILTER MODIFICATION of the EMA strategy. The two mechanisms that DON'T catastrophically break W3 are:
 - **MLTP across all settings** (variance reduction protects W3)
 - **Loose trail (3R)** (almost never fires, doesn't disturb structure)
 
-Strategic implication: future operators considering ANY structural change should expect W3 hostility unless the change is specifically designed for regime transitions.
+**Crucial qualifier (added after sweep #7):** This W3-hostility pattern is specific to MODIFICATIONS OF THE EMA STRATEGY. When the entry signal mechanism itself changes (sweep #7 MACD/RSI), the breaking point becomes W1 (2023-2024), not W3 (2025-2026). MACD W3 = +$138k (HIGHER than baseline). The "regime-hostile window" is mechanism-dependent — EMA is regime-agnostic; alternative signals have different regime sensitivities.
+
+Strategic implication: future operators considering structural changes should expect W3 hostility for EMA-modifications, but should evaluate non-EMA signals against ALL windows independently — the "filter-hostile W3" intuition does not generalize across signal mechanisms.
 
 ### 3. Cross-mechanism insight: trail beats MLTP at loose thresholds
 
@@ -138,6 +141,7 @@ Cell 4 (5/21) is the nominal winner but at 28% more trades (more cost surface, m
 - `results/side_filter_validation_2026-05-19.md` + `.csv` + `scripts/side_filter_validation_sweep.sh`
 - `results/mltp_exit_sweep_2026-05-19.md` + `.csv` + `scripts/mltp_exit_sweep.sh`
 - `results/trailing_stop_sweep_2026-05-19.md` + `.csv` + `scripts/trailing_stop_sweep.sh`
+- `results/alt_signals_retest_2026-05-19.md` + `.csv` + `scripts/alt_signals_retest_sweep.sh`
 - `results/research_synthesis_2026-05-19.md` — this doc
 
 Each sweep doc contains: context, locked grid, held-constant parameters, walk-forward windows, pre-registered predictions, decision rule, results table, mechanism interpretation, what changes/doesn't change, future-session reading note.
