@@ -462,6 +462,41 @@ assert_contains "9.7 verdict received --testnet-dir" "$log" "--testnet-dir"
 cleanup_sandbox "$sb"
 unset MOCK_LOG
 
+# ─────────────────────────────────────────────────────────────
+# Test 11 (meta): writer-equals-fixture lock — pin the filename schema
+# used in test fixtures against a real VPS journal name. If the engine
+# ever changes the naming convention, this test FAILS, forcing a fixture
+# update — the writer-equals-fixture drift that hit layer2_smoke
+# (2026-05-12 PM, L2-6 + L2-7) is blocked here.
+#
+# Best-effort: skipped if ssh to the real VPS is unreachable (CI, offline,
+# no key). The lock holds wherever real VPS state is reachable.
+# ─────────────────────────────────────────────────────────────
+echo "Test 11: writer-equals-fixture meta-pin"
+real_host="${LAYER3_PULL_TEST_REAL_HOST:-root@178.105.24.230}"
+real_base="${LAYER3_PULL_TEST_REAL_BASE:-/var/log/paper-live/journal}"
+if ! ssh -o ConnectTimeout=5 -o BatchMode=yes "$real_host" 'true' 2>/dev/null; then
+    echo "  ⊘ 11 SKIPPED (ssh to $real_host unreachable — CI or offline)"
+else
+    sample=$(ssh -o ConnectTimeout=5 -o BatchMode=yes "$real_host" \
+        "ls $real_base/layer3/*.jsonl 2>/dev/null | head -1 | xargs -r basename" \
+        2>/dev/null)
+    if [[ -z "$sample" ]]; then
+        echo "  ⊘ 11 SKIPPED (no Layer 3 journals on VPS yet — wrap deployed but no fills)"
+    else
+        # The fixture-generator regex used in Tests 6/7/8/9:
+        #   <SYMBOL>USDT-YYYY-MM.jsonl
+        # Pinned source-of-truth: layer3_pull.sh header comment "Filename schema".
+        if [[ "$sample" =~ ^[A-Z0-9]+USDT-[0-9]{4}-[0-9]{2}\.jsonl$ ]]; then
+            assert_eq "11.1 real VPS name matches fixture schema" "MATCH" "MATCH"
+            assert_contains "11.2 sample includes USDT suffix" "$sample" "USDT-"
+            assert_contains "11.3 sample includes .jsonl extension" "$sample" ".jsonl"
+        else
+            assert_eq "11.1 real VPS name matches fixture schema ($sample)" "$sample" "<expected $sample to match [A-Z0-9]+USDT-[0-9]{4}-[0-9]{2}\.jsonl>"
+        fi
+    fi
+fi
+
 echo
 echo "Total: $PASS passed, $FAIL failed"
 if [[ $FAIL -gt 0 ]]; then
