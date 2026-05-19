@@ -434,7 +434,10 @@ if [[ -z "$testnet_status" ]]; then
     # No journal data — scan each testnet log for the most recent heartbeat.
     # shellcheck disable=SC2086  # intentional glob expansion on TESTNET_LOG_GLOB
     testnet_logs=( $TESTNET_LOG_GLOB )
-    if [[ -f "${testnet_logs[0]}" ]]; then
+    # When the glob doesn't match anything bash leaves the literal pattern as
+    # the sole array element. Probe element 0 with the "default if unset" form
+    # so set -u doesn't trip on a truly empty array (defensive, both shapes covered).
+    if [[ -n "${testnet_logs[0]:-}" ]] && [[ -f "${testnet_logs[0]}" ]]; then
         best_hb=""
         best_log=""
         for tlog in "${testnet_logs[@]}"; do
