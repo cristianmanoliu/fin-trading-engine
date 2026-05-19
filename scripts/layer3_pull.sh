@@ -124,10 +124,16 @@ for f in${check_files}; do
 done
 exit 0"
 
-    if ! ssh -o BatchMode=yes -o ConnectTimeout=10 "$HOST" "$check_cmd" > /dev/null 2>/dev/null; then
+    # Run the ssh call outside `if !` so we can capture the real exit code.
+    # `if ! ssh ...; then $?` would resolve to the negated test's status (0),
+    # not ssh's, losing the ability to distinguish ssh-255 from mid-write.
+    ssh -o BatchMode=yes -o ConnectTimeout=10 "$HOST" "$check_cmd" > /dev/null 2>/dev/null
+    mid_rc=$?
+    if [[ $mid_rc -ne 0 ]]; then
         sleep "$retry_sleep"
-        if ! ssh -o BatchMode=yes -o ConnectTimeout=10 "$HOST" "$check_cmd" > /dev/null 2>/dev/null; then
-            mid_rc=$?
+        ssh -o BatchMode=yes -o ConnectTimeout=10 "$HOST" "$check_cmd" > /dev/null 2>/dev/null
+        mid_rc=$?
+        if [[ $mid_rc -ne 0 ]]; then
             if [[ $mid_rc -eq 255 ]]; then
                 echo "ERR: ssh to $HOST failed during mid-write check (exit 255 — network blip or auth)" >&2
             else
