@@ -21,6 +21,16 @@ if [[ ! -f "$DIGEST" ]]; then
     exit 1
 fi
 
+# daily_digest.sh uses `declare -A` (associative arrays, bash 4+). On macOS
+# the system /bin/bash is 3.2 which crashes the script before any assertion
+# can be evaluated. Skip the suite cleanly so safe-push.sh local gauntlet
+# matches CI behavior on Linux bash 5+. To run locally on macOS install bash
+# via homebrew: `brew install bash && /opt/homebrew/bin/bash scripts/test_daily_digest.sh`.
+if [[ "${BASH_VERSINFO[0]:-0}" -lt 4 ]]; then
+    echo "test_daily_digest.sh — skipped (bash ${BASH_VERSION} < 4; daily_digest.sh needs bash 4+)"
+    exit 0
+fi
+
 PASS=0
 FAIL=0
 FAIL_LABELS=()
@@ -58,6 +68,12 @@ JDIR="${TMPDIR_ROOT}/journal"
 mkdir -p "$JDIR"
 mkdir -p "${JDIR}/shadow/alt5-15-336"
 mkdir -p "${JDIR}/shadow/bb20"
+
+# Snapshot dir override — daily_digest.sh defaults to /var/log/paper-live/digest_snapshots
+# which is not writable in test environments (macOS local + CI runner). Without
+# this override the digest script's `mkdir -p` at line 58 fails before any test
+# assertion can read the output. See discovery 2026-05-19.
+export SNAPSHOT_DIR="${TMPDIR_ROOT}/snapshots"
 
 # BTCUSDT live: 3 closed trades — 1 TARGET win (+5000), 2 STOP losses (-500 each)
 # Net PnL = +5000 - 500 - 500 = +4000

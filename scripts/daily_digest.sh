@@ -22,7 +22,18 @@
 # Exit codes:
 #   0  — success (message sent or printed)
 #   1  — JOURNAL_DIR not found
+#   2  — bash < 4 (script uses associative arrays / declare -A)
 set -euo pipefail
+
+# Hard-require bash 4+ — script uses `declare -A` for shadow comparison.
+# Production runs on Hetzner Ubuntu (bash 5); fail-fast with a clear message
+# on older shells (e.g. macOS /bin/bash is 3.2) rather than cryptic
+# `declare: -A: invalid option` mid-script.
+if [[ "${BASH_VERSINFO[0]:-0}" -lt 4 ]]; then
+    echo "daily_digest.sh requires bash 4+ (current: ${BASH_VERSION})" >&2
+    echo "On macOS: brew install bash && /opt/homebrew/bin/bash $0" >&2
+    exit 2
+fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LIB="${SCRIPT_DIR}/lib/notify.sh"
@@ -388,14 +399,18 @@ if [[ -d "$shadow_base" ]]; then
     fi
 fi
 
-# ── Testnet engine (Layer 2) ────────────────────────────────────────────────
+# ── Testnet engines (Layer 2) ───────────────────────────────────────────────
+# Multi-symbol since 2026-05-19 (results/testnet_multi_symbol_extension_2026-05-19.md).
+# Aggregates closed trades from all testnet symbols; falls back to per-log
+# heartbeat scan when no journal data yet. TESTNET_LOG_GLOB is overridable for
+# tests but defaults to the production path glob.
 TESTNET_DIR="${JOURNAL_DIR}/testnet"
-TESTNET_LOG="${TESTNET_LOG:-/var/log/paper-live/testnet-btcusdt.log}"
+TESTNET_LOG_GLOB="${TESTNET_LOG_GLOB:-/var/log/paper-live/testnet-*.log}"
 
 testnet_status=""
 if [[ -d "$TESTNET_DIR" ]]; then
     testnet_files=( "${TESTNET_DIR}"/*-*.jsonl )
-    if [[ ${#testnet_files[@]} -gt 0 ]]; then
+    if [[ ${#testnet_files[@]} -gt 0 ]] && [[ -f "${testnet_files[0]}" ]]; then
         testnet_raw=$(parse_cohort_full "${testnet_files[@]}")
         t_stats=$(echo "$testnet_raw" | grep "^STATS" | head -1)
         if [[ -n "$t_stats" ]]; then
@@ -407,7 +422,7 @@ if [[ -d "$TESTNET_DIR" ]]; then
         fi
         t_open=$(echo "$testnet_raw" | grep "^OPEN" || true)
         if [[ -n "$t_open" ]]; then
-            while IFS=$'\t' read -r _tag sym side entry stop target; do
+            while IFS=$'\t' read -r _tag sym side entry _stop _target; do
                 [[ "$_tag" != "OPEN" ]] && continue
                 testnet_status="${testnet_status} | open: ${sym} ${side} @ ${entry}"
             done <<< "$t_open"
@@ -416,25 +431,38 @@ if [[ -d "$TESTNET_DIR" ]]; then
 fi
 
 if [[ -z "$testnet_status" ]]; then
-    # No journal data — check if the engine is at least running
-    if [[ -f "$TESTNET_LOG" ]]; then
-        last_hb=$(grep "heartbeat" "$TESTNET_LOG" 2>/dev/null | tail -1)
-        if [[ -n "$last_hb" ]]; then
-            hb_ts=$(echo "$last_hb" | jq -r '.time // empty' 2>/dev/null | head -c 19)
-            lag_p50=$(echo "$last_hb" | jq -r '.lag_p50_ms // empty' 2>/dev/null)
-            testnet_status="running (no signals yet) last_hb=${hb_ts:-?}"
+    # No journal data — scan each testnet log for the most recent heartbeat.
+    # shellcheck disable=SC2086  # intentional glob expansion on TESTNET_LOG_GLOB
+    testnet_logs=( $TESTNET_LOG_GLOB )
+    if [[ -f "${testnet_logs[0]}" ]]; then
+        best_hb=""
+        best_log=""
+        for tlog in "${testnet_logs[@]}"; do
+            [[ -f "$tlog" ]] || continue
+            this_hb=$(grep "heartbeat" "$tlog" 2>/dev/null | tail -1)
+            [[ -z "$this_hb" ]] && continue
+            this_ts=$(echo "$this_hb" | jq -r '.time // empty' 2>/dev/null)
+            if [[ -z "$best_hb" ]] || [[ "$this_ts" > "$best_hb" ]]; then
+                best_hb="$this_ts"
+                best_log="$tlog"
+            fi
+        done
+        if [[ -n "$best_hb" ]]; then
+            n_engines=${#testnet_logs[@]}
+            lag_p50=$(grep "heartbeat" "$best_log" 2>/dev/null | tail -1 | jq -r '.lag_p50_ms // empty' 2>/dev/null)
+            testnet_status="${n_engines} engine(s) running (no signals yet) last_hb=${best_hb:0:19}"
             [[ -n "$lag_p50" ]] && testnet_status="${testnet_status} lag_p50=${lag_p50}ms"
         else
-            testnet_status="log exists but no heartbeats"
+            testnet_status="logs exist but no heartbeats"
         fi
     else
-        testnet_status="not running (no log)"
+        testnet_status="not running (no logs)"
     fi
 fi
 
 MSG+=$'\n'
 MSG+=$'\n'"TESTNET"
-MSG+=$'\n'"  BTCUSDT: ${testnet_status}"
+MSG+=$'\n'"  ${testnet_status}"
 
 # ── Verdict line ─────────────────────────────────────────────────────────────
 MSG+=$'\n'
