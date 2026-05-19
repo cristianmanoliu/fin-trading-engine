@@ -380,8 +380,12 @@ echo "$DATA" | grep "^STRATEGY|" | while IFS='|' read -r _ label first_ts last_t
     notional_losers="${notional_losers:-0}"
 
     # Days elapsed (UTC)
-    first_epoch=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "${first_ts%%.*}Z" +%s 2>/dev/null || \
-                  date -d "${first_ts}" +%s 2>/dev/null || echo "$NOW")
+    # -u flag forces UTC interpretation of the input. macOS BSD date silently
+    # ignores the literal Z and treats the value as local-time absent -u,
+    # producing epoch off-by-(local-TZ-offset) hours. Fixed 2026-05-19 after
+    # noticing dashboard reported day 11 vs the VPS-side day 10.
+    first_epoch=$(date -u -j -f "%Y-%m-%dT%H:%M:%SZ" "${first_ts%%.*}Z" +%s 2>/dev/null || \
+                  date -u -d "${first_ts}" +%s 2>/dev/null || echo "$NOW")
     days_elapsed=$(( (NOW - first_epoch) / 86400 ))
 
     # Win rate
@@ -678,8 +682,9 @@ LIVE_DATA=$(echo "$DATA" | awk -F'|' '$1=="STRATEGY" && $2=="live" {print}')
 if [[ -n "$LIVE_DATA" ]]; then
     IFS='|' read -r _ _ live_first_ts _live_last_ts live_trades _live_rest <<<"$LIVE_DATA"
     if [[ "$live_first_ts" != "NODATA" ]] && [[ -n "$live_first_ts" ]]; then
-        live_first_epoch=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "${live_first_ts%%.*}Z" +%s 2>/dev/null || \
-                           date -d "${live_first_ts}" +%s 2>/dev/null || echo "$NOW")
+        # -u flag forces UTC. See first_epoch above — same bug class.
+        live_first_epoch=$(date -u -j -f "%Y-%m-%dT%H:%M:%SZ" "${live_first_ts%%.*}Z" +%s 2>/dev/null || \
+                           date -u -d "${live_first_ts}" +%s 2>/dev/null || echo "$NOW")
         live_days=$(( (NOW - live_first_epoch) / 86400 ))
         days_to_go=$(( MIN_DAYS - live_days ))
         (( days_to_go < 0 )) && days_to_go=0
@@ -750,7 +755,7 @@ elif command -v jq >/dev/null 2>&1; then
     if [[ -z "$last_drift_ts" ]]; then
         printf "    %-50s  [⚠ tail entry has no .ts field]\n" "drift history"
     else
-        last_drift_epoch=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "$last_drift_ts" +%s 2>/dev/null || \
+        last_drift_epoch=$(date -u -j -f "%Y-%m-%dT%H:%M:%SZ" "$last_drift_ts" +%s 2>/dev/null || \
                            date -u -d "$last_drift_ts" +%s 2>/dev/null || echo 0)
         if [[ "$last_drift_epoch" == "0" ]]; then
             printf "    %-50s  [⚠ malformed ts: %s]\n" "drift history" "$last_drift_ts"
