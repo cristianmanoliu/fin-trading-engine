@@ -438,8 +438,12 @@ if [[ -d "$LAYER3_DIR" ]]; then
         # Count distinct symbols (= engines wrapped) + closed fills.
         n_engines=$(printf '%s\n' "${layer3_files[@]}" | xargs -n 1 basename 2>/dev/null \
             | awk -F'-' '{print $1}' | sort -u | wc -l | tr -d ' ')
+        # jq -c writes each matching event as one compact line so `wc -l`
+        # gives the actual event count (vs default pretty-print which
+        # expands each event across N lines — CI hit "16 fill(s)" on a
+        # 2-close fixture because of this 2026-05-19).
         n_fills=$(cat "${layer3_files[@]}" 2>/dev/null \
-            | jq -r 'select(.event=="close" and .outcome!="PARTIAL")' 2>/dev/null | wc -l | tr -d ' ')
+            | jq -c 'select(.event=="close" and .outcome!="PARTIAL")' 2>/dev/null | wc -l | tr -d ' ')
         # Earliest open event determines the 7d countdown.
         earliest_ts=$(cat "${layer3_files[@]}" 2>/dev/null \
             | jq -r 'select(.event=="open") | .ts' 2>/dev/null | sort | head -1)
