@@ -206,6 +206,17 @@ aggregate() {
 live_files=( "${JOURNAL_DIR}"/*-*.jsonl )
 aggregate "live" ${live_files[@]+"${live_files[@]}"}
 
+# Layer 3 (testnet shadow): journal/layer3/*-*.jsonl. The Layer 3 wrap is
+# the formally-required gate before STAGE_1 per
+# results/real_money_executor_architecture_decision_rule_2026-05-08.md.
+# Enabled on a subset of live engines via deploy/systemd/layer3.conf
+# drop-in (results/layer3_enablement_2026-05-19.md). Reported here so the
+# operator sees fill count + open positions alongside live + shadows.
+if [[ -d "${JOURNAL_DIR}/layer3" ]]; then
+    layer3_files=( "${JOURNAL_DIR}/layer3"/*-*.jsonl )
+    aggregate "layer3" ${layer3_files[@]+"${layer3_files[@]}"}
+fi
+
 # Shadows: scan shadow/*/  for any per-symbol files
 if [[ -d "${JOURNAL_DIR}/shadow" ]]; then
     for label_dir in "${JOURNAL_DIR}/shadow"/*/; do
