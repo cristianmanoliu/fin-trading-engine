@@ -113,7 +113,7 @@ set -e
 
 assert_eq "T1 exit code" "$rc" "0"
 assert_contains "T1 LIVE header" "$out" "LIVE"
-assert_contains "T1 3 trades"    "$out" "3 trades"
+assert_contains "T1 3 trades"    "$out" "Trades: 3"
 assert_contains "T1 WR 33.3%"    "$out" "33.3%"
 assert_contains "T1 PnL +4000"   "$out" "+4000"
 assert_contains "T1 open SHORT"  "$out" "SHORT"
@@ -201,7 +201,7 @@ set -e
 
 assert_eq "T5 exit code" "$rc5" "0"
 # Only 1 terminal close (TARGET) — PARTIAL is excluded
-assert_contains "T5 1 trade (PARTIAL excluded)" "$out5" "1 trades"
+assert_contains "T5 1 trade (PARTIAL excluded)" "$out5" "Trades: 1"
 
 # ── Summary ───────────────────────────────────────────────────────────────────
 echo
