@@ -67,7 +67,28 @@ if [[ $PULL_MODE -eq 0 ]]; then
     fi
     exit $rc
 else
-    # TODO Task 6+: --pull path
-    echo "ERR: --pull path not yet implemented" >&2
+    # --pull mode: full local-cache pipeline.
+
+    # Step 1: derive symbol set from VPS layer3/ listing.
+    # Filename schema: <SYMBOL>-YYYY-MM.jsonl — strip the date suffix, dedupe.
+    symbols=$(ssh -o BatchMode=yes -o ConnectTimeout=10 "$HOST" \
+        "ls $VPS_BASE/layer3/*.jsonl 2>/dev/null" \
+        | xargs -n1 basename 2>/dev/null \
+        | sed 's/-[0-9]\{4\}-[0-9]\{2\}\.jsonl$//' \
+        | sort -u)
+    ssh_rc=${PIPESTATUS[0]}
+    if [[ $ssh_rc -eq 255 ]]; then
+        echo "ERR: ssh to $HOST failed (exit 255 — host unreachable / auth failed)" >&2
+        exit 3
+    fi
+    if [[ -z "$symbols" ]]; then
+        echo "ERR: no Layer 3 journals on VPS at $VPS_BASE/layer3/" >&2
+        exit 3
+    fi
+
+    # TODO Task 5: mid-write guard
+    # TODO Task 6: wipe + rsync
+    # TODO Task 7: invoke verdict
+    echo "ERR: --pull pipeline not yet complete (symbols: $symbols)" >&2
     exit 99
 fi

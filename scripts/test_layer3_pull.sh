@@ -165,6 +165,40 @@ assert_not_contains "4.4 --pull NOT forwarded (helper-only flag)" "$ssh_record" 
 cleanup_sandbox "$sb"
 unset MOCK_LOG
 
+# ─────────────────────────────────────────────────────────────
+# Test 5: --pull on empty layer3/ → exit 3, no rsync invoked
+# ─────────────────────────────────────────────────────────────
+echo "Test 5: --pull empty layer3 dir"
+sb=$(new_sandbox)
+cat > "$sb/bin/ssh" <<'EOF'
+#!/usr/bin/env bash
+# args after host: the remote command. Look for `ls .../layer3/*.jsonl`
+# and return empty (nothing matches).
+case "$*" in
+    *"ls "*"/layer3/"*) exit 1 ;;  # empty match — ls returns nonzero
+    *) exit 0 ;;
+esac
+EOF
+chmod +x "$sb/bin/ssh"
+cat > "$sb/bin/rsync" <<'EOF'
+#!/usr/bin/env bash
+echo "rsync-called $*" >> "$MOCK_LOG"
+exit 0
+EOF
+chmod +x "$sb/bin/rsync"
+export MOCK_LOG="$sb/mock.log"
+: > "$MOCK_LOG"
+out=$(PATH="$sb/bin:$PATH" \
+      LAYER3_PULL_CACHE_DIR="$sb/cache" \
+      bash "$HELPER" --pull 2>&1)
+rc=$?
+assert_eq "5.1 empty layer3 → exit 3" "$rc" "3"
+assert_contains "5.2 message names the failure" "$out" "no Layer 3"
+rsync_log=$(cat "$MOCK_LOG" 2>/dev/null || true)
+assert_eq "5.3 rsync NOT invoked" "$rsync_log" ""
+cleanup_sandbox "$sb"
+unset MOCK_LOG
+
 echo
 echo "Total: $PASS passed, $FAIL failed"
 if [[ $FAIL -gt 0 ]]; then
