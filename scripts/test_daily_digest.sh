@@ -131,6 +131,10 @@ assert_contains "T1 BB20 no trades"  "$out" "no trades yet"
 # Open position line: ETHUSDT is the open symbol
 assert_contains "T1 Open line"   "$out" "Open:"
 
+# Layer 3 section appears (no journal/layer3 dir in fixture → "not active")
+assert_contains "T1 Layer 3 section header" "$out" "LAYER 3"
+assert_contains "T1 Layer 3 not active"     "$out" "not active"
+
 # Verdict line present
 assert_contains "T1 verdict"     "$out" "Verdict: WAITING"
 
@@ -202,6 +206,40 @@ set -e
 assert_eq "T5 exit code" "$rc5" "0"
 # Only 1 terminal close (TARGET) — PARTIAL is excluded
 assert_contains "T5 1 trade (PARTIAL excluded)" "$out5" "Trades: 1"
+
+# ── T6: Layer 3 journal dir with fills → engine/fill counts surface ─────────
+echo
+echo "── T6: Layer 3 journal dir with fills ──"
+
+LAYER3_JDIR="${TMPDIR_ROOT}/layer3_journal"
+mkdir -p "${LAYER3_JDIR}/layer3"
+# Live cohort: 1 close so day-count anchors correctly
+cat > "${LAYER3_JDIR}/SOLUSDT-2026-05.jsonl" <<'EOF'
+{"event":"open","symbol":"SOLUSDT","ts":"2026-05-01T10:00:00Z","side":"SHORT","entry":150,"stop":154,"target":138}
+{"event":"close","symbol":"SOLUSDT","ts":"2026-05-02T08:00:00Z","side":"SHORT","outcome":"TARGET","pnl_usd":1200}
+EOF
+# Two Layer 3 symbols with one fill each
+cat > "${LAYER3_JDIR}/layer3/SOLUSDT-2026-05.jsonl" <<'EOF'
+{"event":"open","symbol":"SOLUSDT","ts":"2026-05-01T10:00:00Z","side":"SHORT","entry":150,"stop":154,"target":138}
+{"event":"close","symbol":"SOLUSDT","ts":"2026-05-02T08:00:00Z","side":"SHORT","outcome":"TARGET","pnl_usd":1198}
+EOF
+cat > "${LAYER3_JDIR}/layer3/AVAXUSDT-2026-05.jsonl" <<'EOF'
+{"event":"open","symbol":"AVAXUSDT","ts":"2026-05-01T11:00:00Z","side":"SHORT","entry":50,"stop":52,"target":44}
+{"event":"close","symbol":"AVAXUSDT","ts":"2026-05-02T05:00:00Z","side":"SHORT","outcome":"STOP","pnl_usd":-300}
+EOF
+
+set +e
+out6=$(DRY_RUN=1 JOURNAL_DIR="$LAYER3_JDIR" bash "$DIGEST" 2>&1)
+rc6=$?
+set -e
+
+assert_eq "T6 exit code" "$rc6" "0"
+assert_contains "T6 Layer 3 header"     "$out6" "LAYER 3"
+# 2 engines (SOL + AVAX), 2 fills (both have close events)
+assert_contains "T6 Layer 3 engines"    "$out6" "2 engine(s)"
+assert_contains "T6 Layer 3 fills"      "$out6" "2 fill(s)"
+# Day count present (format "N/7d window")
+assert_contains "T6 Layer 3 window"     "$out6" "/7d window"
 
 # ── Summary ───────────────────────────────────────────────────────────────────
 echo

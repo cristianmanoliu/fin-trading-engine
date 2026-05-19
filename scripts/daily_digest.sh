@@ -204,10 +204,28 @@ if [[ ${#live_files[@]} -gt 0 ]]; then
 fi
 
 # ── Compute days elapsed ────────────────────────────────────────────────────
+# Canonical anchor per results/time_anchor_resolution_2026-05-12.md is
+# first close (NOT deploy date). Matches stage_promotion_check.py and
+# forward_paper_status.sh aggregate. Sole exception path: when no closes
+# exist yet, fall back to FORWARD_START so the digest still produces a
+# meaningful pre-first-close day-count.
 NOW_EPOCH=$(date -u +%s)
-start_epoch=$(date -d "${FORWARD_START}" +%s 2>/dev/null || \
-              date -u -j -f "%Y-%m-%d" "${FORWARD_START}" +%s 2>/dev/null || \
-              echo "$NOW_EPOCH")
+first_close_ts=""
+if [[ ${#live_files[@]} -gt 0 ]] && [[ -f "${live_files[0]}" ]]; then
+    first_close_ts=$(cat "${live_files[@]}" 2>/dev/null \
+        | jq -r 'select(.event=="close") | .ts' 2>/dev/null \
+        | sort | head -1)
+fi
+if [[ -n "$first_close_ts" ]]; then
+    start_epoch=$(date -d "$first_close_ts" +%s 2>/dev/null || \
+                  date -u -j -f "%Y-%m-%dT%H:%M:%SZ" "${first_close_ts%%.*}Z" +%s 2>/dev/null || \
+                  echo "$NOW_EPOCH")
+else
+    # No closes yet — fall back to deploy date so day-count isn't zero.
+    start_epoch=$(date -d "${FORWARD_START}" +%s 2>/dev/null || \
+                  date -u -j -f "%Y-%m-%d" "${FORWARD_START}" +%s 2>/dev/null || \
+                  echo "$NOW_EPOCH")
+fi
 live_days=$(( (NOW_EPOCH - start_epoch) / 86400 ))
 
 # ── Build LIVE section ──────────────────────────────────────────────────────
@@ -380,92 +398,71 @@ if [[ -d "$shadow_base" ]]; then
         shadow_json_parts="${shadow_json_parts}\"${label_name}\":{\"trades\":${s_trades},\"pnl\":${s_pnl},\"wins\":${s_wins}},"
     done
 
-    # Divergence detection: compare alt5-15-336 vs alt5-15-504
-    t336="${shadow_trades[alt5-15-336]:-0}"
-    t504="${shadow_trades[alt5-15-504]:-0}"
-    p336="${shadow_pnl[alt5-15-336]:-0}"
-    p504="${shadow_pnl[alt5-15-504]:-0}"
-    if [[ "$t336" -gt 0 ]] && [[ "$t504" -gt 0 ]]; then
-        if [[ "$t336" == "$t504" ]]; then
-            pnl_match=$(awk -v a="$p336" -v b="$p504" 'BEGIN{print (a==b)?"yes":"no"}')
-            if [[ "$pnl_match" == "yes" ]]; then
-                MSG+=$'\n'"  336 vs 504: identical (no trade >336h yet)"
-            else
-                MSG+=$'\n'"  336 vs 504: DIVERGED (trades=${t336} but PnL differs)"
-            fi
-        else
-            MSG+=$'\n'"  336 vs 504: DIVERGED (${t336} vs ${t504} trades)"
+    # Divergence detection: delegate to shadow_divergence.sh ONELINE mode.
+    # The harness (shipped 2026-05-18, scripts/shadow_divergence.sh) does
+    # per-trade matching: MATCHED (byte-identical), DIVERGED (336h force-
+    # close vs 504h natural exit), ORPHAN (one side only). The previous
+    # inline check only compared aggregate trade-count + total PnL — it
+    # would report "DIVERGED" if either side had ONE more closed trade
+    # for any reason (e.g. a single race-condition close), and conversely
+    # miss a divergence if total PnL happened to be equal by coincidence.
+    # The harness's per-trade classifier is strictly more informative.
+    div_script="${SCRIPT_DIR}/shadow_divergence.sh"
+    if [[ -f "$div_script" ]]; then
+        div_target="${SHADOW_DIVERGENCE_TARGET:-local}"
+        # Run with JOURNAL_DIR override (already in environment). Suppress
+        # stderr so a transient harness error doesn't pollute the Telegram
+        # digest; `|| true` keeps daily_digest's set -e from tripping.
+        div_line=$(JOURNAL_DIR="$JOURNAL_DIR" ONELINE=1 \
+            bash "$div_script" "$div_target" 2>/dev/null || true)
+        if [[ -n "$div_line" ]]; then
+            MSG+=$'\n'"  ${div_line}"
         fi
     fi
 fi
 
-# ── Testnet engines (Layer 2) ───────────────────────────────────────────────
-# Multi-symbol since 2026-05-19 (results/testnet_multi_symbol_extension_2026-05-19.md).
-# Aggregates closed trades from all testnet symbols; falls back to per-log
-# heartbeat scan when no journal data yet. TESTNET_LOG_GLOB is overridable for
-# tests but defaults to the production path glob.
-TESTNET_DIR="${JOURNAL_DIR}/testnet"
-TESTNET_LOG_GLOB="${TESTNET_LOG_GLOB:-/var/log/paper-live/testnet-*.log}"
-
-testnet_status=""
-if [[ -d "$TESTNET_DIR" ]]; then
-    testnet_files=( "${TESTNET_DIR}"/*-*.jsonl )
-    if [[ ${#testnet_files[@]} -gt 0 ]] && [[ -f "${testnet_files[0]}" ]]; then
-        testnet_raw=$(parse_cohort_full "${testnet_files[@]}")
-        t_stats=$(echo "$testnet_raw" | grep "^STATS" | head -1)
-        if [[ -n "$t_stats" ]]; then
-            t_trades=$(echo "$t_stats" | awk -F'\t' '{print $2}')
-            t_wins=$(echo "$t_stats" | awk -F'\t' '{print $3}')
-            t_pnl=$(echo "$t_stats" | awk -F'\t' '{print $4}')
-            t_pnl_int=$(awk -v p="$t_pnl" 'BEGIN{printf "%+.0f", p}')
-            testnet_status="${t_trades} trades (${t_wins}W) PnL=\$${t_pnl_int}"
-        fi
-        t_open=$(echo "$testnet_raw" | grep "^OPEN" || true)
-        if [[ -n "$t_open" ]]; then
-            while IFS=$'\t' read -r _tag sym side entry _stop _target; do
-                [[ "$_tag" != "OPEN" ]] && continue
-                testnet_status="${testnet_status} | open: ${sym} ${side} @ ${entry}"
-            done <<< "$t_open"
-        fi
-    fi
-fi
-
-if [[ -z "$testnet_status" ]]; then
-    # No journal data — scan each testnet log for the most recent heartbeat.
-    # shellcheck disable=SC2086  # intentional glob expansion on TESTNET_LOG_GLOB
-    testnet_logs=( $TESTNET_LOG_GLOB )
-    # When the glob doesn't match anything bash leaves the literal pattern as
-    # the sole array element. Probe element 0 with the "default if unset" form
-    # so set -u doesn't trip on a truly empty array (defensive, both shapes covered).
-    if [[ -n "${testnet_logs[0]:-}" ]] && [[ -f "${testnet_logs[0]}" ]]; then
-        best_hb=""
-        best_log=""
-        for tlog in "${testnet_logs[@]}"; do
-            [[ -f "$tlog" ]] || continue
-            this_hb=$(grep "heartbeat" "$tlog" 2>/dev/null | tail -1)
-            [[ -z "$this_hb" ]] && continue
-            this_ts=$(echo "$this_hb" | jq -r '.time // empty' 2>/dev/null)
-            if [[ -z "$best_hb" ]] || [[ "$this_ts" > "$best_hb" ]]; then
-                best_hb="$this_ts"
-                best_log="$tlog"
-            fi
-        done
-        if [[ -n "$best_hb" ]]; then
-            n_engines=${#testnet_logs[@]}
-            lag_p50=$(grep "heartbeat" "$best_log" 2>/dev/null | tail -1 | jq -r '.lag_p50_ms // empty' 2>/dev/null)
-            testnet_status="${n_engines} engine(s) running (no signals yet) last_hb=${best_hb:0:19}"
-            [[ -n "$lag_p50" ]] && testnet_status="${testnet_status} lag_p50=${lag_p50}ms"
+# ── Layer 3 shadow-parity (same-tick stub-primary + testnet-shadow) ─────────
+# Per real_money_executor_architecture_decision_rule_2026-05-08.md, Layer 3
+# is the formally-required gate before STAGE_1: BinanceLive(testnet) shadow
+# running on the SAME tick stream as the existing Stub primary, for ≥7d.
+# Verdict via scripts/layer3_verdict.sh. Enabled on a subset of live engines
+# via deploy/systemd/layer3.conf drop-in (results/layer3_enablement_2026-05-19.md).
+# Journal subdirectory: ${JOURNAL_DIR}/layer3/. Falls back to a "not active"
+# line when no journal dir exists (Layer 3 not yet enabled).
+LAYER3_DIR="${JOURNAL_DIR}/layer3"
+LAYER3_MIN_DAYS=7
+layer3_status=""
+if [[ -d "$LAYER3_DIR" ]]; then
+    layer3_files=( "${LAYER3_DIR}"/*-*.jsonl )
+    if [[ ${#layer3_files[@]} -gt 0 ]] && [[ -f "${layer3_files[0]}" ]]; then
+        # Count distinct symbols (= engines wrapped) + closed fills.
+        n_engines=$(printf '%s\n' "${layer3_files[@]}" | xargs -n 1 basename 2>/dev/null \
+            | awk -F'-' '{print $1}' | sort -u | wc -l | tr -d ' ')
+        n_fills=$(cat "${layer3_files[@]}" 2>/dev/null \
+            | jq -r 'select(.event=="close" and .outcome!="PARTIAL")' 2>/dev/null | wc -l | tr -d ' ')
+        # Earliest open event determines the 7d countdown.
+        earliest_ts=$(cat "${layer3_files[@]}" 2>/dev/null \
+            | jq -r 'select(.event=="open") | .ts' 2>/dev/null | sort | head -1)
+        if [[ -n "$earliest_ts" ]]; then
+            earliest_epoch=$(date -d "$earliest_ts" +%s 2>/dev/null || \
+                             date -u -j -f "%Y-%m-%dT%H:%M:%SZ" "${earliest_ts%%.*}Z" +%s 2>/dev/null || \
+                             echo "$NOW_EPOCH")
+            days_in_window=$(( (NOW_EPOCH - earliest_epoch) / 86400 ))
+            layer3_status="${n_engines} engine(s), ${n_fills} fill(s), ${days_in_window}/${LAYER3_MIN_DAYS}d window"
         else
-            testnet_status="logs exist but no heartbeats"
+            layer3_status="${n_engines} engine(s) wrapped, awaiting first event"
         fi
     else
-        testnet_status="not running (no logs)"
+        # Directory exists but empty — Layer 3 wrapper active but no events yet
+        layer3_status="enabled, awaiting first event"
     fi
+else
+    layer3_status="not active"
 fi
 
 MSG+=$'\n'
-MSG+=$'\n'"TESTNET"
-MSG+=$'\n'"  ${testnet_status}"
+MSG+=$'\n'"LAYER 3"
+MSG+=$'\n'"  ${layer3_status}"
 
 # ── Verdict line ─────────────────────────────────────────────────────────────
 MSG+=$'\n'
