@@ -623,6 +623,53 @@ class Layer3TopologyRegressionTest(unittest.TestCase):
                 f"exit 2 (SIGNAL_DIVERGENCE — testnet shadow saw a signal "
                 f"the stub didn't). got {code}\nstdout:\n{out}\nstderr:\n{err}")
 
+    def test_no_scope_by_dir_b_disables_filter(self):
+        """Defense for the --no-scope-by-dir-b opt-out flag. A future
+        refactor of layer3_verdict.sh's arg-parsing could silently drop
+        the flag without removing it from the help text — operator opts
+        out for forensic debug, expects symmetric mode, gets asymmetric
+        anyway, misreads the verdict.
+
+        Fixture: 2 wrapped symbols on both sides + 1 non-wrapped only-in-A.
+        With --no-scope-by-dir-b: should fire SIGNAL_DIVERGENCE (exit 2)
+        because the non-wrapped only-in-A trade is no longer filtered.
+        Compare with test_per_symbol_pilot_asymmetric_scope_passes which
+        verifies the default-on case — together they pin BOTH semantics."""
+        with tempfile.TemporaryDirectory() as tmp:
+            stub = Path(tmp) / "stub"
+            tn = Path(tmp) / "testnet"
+            stub.mkdir()
+            tn.mkdir()
+
+            base = dt.datetime(2025, 4, 1, 10, 0, 0, tzinfo=dt.timezone.utc)
+            # In-scope: KAVAUSDT + ENSUSDT matched on both sides.
+            for i, sym in enumerate(("KAVAUSDT", "ENSUSDT")):
+                ts = base + dt.timedelta(hours=i)
+                write_pair(stub, sym, ts, +1000.0)
+                write_pair(tn, sym, ts, +1000.0)
+            # Out-of-scope: BCHUSDT only on stub side. Default-on this would
+            # be silently dropped; --no-scope-by-dir-b should expose it.
+            write_pair(stub, "BCHUSDT", base + dt.timedelta(hours=5), +500.0)
+
+            code, out, err = run_wrapper(
+                "--no-scope-by-dir-b",
+                "--stub-dir", str(stub), "--testnet-dir", str(tn),
+            )
+            self.assertEqual(code, 2,
+                f"--no-scope-by-dir-b should DISABLE the asymmetric "
+                f"filter — only-A BCHUSDT trade should fire "
+                f"SIGNAL_DIVERGENCE (exit 2). Got {code}.\n"
+                f"This catches the refactor regression where the bash "
+                f"flag could silently stop being passed to journal_diff.\n"
+                f"stdout:\n{out}\nstderr:\n{err}")
+            # The opt-out's INFO log line should NOT appear (it only fires
+            # when scope filter IS active).
+            self.assertNotIn("--scope-by-dir-b active", out + err,
+                f"--no-scope-by-dir-b: the scope-active INFO line "
+                f"should NOT appear — that line only fires when the "
+                f"filter is engaged. If it appears, the flag isn't "
+                f"being respected.\nout:\n{out}\nerr:\n{err}")
+
 
 class JournalFieldsMatchWriterTest(unittest.TestCase):
     """L3-extension (2026-05-12): the writer-equals-fixture lens (L2-7) applied
