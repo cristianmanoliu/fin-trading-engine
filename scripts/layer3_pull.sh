@@ -89,7 +89,38 @@ else
         exit 3
     fi
 
-    # TODO Task 5: mid-write guard
+    # Step 2: mid-write guard. Bash command substitution strips trailing
+    # newlines, so $(tail -c 1 file) of a newline-terminated file returns
+    # empty — that's our OK signal. A mid-write file returns the last
+    # raw byte. We tag the SSH call so the test mock can distinguish it
+    # from the ls call above.
+    retry_sleep="${LAYER3_PULL_RETRY_SLEEP:-2}"
+    # Build the remote one-liner. Test mocks recognize the "mid-write-check"
+    # tag. The remote `for f in <files>; do ...; done` checks each file.
+    check_files=""
+    for s in $symbols; do
+        check_files+=" $VPS_BASE/layer3/${s}-*.jsonl"
+        check_files+=" $VPS_BASE/${s}-*.jsonl"
+    done
+    check_cmd="# mid-write-check
+for f in${check_files}; do
+    [[ -s \"\$f\" ]] || continue
+    last=\$(tail -c 1 \"\$f\")
+    if [[ -n \"\$last\" ]]; then
+        echo \"MID:\$f\"
+        exit 1
+    fi
+done
+exit 0"
+
+    if ! ssh -o BatchMode=yes -o ConnectTimeout=10 "$HOST" "$check_cmd" > /dev/null 2>&1; then
+        sleep "$retry_sleep"
+        if ! ssh -o BatchMode=yes -o ConnectTimeout=10 "$HOST" "$check_cmd" > /dev/null 2>&1; then
+            echo "ERR: VPS journal mid-write detected; retry shortly" >&2
+            exit 3
+        fi
+    fi
+
     # TODO Task 6: wipe + rsync
     # TODO Task 7: invoke verdict
     echo "ERR: --pull pipeline not yet complete (symbols: $symbols)" >&2

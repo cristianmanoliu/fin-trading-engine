@@ -199,6 +199,60 @@ assert_eq "5.3 rsync NOT invoked" "$rsync_log" ""
 cleanup_sandbox "$sb"
 unset MOCK_LOG
 
+# ─────────────────────────────────────────────────────────────
+# Test 6: mid-write detected → retry once → still failing → exit 3
+# ─────────────────────────────────────────────────────────────
+echo "Test 6: mid-write guard"
+sb=$(new_sandbox)
+# Mock ssh: first call (ls) returns a symbol; subsequent (mid-write checks)
+# emit MID indicator and exit 1. SANDBOX env carries the sandbox root so the
+# mock can read/write its own count file.
+cat > "$sb/bin/ssh" <<'EOF'
+#!/usr/bin/env bash
+COUNT_FILE="$SANDBOX/ssh_count"
+count=$(cat "$COUNT_FILE" 2>/dev/null || echo 0)
+count=$((count + 1))
+echo "$count" > "$COUNT_FILE"
+case "$*" in
+    *"ls "*"/layer3/"*)
+        echo "/var/log/paper-live/journal/layer3/KAVAUSDT-2026-05.jsonl"
+        ;;
+    *"mid-write-check"*)
+        # Both retries fail — emit MID:<file> on stdout
+        echo "MID:/var/log/paper-live/journal/layer3/KAVAUSDT-2026-05.jsonl"
+        exit 1
+        ;;
+    *)
+        exit 0
+        ;;
+esac
+EOF
+chmod +x "$sb/bin/ssh"
+cat > "$sb/bin/rsync" <<'EOF'
+#!/usr/bin/env bash
+echo "rsync-called $*" >> "$MOCK_LOG"
+exit 0
+EOF
+chmod +x "$sb/bin/rsync"
+export MOCK_LOG="$sb/mock.log"
+: > "$MOCK_LOG"
+export SANDBOX="$sb"
+# LAYER3_PULL_RETRY_SLEEP overrides the 2s sleep to keep tests fast.
+out=$(PATH="$sb/bin:$PATH" \
+      LAYER3_PULL_CACHE_DIR="$sb/cache" \
+      LAYER3_PULL_RETRY_SLEEP=0 \
+      bash "$HELPER" --pull 2>&1)
+rc=$?
+assert_eq "6.1 persistent mid-write → exit 3" "$rc" "3"
+assert_contains "6.2 message mentions mid-write" "$out" "mid-write"
+rsync_log=$(cat "$MOCK_LOG" 2>/dev/null || true)
+assert_eq "6.3 rsync NOT invoked when mid-write fails" "$rsync_log" ""
+ssh_count=$(cat "$sb/ssh_count" 2>/dev/null || echo 0)
+# Expected: 1 ls + 2 mid-write checks (initial + 1 retry) = 3
+assert_eq "6.4 ssh called 3 times (ls + 2 mid-write checks)" "$ssh_count" "3"
+cleanup_sandbox "$sb"
+unset MOCK_LOG SANDBOX
+
 echo
 echo "Total: $PASS passed, $FAIL failed"
 if [[ $FAIL -gt 0 ]]; then
