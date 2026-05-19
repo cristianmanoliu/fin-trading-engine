@@ -358,3 +358,102 @@ func TestCLI_IncludeShadowsFlag_RestoresFullCompare(t *testing.T) {
 		t.Errorf("opt-in shadow path: ETHUSDT must appear in report\nout:\n%s", out)
 	}
 }
+
+// ── --scope-by-dir-b tests ──────────────────────────────────────────────────
+// The Layer 3 wrap covers a subset of live engines (per locked rule "before
+// flipping any SINGLE engine to BinanceLive"). dir-a (live stub) holds 16
+// live symbols; dir-b (testnet shadow) holds only the wrapped subset. Without
+// --scope-by-dir-b every non-wrapped live close fires SIGNAL_DIVERGENCE,
+// making Layer 3 impossible to PASS in any real per-symbol pilot.
+
+// TestCLI_ScopeByDirB_DropsNonOverlappingASymbols verifies that aTrades on
+// symbols absent from bTrades are silently dropped (not divergence) when
+// --scope-by-dir-b is set. dir-a has BTCUSDT + ETHUSDT closes; dir-b has
+// only BTCUSDT. Without the flag → exit 2 (ETHUSDT-only-in-A); with the
+// flag → exit 0 (ETHUSDT silently dropped, BTCUSDT pairs cleanly).
+func TestCLI_ScopeByDirB_DropsNonOverlappingASymbols(t *testing.T) {
+	dirA := t.TempDir()
+	dirB := t.TempDir()
+	writeJournal(t, dirA, "BTCUSDT", "2026-05", sampleTrades([]float64{1000}))
+	writeJournal(t, dirA, "ETHUSDT", "2026-05", sampleTrades([]float64{500}))
+	writeJournal(t, dirB, "BTCUSDT", "2026-05", sampleTrades([]float64{1000}))
+
+	// Without flag: ETHUSDT-only-in-A → SIGNAL_DIVERGENCE.
+	code, _ := runDiff(t, "--dir-a", filepath.Join(dirA, "journal"),
+		"--dir-b", filepath.Join(dirB, "journal"))
+	if code != 2 {
+		t.Errorf("baseline (no --scope-by-dir-b): expected exit 2, got %d", code)
+	}
+
+	// With flag: ETHUSDT dropped, BTCUSDT matches → PASS.
+	code, out := runDiff(t, "--scope-by-dir-b",
+		"--dir-a", filepath.Join(dirA, "journal"),
+		"--dir-b", filepath.Join(dirB, "journal"))
+	if code != 0 {
+		t.Errorf("--scope-by-dir-b: expected exit 0 (BTC matches, ETH dropped silently), got %d\nout:\n%s", code, out)
+	}
+	if !strings.Contains(out, "--scope-by-dir-b active") {
+		t.Errorf("expected INFO log line announcing scope-by-dir-b activation\nout:\n%s", out)
+	}
+}
+
+// TestCLI_ScopeByDirB_OnlyBStillDiverges verifies the asymmetric semantics:
+// trades in dir-b without peers in dir-a STILL flag SIGNAL_DIVERGENCE even
+// with --scope-by-dir-b. Layer 3's contract is "stub must produce identical
+// signals to testnet shadow on shared ticks" — missing-from-stub IS a real
+// failure, only missing-from-testnet (= symbol not wrapped) is out of scope.
+func TestCLI_ScopeByDirB_OnlyBStillDiverges(t *testing.T) {
+	dirA := t.TempDir()
+	dirB := t.TempDir()
+	// dir-a has 1 BTC trade. dir-b has 2 BTC trades. Second BTC trade has no peer in A.
+	writeJournal(t, dirA, "BTCUSDT", "2026-05", sampleTrades([]float64{1000}))
+	writeJournal(t, dirB, "BTCUSDT", "2026-05", sampleTrades([]float64{1000, 500}))
+
+	code, _ := runDiff(t, "--scope-by-dir-b",
+		"--dir-a", filepath.Join(dirA, "journal"),
+		"--dir-b", filepath.Join(dirB, "journal"))
+	if code != 2 {
+		t.Errorf("--scope-by-dir-b + only-B trade: expected exit 2 (real divergence — testnet shadow saw a signal the stub didn't), got %d", code)
+	}
+}
+
+// TestCLI_ScopeByDirB_ThresholdStillFiresOnMatchedPairs verifies that the
+// flag only changes the PAIRING set, not the threshold logic. Symbols
+// kept in scope still must meet the 0.5% threshold.
+func TestCLI_ScopeByDirB_ThresholdStillFiresOnMatchedPairs(t *testing.T) {
+	dirA := t.TempDir()
+	dirB := t.TempDir()
+	// Kept-in-scope BTCUSDT pair has 50% PnL diff (way over 0.5% threshold).
+	// Out-of-scope ETHUSDT in dir-a is silently dropped.
+	writeJournal(t, dirA, "BTCUSDT", "2026-05", sampleTrades([]float64{1000}))
+	writeJournal(t, dirA, "ETHUSDT", "2026-05", sampleTrades([]float64{500}))
+	writeJournal(t, dirB, "BTCUSDT", "2026-05", sampleTrades([]float64{2000}))
+
+	code, _ := runDiff(t, "--scope-by-dir-b",
+		"--dir-a", filepath.Join(dirA, "journal"),
+		"--dir-b", filepath.Join(dirB, "journal"))
+	if code != 1 {
+		t.Errorf("--scope-by-dir-b + over-threshold pair: expected exit 1 (THRESHOLD), got %d", code)
+	}
+}
+
+// TestCLI_ScopeByDirB_EmptyDirB_NoPairs verifies the empty-dir-b case:
+// nothing in scope → zero pairs → PASS by vacuous truth. Layer 3 verdict
+// wrapper handles "no data" via the --min-days gate, NOT via the diff
+// itself (the wrapper returns INSUFFICIENT_DURATION when window <7d).
+func TestCLI_ScopeByDirB_EmptyDirB_NoPairs(t *testing.T) {
+	dirA := t.TempDir()
+	dirB := t.TempDir()
+	writeJournal(t, dirA, "BTCUSDT", "2026-05", sampleTrades([]float64{1000}))
+	// dir-b: directory exists but holds no jsonl files.
+	if err := os.MkdirAll(filepath.Join(dirB, "journal"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	code, _ := runDiff(t, "--scope-by-dir-b",
+		"--dir-a", filepath.Join(dirA, "journal"),
+		"--dir-b", filepath.Join(dirB, "journal"))
+	if code != 0 {
+		t.Errorf("--scope-by-dir-b + empty-dir-b: expected exit 0 (vacuous PASS — operator's responsibility to check duration via layer3_verdict.sh), got %d", code)
+	}
+}

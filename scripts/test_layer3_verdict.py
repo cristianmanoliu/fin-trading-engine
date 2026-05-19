@@ -535,6 +535,89 @@ class Layer3TopologyRegressionTest(unittest.TestCase):
                 f"shadow SOLUSDT trade leaked into Layer 3 report — "
                 f"default shadow-exclusion broken.\nout:\n{out}")
 
+    def test_per_symbol_pilot_asymmetric_scope_passes(self):
+        """End-to-end regression for the SECOND Layer 3 asymmetric topology
+        discovered 2026-05-19. Layer 3 wraps a SUBSET of live engines per
+        the locked rule ("before flipping any SINGLE engine to BinanceLive").
+
+        Production topology after 2026-05-19 enablement:
+            STUB primary:    16 live symbols (KAVAUSDT, ENSUSDT, BCHUSDT, ...)
+            Testnet shadow:  2 wrapped symbols (KAVAUSDT, ENSUSDT only)
+
+        Pre-fix, the diff binary's symmetric pairing flagged every
+        non-wrapped stub close as Only-A → SIGNAL_DIVERGENCE → exit 2 →
+        wrapper returned Layer 3 FAIL. With 14 non-wrapped symbols
+        producing fresh closes daily, the gate could NEVER PASS.
+
+        Post-fix, layer3_verdict.sh passes --scope-by-dir-b to journal_diff
+        by default: aTrades on symbols absent from bTrades are silently
+        dropped before pairing. The gate PASSes when in-scope symbols match.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            stub = Path(tmp) / "stub"
+            tn = Path(tmp) / "testnet"
+            stub.mkdir()
+            tn.mkdir()
+
+            base = dt.datetime(2025, 4, 1, 10, 0, 0, tzinfo=dt.timezone.utc)
+            # Wrapped symbols (in scope): match on both sides.
+            for i, sym in enumerate(("KAVAUSDT", "ENSUSDT")):
+                ts = base + dt.timedelta(hours=i)
+                write_pair(stub, sym, ts, +1000.0)
+                write_pair(tn, sym, ts, +1000.0)
+
+            # 14 non-wrapped live symbols (out of scope): in stub only.
+            for i, sym in enumerate(("BCHUSDT", "GRTUSDT", "DOTUSDT",
+                                     "ROSEUSDT", "1000SHIBUSDT", "ADAUSDT",
+                                     "AVAXUSDT", "1INCHUSDT", "XLMUSDT",
+                                     "IMXUSDT", "ETCUSDT", "RUNEUSDT",
+                                     "APTUSDT", "FILUSDT")):
+                ts = base + dt.timedelta(hours=10 + i)
+                write_pair(stub, sym, ts, +500.0 * (i + 1))
+
+            code, out, err = run_wrapper(
+                "--stub-dir", str(stub), "--testnet-dir", str(tn),
+            )
+            self.assertEqual(code, 0,
+                f"Layer 3 must PASS when per-symbol pilot wraps only a "
+                f"subset of live engines. Pre-fix this exited 2 "
+                f"(SIGNAL_DIVERGENCE) because the 14 non-wrapped live "
+                f"symbols had no peer in the testnet dir. Without "
+                f"--scope-by-dir-b the entire Layer 3 enablement on "
+                f"production (KAVA + ENS only) cannot reach STAGE_1.\n"
+                f"exit={code}\nstdout:\n{out}\nstderr:\n{err}")
+            self.assertIn("PASS — Layer 3 criterion met", out)
+            # Verify the INFO log line confirms the filter was applied.
+            self.assertIn("--scope-by-dir-b active", out + err,
+                f"expected the INFO line announcing --scope-by-dir-b activation "
+                f"(documents the filter is doing real work)\nout:\n{out}\nerr:\n{err}")
+
+    def test_per_symbol_pilot_real_divergence_still_fails(self):
+        """Defense-in-depth: --scope-by-dir-b must NOT mask real divergence
+        within in-scope symbols. A testnet trade with no peer in the stub
+        is still a real signal-divergence failure — testnet shadow fired
+        on a signal the stub missed."""
+        with tempfile.TemporaryDirectory() as tmp:
+            stub = Path(tmp) / "stub"
+            tn = Path(tmp) / "testnet"
+            stub.mkdir()
+            tn.mkdir()
+
+            base = dt.datetime(2025, 4, 1, 10, 0, 0, tzinfo=dt.timezone.utc)
+            # 1 stub trade for KAVAUSDT, 2 testnet trades for KAVAUSDT.
+            # Second testnet trade has no peer → real divergence.
+            write_pair(stub, "KAVAUSDT", base, +1000.0)
+            write_pair(tn, "KAVAUSDT", base, +1000.0)
+            write_pair(tn, "KAVAUSDT", base + dt.timedelta(hours=2), +500.0)
+
+            code, out, err = run_wrapper(
+                "--stub-dir", str(stub), "--testnet-dir", str(tn),
+            )
+            self.assertEqual(code, 2,
+                f"--scope-by-dir-b + real only-testnet trade: expected "
+                f"exit 2 (SIGNAL_DIVERGENCE — testnet shadow saw a signal "
+                f"the stub didn't). got {code}\nstdout:\n{out}\nstderr:\n{err}")
+
 
 class JournalFieldsMatchWriterTest(unittest.TestCase):
     """L3-extension (2026-05-12): the writer-equals-fixture lens (L2-7) applied

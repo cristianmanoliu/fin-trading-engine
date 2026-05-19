@@ -37,6 +37,15 @@
 #     scripts/layer3_verdict.sh --testnet-start 2026-05-15T00:00:00Z   # explicit start
 #     scripts/layer3_verdict.sh --skip-min-days                       # dry-run before 7d
 #     scripts/layer3_verdict.sh --verbose                             # journal_diff verbose
+#     scripts/layer3_verdict.sh --no-scope-by-dir-b                   # disable per-symbol filter (forensic only)
+#
+# --scope-by-dir-b is enabled by default. Layer 3 wraps a SUBSET of live
+# engines (per locked rule "before flipping any SINGLE engine"), so the
+# stub dir has 16 live symbols while the testnet dir has only the wrapped
+# subset. Without filtering, every non-wrapped live close fires
+# SIGNAL_DIVERGENCE and the gate cannot PASS. The flag restricts pairing
+# to symbols present in dir-b; trades in dir-b without peers still
+# divergence (real failure — testnet shadow saw a signal the stub didn't).
 #
 # Test env-vars (NOT for production use):
 #     LAYER3_VERDICT_DIFF_OVERRIDE=PATH — use this binary as journal_diff
@@ -55,6 +64,13 @@ SKIP_MIN_DAYS=0
 VERBOSE=0
 LABEL_A="stub"
 LABEL_B="testnet"
+# Layer 3 is asymmetric by design per the locked rule: the testnet shadow
+# wraps a SUBSET of live engines ("before flipping any SINGLE engine"). The
+# stub dir contains all 16 live symbols; the testnet dir contains only the
+# wrapped subset. Without scope-by-dir-b, every non-wrapped close in the
+# stub dir fires SIGNAL_DIVERGENCE (exit 2) and the gate cannot PASS.
+# Default ON; --no-scope-by-dir-b reverts to symmetric for forensic debug.
+SCOPE_BY_DIR_B=1
 
 usage() {
     sed -n '2,/^set/p' "$0" | sed 's/^# \?//' | head -n -1
@@ -73,6 +89,7 @@ while [[ $# -gt 0 ]]; do
         --verbose)         VERBOSE=1; shift ;;
         --label-a)         LABEL_A="$2"; shift 2 ;;
         --label-b)         LABEL_B="$2"; shift 2 ;;
+        --no-scope-by-dir-b) SCOPE_BY_DIR_B=0; shift ;;
         -h|--help)         usage ;;
         *)
             echo "ERROR: unknown flag: $1" >&2
@@ -212,6 +229,9 @@ DIFF_ARGS=(
     --label-b "$LABEL_B"
 )
 [[ "$VERBOSE" == "1" ]] && DIFF_ARGS+=(--verbose)
+# Default-on per locked rule (asymmetric per-symbol pilot architecture);
+# operator opts out via --no-scope-by-dir-b for forensic debug.
+[[ "$SCOPE_BY_DIR_B" == "1" ]] && DIFF_ARGS+=(--scope-by-dir-b)
 
 set +e
 diff_out=$("$DIFF_BIN" "${DIFF_ARGS[@]}" 2>&1)

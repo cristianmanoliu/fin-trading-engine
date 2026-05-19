@@ -314,6 +314,19 @@ func main() {
 		// trade with no peer. Pass --include-shadows for cross-shadow diffs.
 		includeShadows = flag.Bool("include-shadows", false,
 			"include shadow/<label>/*.jsonl trees in the diff (default OFF: Layer 3 wrapper compares live-only)")
+		// scopeByDirB: Layer 3 asymmetric-pilot mode. Layer 3 wraps a
+		// SUBSET of live engines per the locked rule ("before flipping any
+		// SINGLE engine to BinanceLive"); per-symbol pilots mean dir-b
+		// (testnet shadow) contains fewer symbols than dir-a (live stub).
+		// Without this flag, every dir-a-only symbol fires
+		// SIGNAL_DIVERGENCE, making the gate impossible to PASS under any
+		// real per-symbol pilot. With the flag set, aTrades are filtered
+		// to symbols present in bTrades before pairing. onlyB still
+		// triggers divergence (data missing from A is real divergence —
+		// the live stub should produce identical signals to the testnet
+		// shadow on shared ticks). Pass --scope-by-dir-b for layer3 use.
+		scopeByDirB = flag.Bool("scope-by-dir-b", false,
+			"restrict aTrades to symbols present in bTrades before pairing (Layer 3 asymmetric per-symbol pilot mode; layer3_verdict.sh sets this by default)")
 	)
 	flag.Parse()
 
@@ -332,6 +345,32 @@ func main() {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ERROR reading --dir-b: %v\n", err)
 		os.Exit(3)
+	}
+
+	// Layer 3 asymmetric scope: when --scope-by-dir-b is set, drop aTrades
+	// whose symbol does not appear in bTrades. The Layer 3 wrap covers a
+	// subset of live engines (per-symbol pilots per the locked rule); the
+	// remaining 14+ live symbols correctly produce closes in dir-a that
+	// have no peer in dir-b — that's not divergence, it's scope.
+	if *scopeByDirB {
+		bSymbols := make(map[string]struct{}, len(bTrades))
+		for _, t := range bTrades {
+			bSymbols[t.Symbol] = struct{}{}
+		}
+		preLen := len(aTrades)
+		filtered := make([]trade, 0, preLen)
+		droppedSyms := make(map[string]struct{})
+		for _, t := range aTrades {
+			if _, in := bSymbols[t.Symbol]; in {
+				filtered = append(filtered, t)
+			} else {
+				droppedSyms[t.Symbol] = struct{}{}
+			}
+		}
+		fmt.Fprintf(os.Stderr,
+			"INFO: --scope-by-dir-b active — aTrades filtered from %d to %d (%d symbols dropped, %d kept in dir-b scope)\n",
+			preLen, len(filtered), len(droppedSyms), len(bSymbols))
+		aTrades = filtered
 	}
 
 	matched, onlyA, onlyB := matchPairs(aTrades, bTrades)
