@@ -164,7 +164,16 @@ exit 0"
         exit 3
     fi
 
-    # TODO Task 7: invoke verdict
-    echo "ERR: --pull pipeline not yet complete (symbols: $symbols)" >&2
-    exit 99
+    # Step 5: invoke verdict against the local cache.
+    # exec replaces this process — verdict's exit code becomes the helper's.
+    if [[ ${#FORWARD_ARGS[@]} -gt 0 ]]; then
+        exec bash "$VERDICT_BIN" \
+            --stub-dir "$CACHE_DIR/stub" \
+            --testnet-dir "$CACHE_DIR/testnet" \
+            "${FORWARD_ARGS[@]}"
+    else
+        exec bash "$VERDICT_BIN" \
+            --stub-dir "$CACHE_DIR/stub" \
+            --testnet-dir "$CACHE_DIR/testnet"
+    fi
 fi

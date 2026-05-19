@@ -410,6 +410,58 @@ assert_eq "10.3 helper exited before any ssh call" "$ssh_log" ""
 cleanup_sandbox "$sb"
 unset MOCK_LOG
 
+# ─────────────────────────────────────────────────────────────
+# Test 9: multi-month files → both rsync'd, symbol set deduped
+# ─────────────────────────────────────────────────────────────
+echo "Test 9: month-boundary handling"
+sb=$(new_sandbox)
+cat > "$sb/bin/ssh" <<'EOF'
+#!/usr/bin/env bash
+case "$*" in
+    *"ls "*"/layer3/"*)
+        echo "/var/log/paper-live/journal/layer3/KAVAUSDT-2026-05.jsonl"
+        echo "/var/log/paper-live/journal/layer3/KAVAUSDT-2026-06.jsonl"
+        echo "/var/log/paper-live/journal/layer3/ENSUSDT-2026-06.jsonl"
+        ;;
+    *"mid-write-check"*) exit 0 ;;
+    *) exit 0 ;;
+esac
+EOF
+chmod +x "$sb/bin/ssh"
+cat > "$sb/bin/rsync" <<'EOF'
+#!/usr/bin/env bash
+echo "rsync-pattern $2" >> "$MOCK_LOG"
+exit 0
+EOF
+chmod +x "$sb/bin/rsync"
+cat > "$sb/bin/verdict_mock.sh" <<'EOF'
+#!/usr/bin/env bash
+echo "verdict-INVOKED $*" >> "$MOCK_LOG"
+exit 0
+EOF
+chmod +x "$sb/bin/verdict_mock.sh"
+export MOCK_LOG="$sb/mock.log"
+: > "$MOCK_LOG"
+PATH="$sb/bin:$PATH" \
+    LAYER3_PULL_CACHE_DIR="$sb/cache" \
+    LAYER3_PULL_VERDICT_BIN="$sb/bin/verdict_mock.sh" \
+    LAYER3_PULL_RETRY_SLEEP=0 \
+    bash "$HELPER" --pull >/dev/null 2>&1 || true
+log=$(cat "$MOCK_LOG")
+# rsync should be called with KAVAUSDT-*.jsonl (one pattern, covering both months)
+# and ENSUSDT-*.jsonl, plus the testnet bulk glob. Total stub rsyncs = 2 unique symbols.
+kava_count=$(grep -c "KAVAUSDT-" <<< "$log")
+ens_count=$(grep -c "ENSUSDT-"  <<< "$log")
+assert_contains "9.1 KAVAUSDT pulled" "$log" "KAVAUSDT-"
+assert_contains "9.2 ENSUSDT pulled" "$log" "ENSUSDT-"
+assert_eq "9.3 KAVAUSDT pulled once (symbol deduped)" "$kava_count" "1"
+assert_eq "9.4 ENSUSDT pulled once" "$ens_count" "1"
+assert_contains "9.5 verdict invoked with cache dirs" "$log" "verdict-INVOKED"
+assert_contains "9.6 verdict received --stub-dir" "$log" "--stub-dir"
+assert_contains "9.7 verdict received --testnet-dir" "$log" "--testnet-dir"
+cleanup_sandbox "$sb"
+unset MOCK_LOG
+
 echo
 echo "Total: $PASS passed, $FAIL failed"
 if [[ $FAIL -gt 0 ]]; then
