@@ -128,8 +128,17 @@ aggregate() {
         $1 == "close" {
             # Emit per-close TSV record for downstream HODL comparator.
             printf "CLOSE|%s|%s|%s|%s|%s\n", label, $2, $3, $4, $5
-            if (first_ts=="") first_ts=$2
-            last_ts=$2
+            # Track CHRONOLOGICAL min/max, not iteration-order. Input arrives
+            # in alphabetic file order via cat (1000SHIBUSDT first, XLMUSDT
+            # last), so a plain "first_ts=$2 if empty / last_ts=$2 always"
+            # ends up reporting the first/last close of the alphabetically
+            # first/last file rather than the actual earliest/latest close.
+            # Engine writes ts as Go time.RFC3339 ("YYYY-MM-DDTHH:MM:SSZ",
+            # 20 chars) — fixed width with UTC suffix makes lex comparison
+            # equivalent to chronological comparison. Pinned by the test
+            # fixture in test_aggregate_chronological.sh.
+            if (first_ts=="" || $2 < first_ts) first_ts=$2
+            if (last_ts=="" || $2 > last_ts) last_ts=$2
             # PARTIAL canon (D3 resolution 2026-05-12): terminal positions
             # only count toward total/wins, matching stage_promotion_check
             # (formal gate). Partial closes accumulate PnL/fee/notional but

@@ -45,8 +45,12 @@ aggregate() {
     | awk -F"\t" -v label="$label" '"'"'
         BEGIN { first_ts=""; last_ts=""; total=0; wins=0; targets=0; stops=0; partials=0; pnl=0 }
         {
-            if (first_ts=="") first_ts=$1
-            last_ts=$1
+            # Chronological min/max — input is cat-ed in alphabetic file order
+            # so iteration order != chronological order. Engine writes ts as
+            # RFC3339 ("YYYY-MM-DDTHH:MM:SSZ", 20 chars fixed-width UTC) so
+            # lex comparison equals chronological. Same fix as forward_paper_status.sh.
+            if (first_ts=="" || $1 < first_ts) first_ts=$1
+            if (last_ts=="" || $1 > last_ts) last_ts=$1
             total++
             outcome=$4
             if (outcome=="TARGET") { wins++; targets++ }
