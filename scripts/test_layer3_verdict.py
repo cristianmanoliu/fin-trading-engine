@@ -162,15 +162,20 @@ class DurationGateTest(unittest.TestCase):
 class ParityGateTest(unittest.TestCase):
 
     def test_signal_divergence_exits_2(self):
-        # Stub has a trade testnet doesn't (or vice versa) → exit 2.
+        # Real divergence = testnet shadow fired a signal the stub didn't.
+        # Stub-only trades are now silently dropped under the default
+        # --scope-by-dir-b (asymmetric per-symbol pilot mode), so the
+        # only-testnet direction is the in-scope divergence case.
         with tempfile.TemporaryDirectory() as tmp_a, \
              tempfile.TemporaryDirectory() as tmp_b:
             stub, tn = Path(tmp_a), Path(tmp_b)
             base = dt.datetime.now(dt.timezone.utc).replace(tzinfo=None) - dt.timedelta(days=10)
+            # Both sides have the BTCUSDT trade → in scope, matched.
             write_pair(stub, "BTCUSDT", base, +5000.0)
-            write_pair(stub, "ETHUSDT", base + dt.timedelta(hours=1), +1000.0)
-            # Testnet missing the ETH trade.
             write_pair(tn,   "BTCUSDT", base, +5000.0)
+            # Testnet ALSO has an ETHUSDT trade the stub missed → real
+            # divergence (the testnet shadow saw a signal the stub didn't).
+            write_pair(tn,   "ETHUSDT", base + dt.timedelta(hours=1), +1000.0)
             code, out, err = run_wrapper(
                 "--stub-dir", str(stub), "--testnet-dir", str(tn),
             )
