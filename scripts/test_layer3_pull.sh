@@ -253,6 +253,47 @@ assert_eq "6.4 ssh called 3 times (ls + 2 mid-write checks)" "$ssh_count" "3"
 cleanup_sandbox "$sb"
 unset MOCK_LOG SANDBOX
 
+# ─────────────────────────────────────────────────────────────
+# Test 6b: ssh-255 during mid-write check → distinct error message
+# (regression-pins ssh-failure-vs-data-failure dual sense)
+# ─────────────────────────────────────────────────────────────
+echo "Test 6b: ssh-255 distinguishability during mid-write check"
+sb=$(new_sandbox)
+cat > "$sb/bin/ssh" <<'EOF'
+#!/usr/bin/env bash
+COUNT_FILE="$SANDBOX/ssh_count"
+count=$(cat "$COUNT_FILE" 2>/dev/null || echo 0)
+count=$((count + 1))
+echo "$count" > "$COUNT_FILE"
+case "$*" in
+    *"ls "*"/layer3/"*)
+        echo "/var/log/paper-live/journal/layer3/KAVAUSDT-2026-05.jsonl"
+        ;;
+    *"mid-write-check"*)
+        # Simulate ssh transport failure (e.g., connection drop)
+        echo "ssh: connect to host root@test.example port 22: Connection refused" >&2
+        exit 255
+        ;;
+    *)
+        exit 0
+        ;;
+esac
+EOF
+chmod +x "$sb/bin/ssh"
+export MOCK_LOG="$sb/mock.log"
+export SANDBOX="$sb"
+out=$(PATH="$sb/bin:$PATH" \
+      LAYER3_PULL_CACHE_DIR="$sb/cache" \
+      LAYER3_PULL_RETRY_SLEEP=0 \
+      bash "$HELPER" --pull 2>&1)
+rc=$?
+assert_eq "6b.1 ssh-255 during mid-write → exit 3" "$rc" "3"
+assert_contains "6b.2 ssh-failure message names ssh and 255" "$out" "ssh"
+assert_contains "6b.3 ssh-failure message includes exit 255" "$out" "255"
+assert_not_contains "6b.4 ssh-failure NOT confused with mid-write text" "$out" "mid-write detected"
+cleanup_sandbox "$sb"
+unset MOCK_LOG SANDBOX
+
 echo
 echo "Total: $PASS passed, $FAIL failed"
 if [[ $FAIL -gt 0 ]]; then

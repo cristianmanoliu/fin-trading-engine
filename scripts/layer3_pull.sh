@@ -113,10 +113,15 @@ for f in${check_files}; do
 done
 exit 0"
 
-    if ! ssh -o BatchMode=yes -o ConnectTimeout=10 "$HOST" "$check_cmd" > /dev/null 2>&1; then
+    if ! ssh -o BatchMode=yes -o ConnectTimeout=10 "$HOST" "$check_cmd" > /dev/null 2>/dev/null; then
         sleep "$retry_sleep"
-        if ! ssh -o BatchMode=yes -o ConnectTimeout=10 "$HOST" "$check_cmd" > /dev/null 2>&1; then
-            echo "ERR: VPS journal mid-write detected; retry shortly" >&2
+        if ! ssh -o BatchMode=yes -o ConnectTimeout=10 "$HOST" "$check_cmd" > /dev/null 2>/dev/null; then
+            mid_rc=$?
+            if [[ $mid_rc -eq 255 ]]; then
+                echo "ERR: ssh to $HOST failed during mid-write check (exit 255 — network blip or auth)" >&2
+            else
+                echo "ERR: VPS journal mid-write detected after 2 attempts; operator should retry shortly" >&2
+            fi
             exit 3
         fi
     fi
