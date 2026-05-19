@@ -76,6 +76,9 @@ else
         | xargs -n1 basename 2>/dev/null \
         | sed 's/-[0-9]\{4\}-[0-9]\{2\}\.jsonl$//' \
         | sort -u)
+    # PIPESTATUS[0] here reflects ssh's exit because set -o pipefail propagates
+    # the rightmost nonzero through the command substitution, and downstream
+    # stages (xargs/basename/sed/sort) cannot realistically fail on valid input.
     ssh_rc=${PIPESTATUS[0]}
     if [[ $ssh_rc -eq 255 ]]; then
         echo "ERR: ssh to $HOST failed (exit 255 — host unreachable / auth failed)" >&2
