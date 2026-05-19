@@ -1,0 +1,4 @@
+cell,role,signal_mode,W1_net,W2_net,W3_net,mean_net,wins,verdict,trades_total
+0,BASELINE,ema-9-21,+175021,+645812,+65044,295292,3,POSITIVE,5572
+1,MACD-mode,macd-12-26-9,-212546,+266900,+137964,64106,2,POSITIVE,12557
+2,RSI-mode,rsi-14,-238884,+800940,+3224,188427,2,POSITIVE,11122
