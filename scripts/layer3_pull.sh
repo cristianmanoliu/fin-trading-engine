@@ -48,9 +48,21 @@ for arg in "$@"; do
 done
 
 if [[ $PULL_MODE -eq 0 ]]; then
-    # TODO Task 3: SSH-and-run default path
-    echo "ERR: default path not yet implemented" >&2
-    exit 99
+    # Default: SSH-and-run the verdict on the VPS.
+    remote_cmd="cd /opt/trading-engine && bash scripts/layer3_verdict.sh"
+    remote_cmd+=" --stub-dir $VPS_BASE"
+    remote_cmd+=" --testnet-dir $VPS_BASE/layer3"
+    for a in "${FORWARD_ARGS[@]:-}"; do
+        # shell-quote each forwarded arg
+        remote_cmd+=" $(printf '%q' "$a")"
+    done
+    ssh -o ConnectTimeout=10 "$HOST" "$remote_cmd"
+    rc=$?
+    if [[ $rc -eq 255 ]]; then
+        echo "ERR: ssh to $HOST failed (exit 255 — host unreachable / auth failed)" >&2
+        exit 3
+    fi
+    exit $rc
 else
     # TODO Task 6+: --pull path
     echo "ERR: --pull path not yet implemented" >&2
