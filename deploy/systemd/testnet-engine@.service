@@ -1,0 +1,51 @@
+# Templated Layer 2 testnet engine, one instance per symbol.
+#
+# Per-symbol instance: testnet-engine@<symbol>.service (e.g. testnet-engine@kavausdt.service).
+# %i is the literal instance name (lowercase symbol matching configs/<sym>.yaml).
+#
+# Purpose: run `--executor binance_live_testnet` against real prices + Binance testnet
+# fills to obtain real fee/slip data for the Layer 2 close-out check
+# (forward_paper_completion_review_decision_rule_2026-05-08.md, abbreviated cost-stack
+# section). Order endpoints + position reconciler hit testnet.binancefuture.com; tick
+# feeds remain on production fapi.binance.com (single rate-limit pool — see
+# results/testnet_multi_symbol_extension_2026-05-19.md for the budget math).
+#
+# Multi-symbol motivation: solo-BTCUSDT testnet produced zero fills in 2 days
+# (BTC is on persistent_losers + low signal rate at 0.17/d). Multi-symbol instances
+# on symbols already in deployed-16 raise fill rate ~4× and bring Layer 2 close-out
+# alongside forward-paper completion.
+#
+# Credentials: requires /etc/paper-live/testnet-env with SEPARATE testnet keys from
+# /etc/paper-live/env (which holds mainnet keys, currently unused since live cohort
+# runs --executor stub). Generate testnet keys at testnet.binancefuture.com.
+#
+# Journal: writes to /var/log/paper-live/journal/testnet/<symbol>-YYYY-MM.jsonl.
+# Separate directory from live cohort so forward_paper_status.sh + drift detector
+# read only the live cohort.
+
+[Unit]
+Description=Layer 2 testnet engine for %i — real prices, testnet fills
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=paperlive
+WorkingDirectory=/opt/trading-engine
+EnvironmentFile=/etc/paper-live/env
+EnvironmentFile=/etc/paper-live/testnet-env
+Environment=PAPER_LIVE_JOURNAL_DIR=/var/log/paper-live/journal/testnet
+ExecStart=/opt/trading-engine/bin/engine --config /opt/trading-engine/configs/%i.yaml \
+    --executor binance_live_testnet \
+    --signal-tf 4H --target-rr 6.0 \
+    --side-filter short \
+    --funding-csv-dir /opt/trading-engine/data/funding \
+    --fee-bps 10 --stop-slippage-bps 5 --funding-bps-per-day 0 \
+    --max-hold-hours 504
+StandardOutput=append:/var/log/paper-live/testnet-%i.log
+StandardError=append:/var/log/paper-live/testnet-%i.log
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target
