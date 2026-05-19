@@ -69,6 +69,17 @@ if [[ $PULL_MODE -eq 0 ]]; then
 else
     # --pull mode: full local-cache pipeline.
 
+    # Concurrency guard — only one --pull in flight per cache dir.
+    mkdir -p "$CACHE_DIR" 2>/dev/null || {
+        echo "ERR: cannot create cache dir $CACHE_DIR" >&2
+        exit 3
+    }
+    exec 9>"$CACHE_DIR/.lock"
+    if ! flock -n 9; then
+        echo "ERR: another layer3_pull --pull in progress (lock held)" >&2
+        exit 3
+    fi
+
     # Step 1: derive symbol set from VPS layer3/ listing.
     # Filename schema: <SYMBOL>-YYYY-MM.jsonl — strip the date suffix, dedupe.
     symbols=$(ssh -o BatchMode=yes -o ConnectTimeout=10 "$HOST" \
@@ -126,7 +137,33 @@ exit 0"
         fi
     fi
 
-    # TODO Task 6: wipe + rsync
+    # Step 3: wipe + recreate cache subdirs (no merge with prior runs).
+    rm -rf "$CACHE_DIR/stub" "$CACHE_DIR/testnet"
+    mkdir -p "$CACHE_DIR/stub" "$CACHE_DIR/testnet"
+
+    # Step 4: parallel rsync. Both must succeed.
+    pull_pids=()
+    rsync_status=0
+    {
+        rsync -a "${HOST}:${VPS_BASE}/layer3/*.jsonl" "$CACHE_DIR/testnet/" 2>/dev/null
+    } &
+    pull_pids+=($!)
+    for s in $symbols; do
+        {
+            rsync -a "${HOST}:${VPS_BASE}/${s}-"*.jsonl "$CACHE_DIR/stub/" 2>/dev/null
+        } &
+        pull_pids+=($!)
+    done
+    for pid in "${pull_pids[@]}"; do
+        if ! wait "$pid"; then
+            rsync_status=1
+        fi
+    done
+    if [[ $rsync_status -ne 0 ]]; then
+        echo "ERR: rsync failed during Layer 3 journal pull" >&2
+        exit 3
+    fi
+
     # TODO Task 7: invoke verdict
     echo "ERR: --pull pipeline not yet complete (symbols: $symbols)" >&2
     exit 99

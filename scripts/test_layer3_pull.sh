@@ -294,6 +294,122 @@ assert_not_contains "6b.4 ssh-failure NOT confused with mid-write text" "$out" "
 cleanup_sandbox "$sb"
 unset MOCK_LOG SANDBOX
 
+# ─────────────────────────────────────────────────────────────
+# Test 7: one of two rsyncs fails → exit 3, no verdict invoked
+# ─────────────────────────────────────────────────────────────
+echo "Test 7: partial rsync failure"
+sb=$(new_sandbox)
+cat > "$sb/bin/ssh" <<'EOF'
+#!/usr/bin/env bash
+case "$*" in
+    *"ls "*"/layer3/"*)
+        echo "/var/log/paper-live/journal/layer3/KAVAUSDT-2026-05.jsonl"
+        ;;
+    *"mid-write-check"*) exit 0 ;;
+    *) exit 0 ;;
+esac
+EOF
+chmod +x "$sb/bin/ssh"
+# Mock rsync: testnet path (contains "/layer3/") succeeds; stub path fails.
+cat > "$sb/bin/rsync" <<'EOF'
+#!/usr/bin/env bash
+echo "rsync-called $*" >> "$MOCK_LOG"
+case "$*" in
+    *"/layer3/"*) exit 0 ;;
+    *) exit 23 ;;  # rsync partial transfer
+esac
+EOF
+chmod +x "$sb/bin/rsync"
+# Mock verdict so test 7 detects whether it's invoked.
+cat > "$sb/bin/verdict_mock.sh" <<'EOF'
+#!/usr/bin/env bash
+echo "verdict-INVOKED $*" >> "$MOCK_LOG"
+exit 0
+EOF
+chmod +x "$sb/bin/verdict_mock.sh"
+export MOCK_LOG="$sb/mock.log"
+: > "$MOCK_LOG"
+out=$(PATH="$sb/bin:$PATH" \
+      LAYER3_PULL_CACHE_DIR="$sb/cache" \
+      LAYER3_PULL_VERDICT_BIN="$sb/bin/verdict_mock.sh" \
+      LAYER3_PULL_RETRY_SLEEP=0 \
+      bash "$HELPER" --pull 2>&1)
+rc=$?
+assert_eq "7.1 stub rsync fail → exit 3" "$rc" "3"
+log=$(cat "$MOCK_LOG")
+assert_contains "7.2 rsync was attempted at least once" "$log" "rsync-called"
+assert_not_contains "7.3 verdict NOT invoked on partial pull" "$log" "verdict-INVOKED"
+cleanup_sandbox "$sb"
+unset MOCK_LOG
+
+# ─────────────────────────────────────────────────────────────
+# Test 8: stale cache wiped clean before pull
+# ─────────────────────────────────────────────────────────────
+echo "Test 8: stale-cache wipe"
+sb=$(new_sandbox)
+# Plant a stale file in the cache that should be wiped.
+mkdir -p "$sb/cache/stub" "$sb/cache/testnet"
+echo "stale" > "$sb/cache/stub/STALEUSDT-2026-04.jsonl"
+echo "stale" > "$sb/cache/testnet/STALEUSDT-2026-04.jsonl"
+cat > "$sb/bin/ssh" <<'EOF'
+#!/usr/bin/env bash
+case "$*" in
+    *"ls "*"/layer3/"*)
+        echo "/var/log/paper-live/journal/layer3/KAVAUSDT-2026-05.jsonl"
+        ;;
+    *"mid-write-check"*) exit 0 ;;
+    *) exit 0 ;;
+esac
+EOF
+chmod +x "$sb/bin/ssh"
+cat > "$sb/bin/rsync" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+chmod +x "$sb/bin/rsync"
+cat > "$sb/bin/verdict_mock.sh" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+chmod +x "$sb/bin/verdict_mock.sh"
+PATH="$sb/bin:$PATH" \
+    LAYER3_PULL_CACHE_DIR="$sb/cache" \
+    LAYER3_PULL_VERDICT_BIN="$sb/bin/verdict_mock.sh" \
+    LAYER3_PULL_RETRY_SLEEP=0 \
+    bash "$HELPER" --pull >/dev/null 2>&1 || true
+assert_eq "8.1 stale stub file removed" "$(ls "$sb/cache/stub" 2>/dev/null)" ""
+assert_eq "8.2 stale testnet file removed" "$(ls "$sb/cache/testnet" 2>/dev/null)" ""
+cleanup_sandbox "$sb"
+
+# ─────────────────────────────────────────────────────────────
+# Test 10: concurrent invocation blocked by flock
+# ─────────────────────────────────────────────────────────────
+echo "Test 10: flock concurrency guard"
+sb=$(new_sandbox)
+mkdir -p "$sb/cache"
+# Acquire the lock from outside, then run the helper — it must fail to lock.
+exec 7>"$sb/cache/.lock"
+flock -n 7
+cat > "$sb/bin/ssh" <<'EOF'
+#!/usr/bin/env bash
+echo "ssh-INVOKED" >> "$MOCK_LOG"
+exit 0
+EOF
+chmod +x "$sb/bin/ssh"
+export MOCK_LOG="$sb/mock.log"
+: > "$MOCK_LOG"
+out=$(PATH="$sb/bin:$PATH" \
+      LAYER3_PULL_CACHE_DIR="$sb/cache" \
+      bash "$HELPER" --pull 2>&1)
+rc=$?
+exec 7>&-  # release the lock so cleanup works
+assert_eq "10.1 concurrent --pull blocked → exit 3" "$rc" "3"
+assert_contains "10.2 message names the lock collision" "$out" "in progress"
+ssh_log=$(cat "$MOCK_LOG" 2>/dev/null || true)
+assert_eq "10.3 helper exited before any ssh call" "$ssh_log" ""
+cleanup_sandbox "$sb"
+unset MOCK_LOG
+
 echo
 echo "Total: $PASS passed, $FAIL failed"
 if [[ $FAIL -gt 0 ]]; then
