@@ -1,0 +1,4 @@
+cell,role,side_filter,W1_net,W2_net,W3_net,mean_net,wins,verdict,trades_total
+0,BASELINE,short,+175021,+645812,+65044,295292,3,POSITIVE,5572
+1,longs-mirror,long,-85716,+60452,-380443,-135236,1,NEGATIVE,5910
+2,both-sides,both,+150700,+636696,-205968,193809,2,POSITIVE,9371
