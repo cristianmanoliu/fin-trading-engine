@@ -107,6 +107,7 @@ assert_eq "1.1 default happy exit code" "$rc" "0"
 assert_contains "1.2 default happy verdict line" "$out" "VERDICT_RESULT: PASS"
 assert_contains "1.3 default invokes ssh with VPS host" "$(cat "$MOCK_LOG")" "root@test.example"
 assert_contains "1.4 default invokes verdict on VPS" "$(cat "$MOCK_LOG")" "scripts/layer3_verdict.sh"
+assert_not_contains "1.5 default does NOT emit trailing empty positional" "$(cat "$MOCK_LOG")" "layer3 ''"
 cleanup_sandbox "$sb"
 
 # ─────────────────────────────────────────────────────────────

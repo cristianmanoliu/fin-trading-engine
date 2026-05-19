@@ -52,11 +52,14 @@ if [[ $PULL_MODE -eq 0 ]]; then
     remote_cmd="cd /opt/trading-engine && bash scripts/layer3_verdict.sh"
     remote_cmd+=" --stub-dir $VPS_BASE"
     remote_cmd+=" --testnet-dir $VPS_BASE/layer3"
-    for a in "${FORWARD_ARGS[@]:-}"; do
-        # shell-quote each forwarded arg
-        remote_cmd+=" $(printf '%q' "$a")"
-    done
-    ssh -o ConnectTimeout=10 "$HOST" "$remote_cmd"
+    if [[ ${#FORWARD_ARGS[@]} -gt 0 ]]; then
+        for a in "${FORWARD_ARGS[@]}"; do
+            # shell-quote each forwarded arg so spaces, quotes, and shell
+            # metachars survive the remote bash re-parse
+            remote_cmd+=" $(printf '%q' "$a")"
+        done
+    fi
+    ssh -o BatchMode=yes -o ConnectTimeout=10 "$HOST" "$remote_cmd"
     rc=$?
     if [[ $rc -eq 255 ]]; then
         echo "ERR: ssh to $HOST failed (exit 255 — host unreachable / auth failed)" >&2

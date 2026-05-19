@@ -32,6 +32,7 @@ OPERATIONAL_FILES=(
     "scripts/paper_live_trades.sh"
     "scripts/stage_promotion.sh"
     "scripts/lag_summary.sh"
+    "scripts/layer3_pull.sh"
 )
 
 PASS=0
