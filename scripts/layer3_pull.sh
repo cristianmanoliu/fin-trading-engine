@@ -74,10 +74,17 @@ else
         echo "ERR: cannot create cache dir $CACHE_DIR" >&2
         exit 3
     }
-    exec 9>"$CACHE_DIR/.lock"
-    if ! flock -n 9; then
-        echo "ERR: another layer3_pull --pull in progress (lock held)" >&2
-        exit 3
+    # flock is Linux-only (util-linux). macOS ships without it; rather than
+    # hard-fail the helper for ad-hoc local use, skip the guard with a WARN.
+    # VPS cron path (the production caller) is Linux, so it keeps the guard.
+    if command -v flock >/dev/null 2>&1; then
+        exec 9>"$CACHE_DIR/.lock"
+        if ! flock -n 9; then
+            echo "ERR: another layer3_pull --pull in progress (lock held)" >&2
+            exit 3
+        fi
+    else
+        echo "WARN: flock not available — skipping concurrency guard (install util-linux to enable)" >&2
     fi
 
     # Step 1: derive symbol set from VPS layer3/ listing.

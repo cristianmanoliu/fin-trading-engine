@@ -411,6 +411,44 @@ cleanup_sandbox "$sb"
 unset MOCK_LOG
 
 # ─────────────────────────────────────────────────────────────
+# Test 10b: macOS-style portability — no `flock` on PATH.
+# Must skip the guard with a WARN and continue (not exit 3 from the guard).
+# ─────────────────────────────────────────────────────────────
+echo "Test 10b: flock missing → WARN + continue (macOS fallback)"
+sb=$(new_sandbox)
+# Stub ssh so the symbols-listing returns no layer3 journals → helper hits
+# "no Layer 3 journals" exit 3 downstream of the guard. We assert the guard
+# itself did NOT cause the exit (no "in progress" message).
+cat > "$sb/bin/ssh" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+chmod +x "$sb/bin/ssh"
+# Minimal PATH that excludes flock. On most distros flock lives in /usr/bin,
+# so we restrict PATH to only the sandbox bin + a minimal builtins dir for
+# the helper's shell utilities (ls, sed, sort, mkdir, rm, basename, xargs,
+# rsync). Pick the dir conservatively per host:
+builtin_dir=""
+for d in /usr/bin /bin; do
+    if [[ -x "$d/sed" && -x "$d/sort" && -x "$d/basename" && ! -x "$d/flock" ]]; then
+        builtin_dir="$d"; break
+    fi
+done
+if [[ -z "$builtin_dir" ]]; then
+    echo "  ⊘ 10b skipped — could not find a builtins dir without flock (test_layer3_pull.sh)"
+else
+    out=$(PATH="$sb/bin:$builtin_dir" \
+          LAYER3_PULL_CACHE_DIR="$sb/cache" \
+          bash "$HELPER" --pull 2>&1)
+    rc=$?
+    assert_not_contains "10b.1 NOT the misleading 'lock held' error" "$out" "in progress (lock held)"
+    assert_contains "10b.2 emits WARN about flock missing" "$out" "flock not available"
+    assert_contains "10b.3 reached downstream 'no journals' path" "$out" "no Layer 3 journals"
+    assert_eq "10b.4 exit code is 3 (INPUT_ERROR from downstream, not lock)" "$rc" "3"
+fi
+cleanup_sandbox "$sb"
+
+# ─────────────────────────────────────────────────────────────
 # Test 9: multi-month files → both rsync'd, symbol set deduped
 # ─────────────────────────────────────────────────────────────
 echo "Test 9: month-boundary handling"
