@@ -34,7 +34,7 @@
     <array>
         <string>/bin/bash</string>
         <string>-c</string>
-        <string>cd /Users/cristianmanoliu/Main/source.code/github/trading-engine &amp;&amp; ./scripts/weekly_audit.sh</string>
+        <string>cd /Users/cristianmanoliu/Main/code/active/trading-engine &amp;&amp; ./scripts/weekly_audit.sh</string>
     </array>
 
     <!-- Weekly: Sunday (Weekday=0) 09:00 local time. Missed firings (laptop
@@ -50,10 +50,10 @@
     </dict>
 
     <key>StandardOutPath</key>
-    <string>/Users/cristianmanoliu/Main/source.code/github/trading-engine/results/drift_runs/launchd.out.log</string>
+    <string>/Users/cristianmanoliu/Main/code/active/trading-engine/results/drift_runs/launchd.out.log</string>
 
     <key>StandardErrorPath</key>
-    <string>/Users/cristianmanoliu/Main/source.code/github/trading-engine/results/drift_runs/launchd.err.log</string>
+    <string>/Users/cristianmanoliu/Main/code/active/trading-engine/results/drift_runs/launchd.err.log</string>
 
     <key>RunAtLoad</key>
     <false/>
