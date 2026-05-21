@@ -42,9 +42,28 @@ LIB="${SCRIPT_DIR}/lib/notify.sh"
 source "$LIB"
 
 JOURNAL_DIR="${JOURNAL_DIR:-/var/log/paper-live/journal}"
+# Preserve whether the caller pinned SNAPSHOT_DIR so DRY_RUN can isolate
+# its write target without trampling an explicit override.
+_SNAPSHOT_DIR_USER_SET="${SNAPSHOT_DIR+1}"
 SNAPSHOT_DIR="${SNAPSHOT_DIR:-/var/log/paper-live/digest_snapshots}"
 DRY_RUN="${DRY_RUN:-0}"
 FETCH_PRICES="${FETCH_PRICES:-0}"
+
+# DRY_RUN must not mutate production state. The snapshot write at the end
+# of the script is unconditional (by design — the production cron needs it
+# to compute next-day deltas). If a caller runs DRY_RUN against the
+# production SNAPSHOT_DIR after the daily cron has fired, they overwrite
+# the day's baseline and next morning's "24h delta" lies by whatever
+# closed between cron and the DRY_RUN. Redirect to a tmpdir unless the
+# caller explicitly pinned SNAPSHOT_DIR (test harness pattern).
+if [[ "$DRY_RUN" == "1" ]] && [[ -z "$_SNAPSHOT_DIR_USER_SET" ]]; then
+    # Portable form: `mktemp -d -t prefix.XXXXXX` on BSD/macOS treats the
+    # template as a LITERAL prefix and appends extra entropy, so the path
+    # gains an unwanted `.XXXXXX` segment. The explicit `${TMPDIR:-/tmp}/`
+    # path keeps macOS local + Linux CI behaviour identical.
+    SNAPSHOT_DIR="$(mktemp -d "${TMPDIR:-/tmp}/daily_digest_dryrun.XXXXXX")"
+    trap 'rm -rf "$SNAPSHOT_DIR"' EXIT
+fi
 
 TODAY="$(date -u '+%Y-%m-%d')"
 

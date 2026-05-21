@@ -241,6 +241,50 @@ assert_contains "T6 Layer 3 fills"      "$out6" "2 fill(s)"
 # Day count present (format "N/7d window")
 assert_contains "T6 Layer 3 window"     "$out6" "/7d window"
 
+# ── T7: bare DRY_RUN does not mutate production SNAPSHOT_DIR ────────────────
+echo
+echo "── T7: bare DRY_RUN auto-isolates SNAPSHOT_DIR ──"
+
+# Without SNAPSHOT_DIR set, a DRY_RUN run must NOT write to the production
+# default (/var/log/paper-live/digest_snapshots). Pre-2026-05-21 the snapshot
+# write block was unconditional, so an operator running the DRY_RUN command
+# from CLAUDE.md mid-day would overwrite the morning cron's baseline and
+# corrupt the next digest's "24h delta" by whatever closed in between.
+#
+# We assert via bash -x: the trace shows the script assigned SNAPSHOT_DIR
+# to a `mktemp` path (daily_digest_dryrun.XXXXXX), not to the production
+# default. The EXIT trap cleans the tmpdir before the script returns, so
+# leftover-file checks would race; the trace is the deterministic signal.
+
+T7_TRACE="${TMPDIR_ROOT}/t7_xtrace.log"
+
+set +e
+(unset SNAPSHOT_DIR; \
+    DRY_RUN=1 JOURNAL_DIR="$JDIR" \
+    bash -x "$DIGEST" >/dev/null 2>"$T7_TRACE")
+rc7=$?
+set -e
+
+assert_eq "T7 exit code" "$rc7" "0"
+
+# Trace must show SNAPSHOT_DIR= assigned to a daily_digest_dryrun.* path.
+# Pre-fix: trace contains `SNAPSHOT_DIR=/var/log/paper-live/digest_snapshots`.
+# Post-fix: trace contains `SNAPSHOT_DIR=/<tmp>/daily_digest_dryrun.XXXXXX`.
+if [[ -f "$T7_TRACE" ]]; then
+    snapshot_assignment=$(grep -E "^\+ SNAPSHOT_DIR=" "$T7_TRACE" | tail -1)
+    assert_contains "T7 SNAPSHOT_DIR redirected to tmpdir" \
+        "$snapshot_assignment" \
+        "daily_digest_dryrun."
+    # Negative assertion: must not be the production path.
+    if [[ "$snapshot_assignment" == *"/var/log/paper-live/digest_snapshots"* ]]; then
+        assert_eq "T7 SNAPSHOT_DIR not production path" "production-leak" "isolated"
+    else
+        assert_eq "T7 SNAPSHOT_DIR not production path" "isolated" "isolated"
+    fi
+else
+    assert_eq "T7 trace captured" "missing" "present"
+fi
+
 # ── Summary ───────────────────────────────────────────────────────────────────
 echo
 TOTAL=$((PASS + FAIL))
