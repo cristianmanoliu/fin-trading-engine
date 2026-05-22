@@ -274,6 +274,7 @@ Things that look like signals but aren't:
 - **Backtest re-runs / strategy tuning mid-milestone.** Locked rule. Forbidden until forward-paper resolves.
 - **Reshuffling deployed-32.** Adding/removing symbols mid-flight invalidates the locked symbol set.
 - **Daily emotional reads.** Yesterday's losing trade doesn't predict next quarter. Bootstrap CI is wide.
+- **`post_deploy_check.sh §3` warning after 2026-05-22 module rename.** Since commit ce6621d (`trading-engine` → `fin-trading-engine`), §3 hot-file md5s diverge between local + VPS due to import-path strings ONLY, NOT functional code. The VPS engine binary (built 2026-05-19) is semantically current. Running `deploy/sync.sh` purely to silence §3 would force a 16-engine rebuild + restart for zero functional gain, disrupting mid-MONITORING paper-trading state. Wait for the next legitimate redeploy (real code change or STAGE_1 flip) to resolve the cosmetic delta.
 
 ---
 
