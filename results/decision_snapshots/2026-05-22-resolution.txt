@@ -1,0 +1,14 @@
+══════════════════════════════════════════════════════════════════════════════
+  Forward-paper resolution — 2026-05-22 18:03 UTC
+  Locked rule: results/forward_paper_outcome_resolution_decision_rule_2026-05-10.md
+══════════════════════════════════════════════════════════════════════════════
+
+  Snapshot:        /Users/cristianmanoliu/Main/code/active/fin-trading-engine/results/forward_paper_snapshots/2026-05-22.txt (0d old)
+  Live cohort:     n=19 trades / 14 days / pnl=$-7492.0
+  Drift state:     last exit=2 (0d ago)
+  Sibling exits:   kill=2 promote=2
+
+  >>> VERDICT: CONTINUE  (Rule 3)
+      • n_trades_live=19 < 50 (statistical-power floor; below this nothing but CONTINUE applies — handles the n=9 emotional case)
+
+══════════════════════════════════════════════════════════════════════════════
