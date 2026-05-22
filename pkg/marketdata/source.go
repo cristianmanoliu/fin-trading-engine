@@ -3,7 +3,7 @@ package marketdata
 import (
 	"context"
 
-	"github.com/cristianmanoliu/trading-engine/pkg/models"
+	"github.com/cristianmanoliu/fin-trading-engine/pkg/models"
 )
 
 // DataSource is the single abstraction over live exchange feeds and historical replays.

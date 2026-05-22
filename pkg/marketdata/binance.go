@@ -14,7 +14,7 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"github.com/cristianmanoliu/trading-engine/pkg/models"
+	"github.com/cristianmanoliu/fin-trading-engine/pkg/models"
 )
 
 const (

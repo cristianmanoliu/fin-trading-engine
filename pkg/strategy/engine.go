@@ -5,8 +5,8 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/cristianmanoliu/trading-engine/pkg/indicators"
-	"github.com/cristianmanoliu/trading-engine/pkg/models"
+	"github.com/cristianmanoliu/fin-trading-engine/pkg/indicators"
+	"github.com/cristianmanoliu/fin-trading-engine/pkg/models"
 )
 
 // Executor receives trade signals and manages paper positions.

@@ -1,7 +1,7 @@
 package indicators
 
 import (
-	"github.com/cristianmanoliu/trading-engine/pkg/models"
+	"github.com/cristianmanoliu/fin-trading-engine/pkg/models"
 )
 
 // DailyLevels tracks the Previous Day High (PDH) and Previous Day Low (PDL),

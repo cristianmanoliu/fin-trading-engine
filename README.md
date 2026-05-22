@@ -1,4 +1,4 @@
-# trading-engine
+# fin-trading-engine
 
 A Go-based algorithmic trading engine for Binance USDT-M Futures. Backtesting + paper-live engine + (gated) real-money executor.
 

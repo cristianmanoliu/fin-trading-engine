@@ -9,8 +9,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/cristianmanoliu/trading-engine/pkg/models"
-	"github.com/cristianmanoliu/trading-engine/pkg/notify"
+	"github.com/cristianmanoliu/fin-trading-engine/pkg/models"
+	"github.com/cristianmanoliu/fin-trading-engine/pkg/notify"
 )
 
 // lagRingSize is the rolling window for source-to-receipt lag samples.

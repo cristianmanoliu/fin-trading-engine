@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cristianmanoliu/trading-engine/pkg/models"
-	"github.com/cristianmanoliu/trading-engine/pkg/notify"
+	"github.com/cristianmanoliu/fin-trading-engine/pkg/models"
+	"github.com/cristianmanoliu/fin-trading-engine/pkg/notify"
 )
 
 // Heartbeat is the operational liveness signal that scripts/post_deploy_check.sh

@@ -1,4 +1,4 @@
-module github.com/cristianmanoliu/trading-engine
+module github.com/cristianmanoliu/fin-trading-engine
 
 go 1.26.2
 

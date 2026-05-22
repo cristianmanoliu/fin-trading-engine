@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cristianmanoliu/trading-engine/pkg/models"
-	"github.com/cristianmanoliu/trading-engine/pkg/strategy"
+	"github.com/cristianmanoliu/fin-trading-engine/pkg/models"
+	"github.com/cristianmanoliu/fin-trading-engine/pkg/strategy"
 )
 
 // Compile-time check: BinanceLive satisfies pkg/strategy.Executor. If the

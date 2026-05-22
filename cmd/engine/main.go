@@ -14,14 +14,14 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/cristianmanoliu/trading-engine/config"
-	"github.com/cristianmanoliu/trading-engine/pkg/aggregator"
-	"github.com/cristianmanoliu/trading-engine/pkg/execution"
-	"github.com/cristianmanoliu/trading-engine/pkg/funding"
-	"github.com/cristianmanoliu/trading-engine/pkg/marketdata"
-	"github.com/cristianmanoliu/trading-engine/pkg/models"
-	"github.com/cristianmanoliu/trading-engine/pkg/notify"
-	"github.com/cristianmanoliu/trading-engine/pkg/strategy"
+	"github.com/cristianmanoliu/fin-trading-engine/config"
+	"github.com/cristianmanoliu/fin-trading-engine/pkg/aggregator"
+	"github.com/cristianmanoliu/fin-trading-engine/pkg/execution"
+	"github.com/cristianmanoliu/fin-trading-engine/pkg/funding"
+	"github.com/cristianmanoliu/fin-trading-engine/pkg/marketdata"
+	"github.com/cristianmanoliu/fin-trading-engine/pkg/models"
+	"github.com/cristianmanoliu/fin-trading-engine/pkg/notify"
+	"github.com/cristianmanoliu/fin-trading-engine/pkg/strategy"
 )
 
 func main() {

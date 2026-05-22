@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cristianmanoliu/trading-engine/pkg/models"
+	"github.com/cristianmanoliu/fin-trading-engine/pkg/models"
 )
 
 func TestVWAPInitialState(t *testing.T) {

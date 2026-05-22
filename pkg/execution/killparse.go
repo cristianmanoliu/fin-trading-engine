@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/cristianmanoliu/trading-engine/pkg/models"
+	"github.com/cristianmanoliu/fin-trading-engine/pkg/models"
 )
 
 // ParseClosePositionSpec parses the operator-facing "<sym>,<side>,<qty>;..."

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cristianmanoliu/trading-engine/pkg/execution"
+	"github.com/cristianmanoliu/fin-trading-engine/pkg/execution"
 )
 
 // End-to-end CLI tests for kill_switch.

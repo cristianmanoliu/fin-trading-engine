@@ -3,7 +3,7 @@ package strategy
 import (
 	"testing"
 
-	"github.com/cristianmanoliu/trading-engine/pkg/models"
+	"github.com/cristianmanoliu/fin-trading-engine/pkg/models"
 )
 
 // BiasTracker is the macro-trend gate that every breakout entry passes

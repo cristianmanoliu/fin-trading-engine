@@ -3,7 +3,7 @@ package strategy
 import (
 	"time"
 
-	"github.com/cristianmanoliu/trading-engine/pkg/models"
+	"github.com/cristianmanoliu/fin-trading-engine/pkg/models"
 )
 
 // FundingRateReader returns the prevailing per-8h funding rate at a given time.

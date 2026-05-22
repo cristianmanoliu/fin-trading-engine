@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cristianmanoliu/trading-engine/pkg/models"
+	"github.com/cristianmanoliu/fin-trading-engine/pkg/models"
 )
 
 // captureSlog redirects slog.Default into a buffer for assertion. Restored on

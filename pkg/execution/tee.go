@@ -1,6 +1,6 @@
 package execution
 
-import "github.com/cristianmanoliu/trading-engine/pkg/models"
+import "github.com/cristianmanoliu/fin-trading-engine/pkg/models"
 
 // teeExec is the minimal Executor surface used by TeeExecutor. Defined
 // locally rather than importing pkg/strategy.Executor because pkg/strategy

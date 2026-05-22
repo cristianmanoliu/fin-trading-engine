@@ -3,7 +3,7 @@ package indicators
 import (
 	"math"
 
-	"github.com/cristianmanoliu/trading-engine/pkg/models"
+	"github.com/cristianmanoliu/fin-trading-engine/pkg/models"
 )
 
 // ATR computes the Average True Range over a fixed period using Wilder's smoothing.

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/cristianmanoliu/trading-engine/pkg/models"
+	"github.com/cristianmanoliu/fin-trading-engine/pkg/models"
 	"gopkg.in/yaml.v3"
 )
 

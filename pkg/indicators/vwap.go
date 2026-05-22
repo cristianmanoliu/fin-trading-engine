@@ -3,7 +3,7 @@ package indicators
 import (
 	"time"
 
-	"github.com/cristianmanoliu/trading-engine/pkg/models"
+	"github.com/cristianmanoliu/fin-trading-engine/pkg/models"
 )
 
 // VWAP calculates the session Volume-Weighted Average Price.

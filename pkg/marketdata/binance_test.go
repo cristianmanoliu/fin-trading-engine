@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cristianmanoliu/trading-engine/pkg/models"
+	"github.com/cristianmanoliu/fin-trading-engine/pkg/models"
 )
 
 // mockKline returns one Binance kline row in the JSON-array shape the production

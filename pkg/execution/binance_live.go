@@ -20,8 +20,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cristianmanoliu/trading-engine/pkg/models"
-	"github.com/cristianmanoliu/trading-engine/pkg/notify"
+	"github.com/cristianmanoliu/fin-trading-engine/pkg/models"
+	"github.com/cristianmanoliu/fin-trading-engine/pkg/notify"
 )
 
 // ErrRecoveryDrift is returned by BinanceLive.RecoverFromJournal when the

@@ -38,8 +38,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/cristianmanoliu/trading-engine/pkg/execution"
-	"github.com/cristianmanoliu/trading-engine/pkg/notify"
+	"github.com/cristianmanoliu/fin-trading-engine/pkg/execution"
+	"github.com/cristianmanoliu/fin-trading-engine/pkg/notify"
 )
 
 const usageText = `kill_switch — emergency real-money market-close-all (Path C of auto-kill rule)

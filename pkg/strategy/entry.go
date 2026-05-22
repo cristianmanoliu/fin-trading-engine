@@ -6,8 +6,8 @@ import (
 	"math"
 	"time"
 
-	"github.com/cristianmanoliu/trading-engine/pkg/indicators"
-	"github.com/cristianmanoliu/trading-engine/pkg/models"
+	"github.com/cristianmanoliu/fin-trading-engine/pkg/indicators"
+	"github.com/cristianmanoliu/fin-trading-engine/pkg/models"
 )
 
 // EntryDetector inspects a rolling window of closed candles (timeframe set by the runner)

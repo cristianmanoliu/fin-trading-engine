@@ -20,7 +20,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cristianmanoliu/trading-engine/pkg/models"
+	"github.com/cristianmanoliu/fin-trading-engine/pkg/models"
 )
 
 // Provider is the abstraction the executor uses to charge funding cost on a closed trade.

@@ -12,9 +12,9 @@ import (
 	"sort"
 	"time"
 
-	"github.com/cristianmanoliu/trading-engine/pkg/funding"
-	"github.com/cristianmanoliu/trading-engine/pkg/models"
-	"github.com/cristianmanoliu/trading-engine/pkg/notify"
+	"github.com/cristianmanoliu/fin-trading-engine/pkg/funding"
+	"github.com/cristianmanoliu/fin-trading-engine/pkg/models"
+	"github.com/cristianmanoliu/fin-trading-engine/pkg/notify"
 )
 
 // OpenPosition tracks an active paper trade.

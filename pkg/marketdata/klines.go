@@ -3,7 +3,7 @@ package marketdata
 import (
 	"time"
 
-	"github.com/cristianmanoliu/trading-engine/pkg/models"
+	"github.com/cristianmanoliu/fin-trading-engine/pkg/models"
 )
 
 // expandKlineToTicks converts a single 1m kline into 4 synthetic ticks:

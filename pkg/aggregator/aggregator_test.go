@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cristianmanoliu/trading-engine/pkg/models"
+	"github.com/cristianmanoliu/fin-trading-engine/pkg/models"
 )
 
 // fixtureTick builds a Tick with the given UTC time + price/volume defaults.

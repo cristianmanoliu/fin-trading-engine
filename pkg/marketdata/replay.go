@@ -8,7 +8,7 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/cristianmanoliu/trading-engine/pkg/models"
+	"github.com/cristianmanoliu/fin-trading-engine/pkg/models"
 )
 
 // CSVReplay replays a Binance klines CSV file as a synthetic tick stream.

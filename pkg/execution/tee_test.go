@@ -3,7 +3,7 @@ package execution
 import (
 	"testing"
 
-	"github.com/cristianmanoliu/trading-engine/pkg/models"
+	"github.com/cristianmanoliu/fin-trading-engine/pkg/models"
 )
 
 // mockTeeExec records every call for assertion. Captures both signals

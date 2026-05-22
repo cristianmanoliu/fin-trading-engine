@@ -1,6 +1,6 @@
 package strategy
 
-import "github.com/cristianmanoliu/trading-engine/pkg/models"
+import "github.com/cristianmanoliu/fin-trading-engine/pkg/models"
 
 // BiasTracker determines macro directional bias from 4H candles.
 // Bias gates breakout entries: only signals aligned with bias are emitted.
