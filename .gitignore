@@ -63,3 +63,4 @@ resume-claude.sh
 # Superpowers plugin artifacts (plans/specs generated during sessions)
 docs/superpowers/
 results/signal_context_cache/
+results/journal_cache/
