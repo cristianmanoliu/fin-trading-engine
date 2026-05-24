@@ -33,7 +33,12 @@ rsync -az --delete \
 if [[ -d "${ROOT}/data/funding" ]]; then
     echo "→ Syncing data/funding/ (Binance funding rate history)..."
     ssh ${SSH_OPTS} "${TARGET}" "mkdir -p ${REMOTE_DIR}/data/funding"
-    rsync -az --delete \
+    # -u (--update): skip files where VPS mtime >= local mtime.
+    # Protects CSVs written by the VPS-side funding_refresh_cron.sh (Sundays
+    # 03:00 UTC) from being clobbered by stale local copies during redeploy.
+    # --delete intentionally omitted: VPS-cron may create symbol files not yet
+    # present locally; removing them would undo a successful refresh.
+    rsync -azu \
         -e "ssh ${SSH_OPTS}" \
         "${ROOT}/data/funding/" \
         "${TARGET}:${REMOTE_DIR}/data/funding/"
