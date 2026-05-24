@@ -528,6 +528,14 @@ func main() {
 			"dir", liveCtxWriter.Dir)
 	}
 
+	// Wire funding reader for signal-context sidecar enrichment regardless of
+	// whether the funding-regime filter is active. Without this, funding fields
+	// are absent from all sidecar records when filter is disabled (the production
+	// default: --funding-csv-dir set but --funding-filter-max-bps-per-day=0).
+	if hist, ok := fundingProvider.(*funding.Historical); ok {
+		runner.SetFundingContextReader(hist)
+	}
+
 	// Funding filter (optional): gate SHORT signals by current funding regime.
 	// Requires Historical funding provider — Constant rate has no time variation
 	// so the filter would be trivially uniform. Mirrors cmd/backtest wiring.
@@ -626,6 +634,9 @@ func main() {
 				Symbol: cfg.Symbol,
 			}
 			shadowRunners[i].SetSignalContextWriter(shadowCtxWriter, spec.Label)
+		}
+		if hist, ok := fundingProvider.(*funding.Historical); ok {
+			shadowRunners[i].SetFundingContextReader(hist)
 		}
 		switch spec.Type {
 		case "bb":

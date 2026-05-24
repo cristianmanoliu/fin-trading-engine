@@ -172,7 +172,11 @@ func NewEntryDetector(cfg EntryConfig) *EntryDetector {
 		d.ema9 = indicators.NewEMA(fast)
 		d.ema21 = indicators.NewEMA(slow)
 	}
-	if cfg.ATRStopMult > 0 {
+	// ATR is always constructed for signal-context observability even when the
+	// wick-based stop is in use (ATRStopMult==0). The ATR value is included in
+	// every sidecar record so post-resolution cohort analysis can condition on
+	// volatility regime. ATRStopMult==0 path ignores e.atr in stop calculation.
+	{
 		period := cfg.ATRPeriod
 		if period <= 0 {
 			period = 14
@@ -189,8 +193,21 @@ func NewEntryDetector(cfg EntryConfig) *EntryDetector {
 	if cfg.MACDMode {
 		d.macd = indicators.NewMACD(cfg.MACDFast, cfg.MACDSlow, cfg.MACDSignal)
 	}
-	if cfg.BollingerMode {
-		d.bollinger = indicators.NewBollinger(cfg.BollingerPeriod, cfg.BollingerStdMult)
+	// Bollinger is always constructed for signal-context observability. BB position
+	// at signal emission is a key analytical dimension for post-resolution cohort
+	// analysis regardless of whether BollingerMode drives entry signals.
+	// The BollingerMode strategy path already checks e.bollinger != nil, so
+	// making it unconditional does not change signal-generation behaviour.
+	{
+		period := cfg.BollingerPeriod
+		if period <= 0 {
+			period = 20
+		}
+		mult := cfg.BollingerStdMult
+		if mult <= 0 {
+			mult = 2.0
+		}
+		d.bollinger = indicators.NewBollinger(period, mult)
 	}
 	if cfg.Confluence1DMode {
 		fast := cfg.ConfluenceFastPeriod
@@ -223,10 +240,8 @@ func (e *EntryDetector) Snapshot() IndicatorSnapshot {
 	if e.atr != nil && e.atr.Primed() {
 		s.ATR = e.atr.Value()
 	}
-	if e.cfg.VolFilterMode {
-		s.RealizedVol30dAnn = e.realizedVol30d
-	}
-	if e.cfg.BollingerMode && e.bollinger != nil && e.bollinger.Primed() {
+	s.RealizedVol30dAnn = e.realizedVol30d // 0 until ≥30 log-return observations
+	if e.bollinger != nil && e.bollinger.Primed() {
 		lower, mid, upper := e.bollinger.Value()
 		s.BBLower = lower
 		s.BBMid = mid
@@ -255,7 +270,7 @@ func (e *EntryDetector) AddCandle(c models.Candle) {
 		e.prevMACD, e.prevSignal = e.macd.Value()
 		e.macd.Update(c.Close)
 	}
-	if e.cfg.BollingerMode && e.bollinger != nil {
+	if e.bollinger != nil {
 		e.bollinger.Update(c.Close)
 	}
 
@@ -269,8 +284,9 @@ func (e *EntryDetector) AddCandle(c models.Candle) {
 		}
 	}
 
-	// E1 vol filter: roll log returns and recompute realized vol when window has ≥30 obs.
-	if e.cfg.VolFilterMode && len(e.window) >= 1 {
+	// Roll log-returns and recompute realized vol unconditionally for signal-context
+	// observability. VolFilterMode gates the filter action (below), not the computation.
+	if len(e.window) >= 1 {
 		prev := e.window[len(e.window)-1].Close
 		if prev > 0 && c.Close > 0 {
 			ret := math.Log(c.Close / prev)

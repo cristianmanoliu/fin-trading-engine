@@ -586,3 +586,55 @@ func TestFundingCross_SideFilterShort_LongSignalSuppressed(t *testing.T) {
 		t.Errorf("expected nil signal (SideFilter=Short blocks LONG funding signal), got %+v", sig)
 	}
 }
+
+// TestSnapshot_ObservabilityFieldsPopulatedWithoutModeFlags verifies the 2026-05-24
+// schema-completeness fix: ATR, RealizedVol30dAnn, and BB are captured in Snapshot
+// even when ATRStopMult==0, VolFilterMode==false, and BollingerMode==false.
+// Pre-fix, these were absent from all 235 live/shadow signal-context records.
+func TestSnapshot_ObservabilityFieldsPopulatedWithoutModeFlags(t *testing.T) {
+	cfg := EntryConfig{
+		EMAMode: true,
+		// ATRStopMult == 0 (wick-based stop, production default)
+		// VolFilterMode == false (not deployed)
+		// BollingerMode == false (EMA mode, not BB mode)
+	}
+	d := NewEntryDetector(cfg)
+
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	// Feed enough candles to prime ATR(14), BB(20), and realizedVol (≥30).
+	// Prices move: 100 → 110 in steps to give non-trivial ATR/vol/BB values.
+	for i := 0; i < 40; i++ {
+		price := 100.0 + float64(i)*0.25
+		d.AddCandle(models.Candle{
+			Symbol:    "TEST",
+			Open:      price - 0.1,
+			High:      price + 0.5,
+			Low:       price - 0.5,
+			Close:     price,
+			CloseTime: base.Add(time.Duration(i) * 5 * time.Minute),
+		})
+	}
+
+	snap := d.Snapshot()
+
+	// ATR must be primed and non-zero (14 candles min; we fed 40).
+	if snap.ATR == 0 {
+		t.Error("ATR is 0 in Snapshot — unconditional construction fix not effective")
+	}
+
+	// RealizedVol must be primed (≥30 observations needed; we fed 40).
+	if snap.RealizedVol30dAnn == 0 {
+		t.Error("RealizedVol30dAnn is 0 in Snapshot — VolFilterMode guard removal not effective")
+	}
+
+	// BB must be primed (20 candles min; we fed 40).
+	if snap.BBMid == 0 {
+		t.Error("BBMid is 0 in Snapshot — unconditional Bollinger construction fix not effective")
+	}
+	if snap.BBUpper == 0 {
+		t.Error("BBUpper is 0 in Snapshot")
+	}
+	if snap.BBLower == 0 {
+		t.Error("BBLower is 0 in Snapshot")
+	}
+}

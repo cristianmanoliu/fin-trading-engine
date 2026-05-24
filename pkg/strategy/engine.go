@@ -55,8 +55,9 @@ type Runner struct {
 	// signalContext (optional) writes rich state at signal-emission time to
 	// JSONL sidecars for forward-paper pattern-matching analysis. Nil = disabled.
 	// See SignalContext / SignalContextWriter in signal_context.go.
-	signalContext *SignalContextWriter
-	contextLabel  string // "live" | shadow label, embedded in each record
+	signalContext        *SignalContextWriter
+	contextLabel         string // "live" | shadow label, embedded in each record
+	fundingContextReader FundingRateReader // for sidecar only; separate from fundingFilter
 
 	// output
 	executor Executor
@@ -101,6 +102,15 @@ func (r *Runner) SetFundingRateReader(f func(t time.Time) float64) {
 	if r.detector != nil {
 		r.detector.SetFundingRateReader(f)
 	}
+}
+
+// SetFundingContextReader wires a funding-rate reader used exclusively for
+// signal-context sidecar enrichment. Independent of the funding-filter gate
+// (SetFundingFilter) — allows funding rate to be captured in sidecar records
+// even when the funding-regime filter is disabled (the common production case:
+// --funding-csv-dir set but --funding-filter-max-bps-per-day=0).
+func (r *Runner) SetFundingContextReader(reader FundingRateReader) {
+	r.fundingContextReader = reader
 }
 
 // NewRunner wires up the strategy runner.
@@ -395,8 +405,18 @@ func (r *Runner) writeSignalContext(sig *models.Signal) {
 		SignalTF:          string(r.signalTF),
 		SideFilter:        sideFilter,
 	}
+	// Prefer fundingFilter.Reader (already wired when filter is active); fall back
+	// to fundingContextReader (wired by cmd/engine when --funding-csv-dir is set
+	// but --funding-filter-max-bps-per-day=0 — the production case that previously
+	// left funding fields absent from all sidecar records).
+	var fundingReader FundingRateReader
 	if r.fundingFilter != nil && r.fundingFilter.Reader != nil {
-		rate8h := r.fundingFilter.Reader.RateAt(sig.Timestamp)
+		fundingReader = r.fundingFilter.Reader
+	} else if r.fundingContextReader != nil {
+		fundingReader = r.fundingContextReader
+	}
+	if fundingReader != nil {
+		rate8h := fundingReader.RateAt(sig.Timestamp)
 		ctx.FundingRate8h = rate8h
 		ctx.FundingBpsPerDay = rate8h * 3 * 10000 // 3 funding intervals per day, → bps
 	}
