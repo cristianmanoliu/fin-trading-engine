@@ -1,0 +1,35 @@
+
+════════════════════════════════════════════════════════════════════════════════════════
+  W7 — EMA9×EMA21  4H  short-only  target_rr=6.0  mh=504h  LIVE CANDIDATE CONFIG
+  Universe: deployed-16
+  Flags: --exact-fills --include-boundary --pessimistic-ambiguous
+         --fee-bps=10  --stop-slippage-bps=5
+  Period: 2026-01 → 2026-04  |  $1k stake per trade
+  Pre-reg: results/w7_2026_backtest_decision_rule_2026-05-24.md
+════════════════════════════════════════════════════════════════════════════════════════
+
+Symbol               Trades   Wins WinPct      Gross_$       Fees_$        NET_$
+────── ────── ──── ────── ──────── ────── ──────
+RUNEUSDT                  8      3  37.5% +     13000       1164 +     11442
+XLMUSDT                  11      3  27.3% +     10000        641 +      9130
+KAVAUSDT                  9      2  22.2% +      5000        472 +      4392
+ROSEUSDT                  2      0   0.0% +      4308         27 +      4232
+APTUSDT                   9      2  22.2% +      5000        612 +      4146
+ETCUSDT                  16      3  18.8% +      6039       1339 +      4138
+IMXUSDT                  11      2  18.2% +      4517        490 +      3871
+1000SHIBUSDT             16      3  18.8% +      5000       1408 +      3034
+ENSUSDT                   6      1  16.7% +      2876        344 +      2352
+1INCHUSDT                 3      0   0.0% +      2442        127 +      2275
+DOTUSDT                  14      2  14.3% +      3101        953 +      1720
+ADAUSDT                  12      2  16.7% +      2000        824 +       850
+AVAXUSDT                 14      2  14.3% +         0       1489      -2176
+BCHUSDT                   7      0   0.0%      -2823        410      -3455
+GRTUSDT                  13      1   7.7%      -4928        821      -6127
+FILUSDT                  14      1   7.1%      -7000        745      -8115
+
+────────────────────────────────────────────────────────────────────────────────────────
+TOTAL  16 symbols | 165 trades | 27 wins (16.4%)
+       Gross:    +48532$
+       Fees:     11868$
+       NET:      +31710$
+       12/16 profitable symbols

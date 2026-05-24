@@ -1,0 +1,17 @@
+════════════════════════════════════════════════════════════════════════════════════════════════════
+  Kill-protocol check (stage: STAGE_0)
+  Source: results/real_money_protocol_decision_rule_2026-05-08.md §Kill criteria
+════════════════════════════════════════════════════════════════════════════════════════════════════
+
+  criterion                                                   threshold                     actual                        status
+  --------------------------------------------------------------------------------------------------
+  1. Drift detector confirmed fire (≥2 firings, ≥7d apart)    0 firings                     0 firings (23 clean runs, last 2026-05-24)  [CONTINUE]
+  2. Slip >30.0bp over last 30 losers                         <30.0bp                       only 25 losers                [PENDING]
+  3. 3 consecutive days each loss >5.0× stake ($1000, STAGE_0)  <3 consecutive days < $-5000  no qualifying run             [OPERATOR-VERIFY]
+  4. Single-symbol >50.0% PnL                                 <50.0%                        only 27 trades (need ≥30)     [PENDING]
+  5. Unrecoverable engine/exchange error                      operator-verify (Telegram + post_deploy_check §5)  (deferred)                    [DEFERRED]
+  6. Drawdown >20.0% over 60d window                          ≤20.0%                        only 15d of history           [PENDING]
+
+════════════════════════════════════════════════════════════════════════════════════════════════════
+  >>> VERDICT: WAITING — insufficient data on ≥1 criterion. Continue forward-paper monitoring.
+════════════════════════════════════════════════════════════════════════════════════════════════════
