@@ -35,9 +35,6 @@ OPTIONAL_INDICATOR_FIELDS = [
     "funding_rate_8h", "funding_bps_per_day",
     "side_filter",
 ]
-ALL_FIELDS = list(REQUIRED_FIELDS) + OPTIONAL_INDICATOR_FIELDS
-
-
 def load_cohort(cohort_dir: Path) -> tuple[list[dict[str, Any]], list[str]]:
     """Load all JSONL records from a cohort directory. Returns (records, errors)."""
     records: list[dict[str, Any]] = []
@@ -55,15 +52,29 @@ def load_cohort(cohort_dir: Path) -> tuple[list[dict[str, Any]], list[str]]:
     return records, errors
 
 
-def field_presence(records: list[dict[str, Any]], fields: list[str]) -> dict[str, float]:
-    """Return % of records where each field is present and non-zero/non-empty."""
+def field_key_presence_pct(records: list[dict[str, Any]], fields: list[str]) -> dict[str, float]:
+    """Return % of records where the field key exists (regardless of value).
+
+    Use this to detect truly absent fields — i.e., the writer never emitted the field.
+    A field with a legitimate zero value (e.g., ema_spread_pct=0.0) shows 100% here.
+    """
     if not records:
         return {f: 0.0 for f in fields}
-    presence: dict[str, float] = {}
-    for f in fields:
-        count = sum(1 for r in records if r.get(f) not in (None, 0, 0.0, ""))
-        presence[f] = count / len(records) * 100
-    return presence
+    return {f: sum(1 for r in records if f in r) / len(records) * 100 for f in fields}
+
+
+def field_nonzero_presence_pct(records: list[dict[str, Any]], fields: list[str]) -> dict[str, float]:
+    """Return % of records where the field is present AND non-zero/non-empty.
+
+    Legacy semantics (pre-cleanup). Useful for numeric fields where zero means 'uncalculated';
+    misleading for fields where zero is a legitimate measurement (e.g., exact PDH cross).
+    """
+    if not records:
+        return {f: 0.0 for f in fields}
+    return {
+        f: sum(1 for r in records if r.get(f) not in (None, 0, 0.0, "")) / len(records) * 100
+        for f in fields
+    }
 
 
 def date_range(records: list[dict[str, Any]]) -> tuple[str, str]:
@@ -125,7 +136,8 @@ def main() -> int:
         label = cohort_dir.name
         records, parse_errors = load_cohort(cohort_dir)
         schema_errors = check_required_fields(records)
-        presence = field_presence(records, OPTIONAL_INDICATOR_FIELDS)
+        key_pres = field_key_presence_pct(records, OPTIONAL_INDICATOR_FIELDS)
+        nonzero_pres = field_nonzero_presence_pct(records, OPTIONAL_INDICATOR_FIELDS)
         sym_counts = per_symbol_counts(records)
         first_ts, last_ts = date_range(records)
 
@@ -134,7 +146,8 @@ def main() -> int:
             "symbols": sym_counts,
             "date_first": first_ts,
             "date_last": last_ts,
-            "field_presence_pct": presence,
+            "field_key_presence_pct": key_pres,
+            "field_nonzero_presence_pct": nonzero_pres,
             "parse_errors": parse_errors,
             "schema_errors": schema_errors,
         }
@@ -145,10 +158,7 @@ def main() -> int:
 
     # ── Render ───────────────────────────────────────────────────────────────
     if args.json:
-        # Machine-readable output omits raw records; includes summary only.
-        output = {k: {x: v[x] for x in v if x != "records_data"}
-                  for k, v in all_cohort_data.items()}
-        print(json.dumps(output, indent=2))
+        print(json.dumps(all_cohort_data, indent=2))
     else:
         _render_human(all_cohort_data)
 
@@ -194,11 +204,16 @@ def _render_human(all_cohort_data: dict[str, dict]) -> None:
         for sym, cnt in sorted(data["symbols"].items()):
             print(f"    {sym:<20} {cnt:>3} record(s)")
 
-        # Field-presence for optional indicator fields grouped by category
-        pres = data["field_presence_pct"]
+        # Field-presence for optional indicator fields grouped by category.
+        # key_pres: field key exists in record (detects writer not emitting the field).
+        # nz_pres: field key exists AND value is non-zero (legacy; can mislead on
+        #          exact-zero legitimate readings like ema_spread_pct=0.0 at cross).
+        # ABSENT flag keys off key_pres so exact-zero readings don't get mislabeled.
+        key_pres = data["field_key_presence_pct"]
+        nz_pres = data["field_nonzero_presence_pct"]
         print()
-        print(f"    {'Field':<25} {'Present':>8}")
-        print(f"    {'─────':<25} {'───────':>8}")
+        print(f"    {'Field':<25} {'Key%':>8}  {'NonZero%':>9}")
+        print(f"    {'─────':<25} {'────':>8}  {'────────':>9}")
 
         categories = [
             ("EMA", ["ema9", "ema21", "ema_spread_pct"]),
@@ -211,10 +226,11 @@ def _render_human(all_cohort_data: dict[str, dict]) -> None:
         for cat_name, fields in categories:
             first = True
             for f in fields:
-                pct = pres.get(f, 0.0)
-                flag = " ← ABSENT" if pct == 0.0 else (" ← sparse" if pct < 50 else "")
+                kp = key_pres.get(f, 0.0)
+                nzp = nz_pres.get(f, 0.0)
+                flag = " ← ABSENT" if kp == 0.0 else (" ← sparse" if kp < 50 else "")
                 prefix = f"    [{cat_name}]" if first else "           "
-                print(f"    {prefix:<25} {f:<22} {pct:>6.1f}%{flag}")
+                print(f"    {prefix:<25} {f:<22} {kp:>6.1f}%  {nzp:>7.1f}%{flag}")
                 first = False
         print()
 
