@@ -1,6 +1,6 @@
 # results/ index — decision rules, verdicts, and operational pre-registrations
 
-61 markdown artifacts (including INDEX) as of 2026-05-24, organized by lifecycle stage and category.
+62 markdown artifacts (including INDEX) as of 2026-05-24, organized by lifecycle stage and category.
 
 **Three artifact types:**
 - `*_decision_rule_*.md` — pre-registered: rule LOCKED before data is observed
@@ -86,6 +86,7 @@ Sits between mechanical DEPLOY-READY verdict and STAGE_1 promotion. The discipli
 - **`forward_paper_completion_review_decision_rule_2026-05-08.md`** — qualitative audit gate; three sections (cost realization / empirical-vs-prediction shape / anomaly + qualitative); composite GREEN/AMBER/RED; required artifact + AMBER resolution path
 - **`forward_paper_outcome_resolution_decision_rule_2026-05-10.md`** — five-verdict mechanical decision tree (CONTINUE / WATCH / PROMOTE / KILL / OPERATOR_REVIEW) for the LIMBO case (calendar gate met but trade gate not, or any genuinely ambiguous outcome); locks the response BEFORE the data forces a heuristic call. Rule 3 explicitly handles 2026-05-10's emotional reaction to n=9 by mandating CONTINUE below n=50
 - **`cohort_outcome_join_decision_rule_2026-05-24.md`** — post-resolution analysis methodology: joins signal-context sidecar records to journal close events, computes per-cohort outcome distributions across 4 cohorts (live + 3 shadows), and applies a locked 4-verdict tree (DOMINATE / MATCH / UNDERPERFORM / CONTRADICTION) with family-wise Bonferroni correction (α_family=0.05, N=3). PRIMARY metric: mean PnL/trade (unequal-n safe). DOMINATE → milestone-2 candidate only (not auto-promote). Forbids per-symbol cherry-picking, post-hoc time-window slicing, and invocation before resolution artifact exists (exit 5 PRE_RESOLUTION).
+- **`resolution_data_freeze_decision_rule_2026-05-24.md`** — locks the snapshot-and-bundle procedure at the resolution moment: 12-file canonical bundle into `results/freeze/<t_freeze>/` (all fresh runs, NOT prior cron copies), `t_freeze` definition (UTC at verdict-emit, floor-day `elapsed` for pro-rate), in-flight position exclusion from numerator, gate-ordering hysteresis (`n_ever ≥ 150` not `n_current`), drift-history-as-of-freeze (fresh check required; INSUFFICIENT does not re-veto verdict), and 6 exit codes including exit-4 ALREADY_FROZEN one-shot guard. Upstream of `honest_annual_prorate_decision_rule` (defines canonical `elapsed`) and `cohort_outcome_join_decision_rule_2026-05-24.md` (defines calendar bounds for matched-window analysis).
 
 ### Stage 3 — Real-money execution (STAGE_1 through STAGE_4)
 
@@ -116,7 +117,7 @@ Pre-registered now; activates when current milestone closes.
 ## Index by category (alternative view)
 
 ### Locked decision rules (rule pre-registered, awaits data)
-33 files. The pre-registration backbone of the project. (+1 telegram_alert_design 2026-05-08 + 1 forward_paper_outcome_resolution 2026-05-10 + 1 milestone2_runbook 2026-05-10 + 1 promote_closure_template 2026-05-10 + signal_context_consumer/signal_journal_reconcile/binomial_monitor/cohort_outcome_join 2026-05-24.)
+34 files. The pre-registration backbone of the project. (+1 telegram_alert_design 2026-05-08 + 1 forward_paper_outcome_resolution 2026-05-10 + 1 milestone2_runbook 2026-05-10 + 1 promote_closure_template 2026-05-10 + signal_context_consumer/signal_journal_reconcile/binomial_monitor/cohort_outcome_join/resolution_data_freeze 2026-05-24.)
 
 ### Verdicts (rule applied to data)
 22 files. Each verdict mechanically applies its corresponding decision rule to specific data.
