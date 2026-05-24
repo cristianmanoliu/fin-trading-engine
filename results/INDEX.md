@@ -1,6 +1,6 @@
 # results/ index — decision rules, verdicts, and operational pre-registrations
 
-58 markdown artifacts (including INDEX) as of 2026-05-10, organized by lifecycle stage and category.
+61 markdown artifacts (including INDEX) as of 2026-05-24, organized by lifecycle stage and category.
 
 **Three artifact types:**
 - `*_decision_rule_*.md` — pre-registered: rule LOCKED before data is observed
@@ -85,6 +85,7 @@ Sits between mechanical DEPLOY-READY verdict and STAGE_1 promotion. The discipli
 
 - **`forward_paper_completion_review_decision_rule_2026-05-08.md`** — qualitative audit gate; three sections (cost realization / empirical-vs-prediction shape / anomaly + qualitative); composite GREEN/AMBER/RED; required artifact + AMBER resolution path
 - **`forward_paper_outcome_resolution_decision_rule_2026-05-10.md`** — five-verdict mechanical decision tree (CONTINUE / WATCH / PROMOTE / KILL / OPERATOR_REVIEW) for the LIMBO case (calendar gate met but trade gate not, or any genuinely ambiguous outcome); locks the response BEFORE the data forces a heuristic call. Rule 3 explicitly handles 2026-05-10's emotional reaction to n=9 by mandating CONTINUE below n=50
+- **`cohort_outcome_join_decision_rule_2026-05-24.md`** — post-resolution analysis methodology: joins signal-context sidecar records to journal close events, computes per-cohort outcome distributions across 4 cohorts (live + 3 shadows), and applies a locked 4-verdict tree (DOMINATE / MATCH / UNDERPERFORM / CONTRADICTION) with family-wise Bonferroni correction (α_family=0.05, N=3). PRIMARY metric: mean PnL/trade (unequal-n safe). DOMINATE → milestone-2 candidate only (not auto-promote). Forbids per-symbol cherry-picking, post-hoc time-window slicing, and invocation before resolution artifact exists (exit 5 PRE_RESOLUTION).
 
 ### Stage 3 — Real-money execution (STAGE_1 through STAGE_4)
 
@@ -115,7 +116,7 @@ Pre-registered now; activates when current milestone closes.
 ## Index by category (alternative view)
 
 ### Locked decision rules (rule pre-registered, awaits data)
-30 files. The pre-registration backbone of the project. (+1 telegram_alert_design 2026-05-08 + 1 forward_paper_outcome_resolution 2026-05-10 + 1 milestone2_runbook 2026-05-10 + 1 promote_closure_template 2026-05-10 since the 2026-05-08 snapshot.)
+33 files. The pre-registration backbone of the project. (+1 telegram_alert_design 2026-05-08 + 1 forward_paper_outcome_resolution 2026-05-10 + 1 milestone2_runbook 2026-05-10 + 1 promote_closure_template 2026-05-10 + signal_context_consumer/signal_journal_reconcile/binomial_monitor/cohort_outcome_join 2026-05-24.)
 
 ### Verdicts (rule applied to data)
 22 files. Each verdict mechanically applies its corresponding decision rule to specific data.
