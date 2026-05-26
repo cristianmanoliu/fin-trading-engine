@@ -9,7 +9,7 @@ User=paperlive
 WorkingDirectory=/opt/trading-engine
 EnvironmentFile=/etc/paper-live/env
 Environment=PAPER_LIVE_JOURNAL_DIR=/var/log/paper-live/journal
-# Strategy A (P4-Combined) with mh504 (21d max-hold) + 5 shadow strategies.
+# Strategy A (P4-Combined) with mh504 (21d max-hold) + 8 shadow strategies.
 # Pre-registered validation history:
 #   - 2026-05-06: mh504 wins 6/6 vs mh336 → STRONG → adopted as live config
 #   - 2026-05-06: 5/15 EMA wins 4/6 vs 9/21 → WEAK → run as shadow for forward validation
@@ -20,6 +20,15 @@ Environment=PAPER_LIVE_JOURNAL_DIR=/var/log/paper-live/journal
 #     ema_tf_exploratory_grid_2026-05-19); forward-paper resolves multi-comparison artifact.
 #   - 2026-05-26: 7/14 EMA added as shadow — mid-pack (+33% more trades vs live),
 #     independent data point on shorter EMA cluster (ema_tf_exploratory_grid_2026-05-19).
+#   - 2026-05-26: 10/30 EMA added as shadow — sweep#1 cell 2, mean NET +$192k/3yr, 2/3
+#     windows positive; W3 NEGATIVE (-$80k). Tests whether slower-base survives 2025-26
+#     regime forward. (ema_tf_exploratory_grid_2026-05-19)
+#   - 2026-05-26: 12/26 EMA added as shadow — sweep#1 cell 3, mean NET +$229k/3yr, 2/3
+#     windows positive; MACD-classic periods; W3 NEGATIVE (-$44k). Falsification reference
+#     for "magic numbers" hypothesis. (ema_tf_exploratory_grid_2026-05-19)
+#   - 2026-05-26: 21/50 EMA added as shadow — sweep#1 cell 6, mean NET +$112k/3yr, 3/3
+#     windows positive (only all-positive candidate). Low trade count (~0.6/day) — power
+#     floor n=63 may need >60d window. (ema_tf_exploratory_grid_2026-05-19)
 # Shadow strategies receive identical market data but write to separate journals
 # at /var/log/paper-live/journal/shadow/<label>/. Compare live vs shadow PnL
 # after sufficient forward time accumulates.
@@ -55,7 +64,7 @@ ExecStart=/opt/trading-engine/bin/engine --config /opt/trading-engine/configs/%i
     --funding-csv-dir /opt/trading-engine/data/funding \
     --fee-bps 10 --stop-slippage-bps 5 --funding-bps-per-day 0 \
     --max-hold-hours 504 \
-    --shadow alt5-15-336:5-15-336,alt5-15-504:5-15-504,bb20:bb:20-2.0-504,alt5-21-504:5-21-504,alt7-14-504:7-14-504
+    --shadow alt5-15-336:5-15-336,alt5-15-504:5-15-504,bb20:bb:20-2.0-504,alt5-21-504:5-21-504,alt7-14-504:7-14-504,alt10-30-504:10-30-504,alt12-26-504:12-26-504,alt21-50-504:21-50-504
 StandardOutput=append:/var/log/paper-live/%i.log
 StandardError=append:/var/log/paper-live/%i.log
 Restart=always
