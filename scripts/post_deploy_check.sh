@@ -207,6 +207,32 @@ case "$(compare_code_checksums "$LOCAL_MD5" "$REMOTE_MD5")" in
         ;;
 esac
 
+# ── 3b. Systemd unit drift (source vs installed) ─────────────────────────────
+echo ""
+echo "3b. Systemd unit drift (source vs installed)"
+UNIT_FILES="paper-live@.service paper-live.target paper-live-watchdog.service paper-live-watchdog.timer paper-live-digest.service paper-live-digest.timer testnet-engine@.service"
+ssh_remote "drift=''; for u in ${UNIT_FILES}; do
+  src=/opt/trading-engine/deploy/systemd/\$u
+  inst=/etc/systemd/system/\$u
+  if [[ ! -f \$src || ! -f \$inst ]]; then
+    drift=\"\${drift} MISSING:\$u\"
+  else
+    sm=\$(md5sum \$src | cut -d' ' -f1)
+    im=\$(md5sum \$inst | cut -d' ' -f1)
+    [[ \$sm != \$im ]] && drift=\"\${drift} DRIFT:\$u\"
+  fi
+done; echo \"\$drift\""
+UNIT_DRIFT=""
+[[ "$SSH_EXIT" -eq 0 ]] && UNIT_DRIFT="$(echo "$SSH_REPLY" | xargs)"
+if [[ -z "$UNIT_DRIFT" ]]; then
+    ok "all 7 systemd units match source (no drift)"
+else
+    for entry in $UNIT_DRIFT; do
+        warn "  ${entry}"
+    done
+    warn "  → run ./deploy/sync.sh to reinstall"
+fi
+
 # ── 4. Per-engine tick freshness ──────────────────────────────────────────────
 echo ""
 echo "4. Per-engine tick freshness (heartbeat last_tick_age + lag_p99)"

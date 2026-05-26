@@ -50,6 +50,25 @@ else
     echo "     ./deploy/sync.sh ${TARGET}             # re-run this sync" >&2
 fi
 
+echo "→ Installing systemd units on ${TARGET}..."
+# Copy all unit files from source to the installed location and daemon-reload
+# so that changes to deploy/systemd/ take effect on the next restart.
+# Previously this only happened in install.sh (one-time bootstrap); omitting
+# it here meant redeploy.sh would restart engines against stale unit configs
+# with no error — a silent-fail identical to the fail-open class we've closed.
+# Pattern mirrors deploy_testnet.sh:120-122. Drop-ins (layer3.conf) are
+# managed separately by deploy_layer3.sh and are intentionally excluded.
+ssh ${SSH_OPTS} "${TARGET}" "
+    cp ${REMOTE_DIR}/deploy/systemd/paper-live@.service    /etc/systemd/system/ && \
+    cp ${REMOTE_DIR}/deploy/systemd/paper-live.target      /etc/systemd/system/ && \
+    cp ${REMOTE_DIR}/deploy/systemd/paper-live-watchdog.service /etc/systemd/system/ && \
+    cp ${REMOTE_DIR}/deploy/systemd/paper-live-watchdog.timer   /etc/systemd/system/ && \
+    cp ${REMOTE_DIR}/deploy/systemd/paper-live-digest.service   /etc/systemd/system/ && \
+    cp ${REMOTE_DIR}/deploy/systemd/paper-live-digest.timer     /etc/systemd/system/ && \
+    cp ${REMOTE_DIR}/deploy/systemd/testnet-engine@.service /etc/systemd/system/ && \
+    chmod 644 /etc/systemd/system/paper-live* /etc/systemd/system/testnet-engine* && \
+    systemctl daemon-reload"
+
 echo "→ Building binaries on ${TARGET}..."
 # shellcheck disable=SC2029,SC2087
 # SC2029: ${SSH_OPTS} expands client-side, intentional (let SSH parse flags).
