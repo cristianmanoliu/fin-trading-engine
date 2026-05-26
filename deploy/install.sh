@@ -38,8 +38,9 @@ if [[ ! -f "$ENV_FILE" ]]; then
         exit 1
     fi
     cat > "$ENV_FILE" <<EOF
-TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
-TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
+export TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+export TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
+export PAPER_LIVE_SIGNAL_CONTEXT_DIR=/var/log/paper-live/signal-context
 EOF
     chmod 600 "$ENV_FILE"
     chown paperlive:paperlive "$ENV_FILE"
