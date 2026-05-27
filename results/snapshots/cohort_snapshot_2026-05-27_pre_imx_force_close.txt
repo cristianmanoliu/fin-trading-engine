@@ -1,0 +1,20 @@
+Snapshot pre-IMX max-hold force-close
+Captured: 2026-05-27T20:24:00Z (UTC)
+Purpose: baseline for post-2026-05-30 diff (alt5-15-336 IMX) + post-2026-06-06 (alt5-15-504 IMX)
+
+Cohort                    n_close  open  cumulative_pnl_usd
+alt5-15-336               54       64    15578.95
+alt5-15-504               53       64    11383.64
+bb20                      42       55    -30632.75
+alt5-21-504               2        4     -2228.10
+alt7-14-504               4        6     -4396.81
+alt12-26-504              1        3     -1129.51
+live                      30       35    -19406.29
+
+Key open positions (alt5-15-* IMX cluster artifact):
+  alt5-15-336 IMXUSDT SHORT entry=0.1851 opened=2026-05-16T00:00:00Z (force-close 2026-05-30T00:00:00Z)
+  alt5-15-504 IMXUSDT SHORT entry=0.1851 opened=2026-05-16T00:00:00Z (force-close 2026-06-06T00:00:00Z)
+  Current price: ~0.1710 (+5.7R unrealized on each)
+
+Expected PnL contribution per close (gross, ~6:1 RR target, stake=$1000):
+  ~+$5,700 less fees/slip — exact post-fire depends on tick price at fire moment
