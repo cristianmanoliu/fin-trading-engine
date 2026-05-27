@@ -112,13 +112,24 @@ ssh root@178.105.24.230 'ls -la /var/log/paper-live/journal/ | grep -vE "^total|
 
 # Tier-specific:
 # HARD: disable systemd units so a server reboot does not auto-restart
-ssh root@178.105.24.230 '
-  for sym in $(./lib/symbols.sh deployed lower); do
-    systemctl disable paper-live@${sym}.service
+# NOTE: symbols.sh is sourced from scripts/lib/ (not ./lib/). The get_symbols
+# fn is shell-level (no executable wrapper). Operator runs the resolution
+# locally then ssh'es the result, since symbols.sh requires the repo
+# checkout + configs/symbols.yaml. Verified 2026-05-27 against live repo.
+SYMBOLS=$(cd /Users/cristianmanoliu/Main/code/active/fin-trading-engine && \
+          source scripts/lib/symbols.sh && \
+          get_symbols deployed lower)
+ssh root@178.105.24.230 "
+  for sym in $SYMBOLS; do
+    systemctl disable paper-live@\${sym}.service
   done
   systemctl disable paper-live-watchdog.timer
   systemctl disable paper-live-digest.timer
-'
+"
+# NOTE: drift detection runs via launchd on local Mac (deploy/drift-check.launchd.plist),
+# NOT on VPS. Disable it separately if killing:
+#   launchctl unload ~/Library/LaunchAgents/com.tradingengine.drift-check.plist
+# (Verified 2026-05-27: only two paper-live timers on VPS.)
 
 # SOFT: leave units enabled (systemctl start will resume after fix)
 ```
@@ -274,6 +285,13 @@ The rule re-opens for design when:
 3. **First operator override of an exit-4** (per the edge case). Document and verify the override rule is calibrated correctly.
 4. **Persistent overrides** (2+ exit-4 overrides without a HARD kill). Indicates the wrapper's exit-4 threshold is mis-calibrated for current operating context — re-open both this rule AND the wrapper's calibration.
 5. **Multi-strategy fleet** (future milestone). Currently 1 live + 3 shadow; if the architecture grows to multi-strategy live (Strategy A + Strategy B both real), the kill rule becomes per-strategy and the playbook needs clarification on whether one strategy's kill affects the other.
+
+## Amendments
+
+| Date | Change | Reason |
+|------|--------|--------|
+| 2026-05-27 | Phase 3 path fix: `./lib/symbols.sh` → `source scripts/lib/symbols.sh && get_symbols deployed lower` (local resolution + ssh inline) | Original syntax assumed executable wrapper; real API is shell-fn. Verified against repo + VPS. |
+| 2026-05-27 | Phase 3 timer cleanup: removed nonexistent `drift-check.timer` + `paper-live-daily-digest.timer` from VPS disable list; added launchd unload note for `com.tradingengine.drift-check.plist` (drift runs local Mac, not VPS) | Drift detection lives in launchd, not VPS systemd. Pre-fire verification prevents dead-end commands at kill time. |
 
 ## Cross-references
 
