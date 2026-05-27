@@ -81,6 +81,7 @@ Live paper-trading; weekly drift detection; threshold cross-checks. The kill rul
 
 #### Shadow promotion
 - **`shadow_promotion_decision_rule_2026-05-27.md`** — locked 8-gate criteria for swapping a shadow variant (alt5-15-*, alt5-21, alt7-14, alt10-30, alt12-26, alt21-50, bb20) into the live config. Activates when any shadow first reaches n=63 (~2026-06-08 earliest for alt5-15-*). Two-proportion z-test p<0.001 (Bonferroni for 7 shadows), shadow PnL ≥ 1.5× |live PnL| or +$20k with live ≤ 0, mechanism-confirmed via shared-day analysis, atomic-swap Phases A-D with 14d post-promotion validation gate. Auto-kill protocol takes precedence — if drift fires, this rule pauses
+- **`post_shadow_evaluation_research_decision_rule_2026-05-27.md`** — cascaded 3-tier research sweep pre-reg, activates ONLY if current shadows fail promotion gates AND live not killed. TIER 1: Cat-B exits (4 cells); TIER 2: symbol-universe (3 cells); TIER 3: ensembles (3 cells). Each tier runs sequentially, only if prior rejected. Anti-cluster gate codifies 2026-05-27 lesson (variant rejected if backtest "edge" disappears when 2 best days removed). Max 1 new shadow per execution. Explicit anti-discovery commitments prevent garden-of-forking-paths
 
 ### Stage 2 — Forward-paper → real-money gateway
 
