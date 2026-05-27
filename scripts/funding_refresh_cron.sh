@@ -34,6 +34,7 @@ FUNDING_DIR="${ROOT}/data/funding"
 NOW_S=$(date +%s)
 STALE_THRESHOLD_S=$((24 * 3600))
 
+printf '%s funding_refresh_cron START pid=%d\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$$"
 echo "── funding_refresh_cron: ${SYMBOL_COUNT} deployed symbols ──"
 
 # ── Download ────────────────────────────────────────────────────────────────
