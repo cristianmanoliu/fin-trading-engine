@@ -49,7 +49,7 @@ statistical bar to justify swapping the live config?**
 
 ## Gate criteria (ALL must hold to promote a shadow to live)
 
-A shadow is eligible for promotion ONLY when ALL of:
+A shadow is eligible for promotion ONLY when ALL 9 of:
 
 1. **Shadow n ≥ 63 closed trades** (power floor; ±10pp CI on WR per
    binomial bounds — CLAUDE.md power floor)
@@ -72,8 +72,25 @@ A shadow is eligible for promotion ONLY when ALL of:
    pick the one with HIGHER cumulative PnL only when their PnL difference
    ≥ 1 standard error of the mean PnL delta (i.e., distinguishable signal,
    not noise between alternatives)
+9. **Anti-cluster gate** (explicit codification of 2026-05-27 lesson —
+   shadow alt5-15-* apparent +$15,579 collapsed to -$31,754 once 2 best
+   calendar days were excluded). Compute over the shadow's full forward-paper
+   trade set:
+   - `cumulative_PnL_raw` = standard sum across all closed trades
+   - `cumulative_PnL_robust` = sum after removing all trades that closed
+     on the 2 calendar days (UTC) with highest per-day PnL contribution
+   Both must hold:
+   - `cumulative_PnL_robust > 0`
+   - `cumulative_PnL_robust > 0.4 × cumulative_PnL_raw`
+   A shadow whose apparent edge disappears when 2 best calendar days are
+   removed is REJECTED. The 0.4 threshold mirrors the research-phase
+   anti-cluster gate (`post_shadow_evaluation_research_decision_rule_2026-05-27.md`).
+   This is STRICTER than the line-170 rejection bullet ("one trade >40%
+   of PnL"), which only catches concentrated single trades; cluster
+   patterns spread the same effect across N trades on 1-2 days and would
+   pass the single-trade test.
 
-If gates 1-7 are met but gate 8 reveals two equally-good shadows,
+If gates 1-8 are met but gate 8 reveals two equally-good shadows,
 **defer** to the variant with LONGER backtest history support (i.e.,
 the 5-year backtest already tested it more times). If tied there too,
 **defer to next 30 trades**.
@@ -249,5 +266,6 @@ is data for next milestone (selection-process calibration).
 | Date | Event | Action |
 |------|-------|--------|
 | 2026-05-27 | Rule locked | (this doc) |
+| 2026-05-27 | Amendment: explicit Gate 9 (anti-cluster) added pre-eval | Closes parity gap with `post_shadow_evaluation_research_decision_rule_2026-05-27.md` |
 | TBD | First shadow reaches n=63 | Apply rule, write eval doc |
 | TBD | Auto-kill fires | Rule SUSPENDED (auto-kill takes precedence) |
