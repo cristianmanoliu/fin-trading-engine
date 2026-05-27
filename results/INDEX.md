@@ -79,6 +79,9 @@ Live paper-trading; weekly drift detection; threshold cross-checks. The kill rul
 #### Operator alerting layer
 - **`telegram_alert_design_decision_rule_2026-05-08.md`** — 3-tier alert system (INFO/WARN/CRITICAL) with locked rate limits, mute-hour semantics, per-event tier assignments, and aggregation behavior. Activates when first non-startup/shutdown alert fires; binds every other locked rule that references "Telegram alert" to a consistent format and cadence
 
+#### Shadow promotion
+- **`shadow_promotion_decision_rule_2026-05-27.md`** — locked 8-gate criteria for swapping a shadow variant (alt5-15-*, alt5-21, alt7-14, alt10-30, alt12-26, alt21-50, bb20) into the live config. Activates when any shadow first reaches n=63 (~2026-06-08 earliest for alt5-15-*). Two-proportion z-test p<0.001 (Bonferroni for 7 shadows), shadow PnL ≥ 1.5× |live PnL| or +$20k with live ≤ 0, mechanism-confirmed via shared-day analysis, atomic-swap Phases A-D with 14d post-promotion validation gate. Auto-kill protocol takes precedence — if drift fires, this rule pauses
+
 ### Stage 2 — Forward-paper → real-money gateway
 
 Sits between mechanical DEPLOY-READY verdict and STAGE_1 promotion. The discipline payoff moment.
