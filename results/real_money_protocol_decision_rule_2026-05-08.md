@@ -46,9 +46,13 @@ ALL of:
   - ≥150 closed paper trades
   - ≥60 calendar days net-positive in dollar terms
   - Live PnL ≥ 60% of pro-rated honest-annual ($69k/yr × elapsed × 0.60)
-  - Live PnL beats BTC HODL with $32k notional over the same window
+  - Live PnL beats BTC HODL with $16k notional over the same window
+    (amended 2026-05-12 — see `btc_hodl_notional_amendment_2026-05-12.md`;
+    original $32k was stale deployed-32-era figure)
   - No single symbol >40% of cumulative paper PnL
-- **Drift detector clean for ≥30 consecutive days** at α=0.001 weekly cadence
+- **Drift detector clean for ≥30 consecutive days** at α=0.001 weekly
+  cadence (= ≥4 consecutive weekly checks with exit 0; per
+  `deploy/drift-check.launchd.plist` Sunday 09:00 schedule)
 - Realized round-trip taker fees ≤ 12 bp (vs 10 bp modeled)
 - Realized stop-side slippage ≤ 20 bp on losing-trade subsample
 
@@ -59,7 +63,7 @@ ALL of:
 - ≥30 calendar days at STAGE_1
 - Realized round-trip fee within 5% of STAGE_1 modeled (≤ 10.5 bp)
 - Realized stop-side slip within 20% of modeled (≤ 6 bp on losers)
-- Drift detector clean for ≥30 days at α=0.001 weekly cadence
+- Drift detector clean for ≥30 days at α=0.001 weekly cadence (≥4 checks)
 - No single-day net loss exceeding 2× per-trade stake ($200 at STAGE_1)
 - Net-positive cumulative at STAGE_1
 
@@ -70,7 +74,7 @@ ALL of:
 - ≥60 calendar days at STAGE_2
 - Realized fee/slip stable: most recent 30-trade window within 10% of
   modeled
-- Drift detector clean for ≥45 days at α=0.001 weekly cadence
+- Drift detector clean for ≥45 days at α=0.001 weekly cadence (≥6 checks)
 - Net-positive over most recent 30-day window
 - No single-symbol >40% of STAGE_1+STAGE_2 cumulative PnL
 
@@ -80,8 +84,9 @@ ALL of:
 - ≥200 closed real-money trades cumulative
 - ≥90 calendar days at STAGE_3
 - Realized fee/slip stable across STAGE_2+STAGE_3 (90+ day window)
-- Drift detector clean for ≥60 days at α=0.001 weekly cadence
-- Net-positive cumulative across STAGE_2+STAGE_3
+- Drift detector clean for ≥60 days at α=0.001 weekly cadence (≥8 checks)
+- Net-positive cumulative across STAGE_1+STAGE_2+STAGE_3 (all prior
+  real-money trades; convention from STAGE_2→STAGE_3 single-symbol gate)
 - Annualized realized NET ≥ 50% of pro-rated honest-annual ($69k/yr ×
   elapsed × 0.50)
 
@@ -89,9 +94,12 @@ ALL of:
 
 When ANY of these fire, the protocol enters KILLED state:
 
-1. **Drift detector confirmed fire** at α=0.001:
+1. **Drift detector confirmed fire** at α=0.001 (per
+   `auto_kill_execution_decision_rule_2026-05-08.md` row 1):
    - Two firings ≥7 days apart, OR
-   - Single firing combined with `forward_paper_status.sh` advisory KILL
+   - Single firing combined with a threshold-criterion match in
+     `forward_paper_status.sh` (drift+threshold). Note: a threshold-only
+     advisory without a drift firing is INVESTIGATION, not KILL.
 2. **Realized stop-side slip >30 bp** sustained over ≥30 most recent
    trades (well below A2's 81-bp linear-cost cliff but above the
    25-bp investigation threshold)
@@ -129,10 +137,16 @@ These cap promotion speed even if all other criteria pass:
 Time gates compound with trade-count gates — both must be satisfied.
 
 Total minimum time STAGE_1 → STAGE_4: 180 days, plus the forward-paper
-gate of 60+ days (likely 127 days at fleet rate to hit 150 trades). So
-the EARLIEST the strategy reaches full $1k/trade deployment from now
-is roughly **307 days from forward-paper start**, or approximately
-**2027-03-09** assuming forward-paper started 2026-05-05.
+gate of 60+ days (originally projected 127 days at 1.18 trades/day to
+hit 150 trades). So the EARLIEST the strategy reaches full $1k/trade
+deployment from forward-paper start is roughly **307 days**, or
+approximately **2027-03-09** assuming forward-paper started 2026-05-05.
+
+**2026-05-28 update:** Observed trade rate is 1.50/day (vs 1.18 prior),
+shifting STAGE_1 earliest to ~2026-08-16 (103 days STAGE_0 vs 127 modeled).
+STAGE_4 earliest correspondingly ~2027-02-12 (~25 days ahead of original
+2027-03-09 projection). The protocol gates are unchanged — only the
+underlying rate projection differs.
 
 ## What is NOT permitted (locked)
 
@@ -207,3 +221,31 @@ positions continue tracking until they resolve.
 
 The historical 2020-2025 backtest investigation is closed. Forward-paper
 data accumulation is the next data flow.
+
+## Decision log
+
+- **2026-05-28 (mirror audit):** 4 stale-reference bugs patched before
+  STAGE_0 → STAGE_1 activation window opens.
+  - Bug 1: $32k BTC-HODL notional → $16k (per
+    `btc_hodl_notional_amendment_2026-05-12.md` D2 amendment;
+    pre-existing deployed-32-era figure).
+  - Bug 2: STAGE_3 → STAGE_4 "Net-positive cumulative across
+    STAGE_2+STAGE_3" missing STAGE_1 inclusion → fixed to all prior
+    real-money trades (STAGE_1+2+3).
+  - Bug 3: drift-detector "≥30 days clean at α=0.001 weekly cadence"
+    ambiguous against weekly-only cron → clarified as "≥4 checks"
+    (similarly ≥45d=6, ≥60d=8).
+  - Bug 4: kill criterion 1 wording "single firing + advisory KILL"
+    conflicted with `auto_kill_execution_decision_rule_2026-05-08.md`
+    row 1 ("drift+threshold match") and CLAUDE.md (threshold-only
+    advisories = INVESTIGATION, not KILL) → cross-referenced auto-kill
+    rule and explicit note that threshold-only without drift is NOT
+    a KILL.
+  - Stale-projection caveat: timeline math (307d / 2027-03-09) is
+    internally consistent but assumed 1.18 trades/day; observed
+    1.50/day shifts STAGE_4 earliest to ~2027-02-12. Annotated as
+    update without altering gates.
+  - Audit context: this is the third pre-fire rule audit (auto-kill
+    2026-05-27, post-shadow research 2026-05-28, real-money protocol
+    2026-05-28). Pattern continues to find 4-6 bugs/rule before
+    activation window.
