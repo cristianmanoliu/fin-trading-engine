@@ -237,7 +237,7 @@ milestone).
 These are predictions I make NOW, before evaluation, to test my
 calibration later:
 
-- P(any shadow passes all 8 gates by 2026-08-12 STAGE_1 ETA): ~25%
+- P(any shadow passes all 9 gates by 2026-08-12 STAGE_1 ETA): ~25% (lock-time prior was "8 gates"; Gate 9 added 2026-05-27 in commit `4393e86` — prior not re-calibrated, treat as stale)
 - P(specifically alt5-15-* passes all gates): ~20% (highest-prior given
   current trajectory)
 - P(bb20 ever passes): ~2%

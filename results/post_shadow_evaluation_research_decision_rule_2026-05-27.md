@@ -16,7 +16,7 @@ The temptation 12 days from now will be: "current shadows didn't pan out, let's 
 
 1. At least one shadow has reached n ≥ 63 closed trades
 2. `shadow_promotion_decision_rule_2026-05-27.md` has been applied per its terms
-3. NO shadow passed all 8 promotion gates
+3. NO shadow passed all 9 promotion gates (Gate 9 = anti-cluster, added 2026-05-27 in commit `4393e86`)
 4. Live strategy is NOT in auto-kill state (`auto_kill_execution_decision_rule` did NOT fire)
 5. Live is also NOT yet promoted to STAGE_1 (still STAGE_0 paper)
 
@@ -38,14 +38,18 @@ Specifies the SHAPE of the next research tier: which sweeps run, in what order, 
 
 **4 cells (LOCKED, no expansion):**
 
-| # | Variant | Description |
-|---|---------|-------------|
-| 1 | trail-stop 3R | Move stop to break-even at +3R, trail by 1R thereafter |
-| 2 | trail-stop 4R | Same but engage at +4R |
-| 3 | MLTP 50%-at-3R | Close 50% position at +3R, hold remainder to 6R |
-| 4 | MLTP 33%-at-2R + 33%-at-4R | Three-tier scale-out |
+| # | Variant | Engine params | Description |
+|---|---------|---------------|-------------|
+| 1 | trail-interval-2R | `--trailing-stop-mode --trail-interval-r 2.0` | Lock (N-1)R after every +NR favorable, step=2R |
+| 2 | trail-interval-3R | `--trailing-stop-mode --trail-interval-r 3.0` | Same, step=3R |
+| 3 | MLTP mid-3R-half | `--multi-level-tp-mode --mid-r 3.0 --mid-frac 0.5` | Close 50% at +3R, raise stop to BE on remainder, hold remainder to 6R |
+| 4 | MLTP mid-4R-half | `--multi-level-tp-mode --mid-r 4.0 --mid-frac 0.5` | Same, partial at +4R |
 
-All run with LIVE entry config (EMA 9/21 mh504 short 4H), realistic costs (fee=10 + slip=5). Walk-forward 3 windows (W1/W2/W3 per harness). Universe = 57 historical symbols (NOT deployed-16; avoids look-ahead).
+**Note on engine capability (audited 2026-05-28):** the engine's trailing-stop has no separate "engagement threshold" parameter — engagement is implicit at +1R (first ratchet step). The original "trail-stop 3R/4R = engage at +N R" semantics in this rule's lock draft were not implementable. Cells 1-2 use the actual `--trail-interval-r` semantics. MLTP supports single mid-level only (`MidR` + `MidFrac`, fires at most once per position). The original "33%-at-2R + 33%-at-4R" two-tier scale-out is not implementable without engine changes. Cells 3-4 use single-mid variants.
+
+**Prior research note:** 2026-05-19 sweeps (`trailing_stop_sweep_2026-05-19.csv` + `mltp_exit_sweep_2026-05-19.csv`) already produced raw NET numbers for these exact engine cells at fee=10 + slip=5. Re-running is still required because gates C (stress fee=15 + slip=15) and D (anti-cluster) were NOT applied in 2026-05-19. Use prior CSVs as the cached `mean_NET_raw` per cell; new sweep work is the stress + cluster runs only.
+
+All run with LIVE entry config (EMA 9/21 mh504 short 4H), realistic costs (fee=10 + slip=5). Walk-forward 3 windows (W1/W2/W3 per harness, via `scripts/trailing_stop_sweep.sh` + `scripts/mltp_exit_sweep.sh` which wrap `walk_forward.sh`). Universe = 57 historical symbols (NOT deployed-16; avoids look-ahead).
 
 **Deploy-as-shadow criteria (ALL must hold):**
 
@@ -95,14 +99,16 @@ A. Ensemble POSITIVE in ≥2/3 windows
 B. Ensemble Sharpe (mean / std of per-window NET) > 1.2 × LIVE Sharpe
 C. Stress test (fee=15bp + slip=15bp) holds
 D. Anti-cluster test holds
-E. Implementation simplicity check: can be expressed as 2-instance shadow journals without engine changes (if requires code changes → defer to milestone 2)
+E. Implementation simplicity check: can be expressed as **post-hoc journal arithmetic** on already-running shadow journals (multiply each per-trade PnL by stake-weight, sum). The `--shadow` flag runs each variant at full stake on identical ticks; stake-split semantics are applied at evaluation time, not in the engine. If a cell requires actual engine-level position sizing changes → defer to milestone 2
+
+**Audit note 2026-05-28:** `--shadow` flag spec is `label:ema_fast-ema_slow-max_hold` only — it cannot encode stake fractions or per-strategy weighting. This is fine: ensemble PnL is computed at evaluation time as `Σ weight_i × journal_PnL_i`, no engine change needed.
 
 ## Cost budget (LOCKED)
 
 - Wall-clock per tier: ≤ 4h (matches existing sweep infrastructure throughput)
 - Maximum new shadows added across all tiers: **1**
 - Maximum REST poll load increase: 120/min (1 new symbol shadow)
-- Compute: existing `realistic_sweep.sh` + `mltp_exit_sweep.sh` + `trailing_stop_sweep.sh` infrastructure; no new tooling
+- Compute: existing `walk_forward.sh` harness wrapped by `mltp_exit_sweep.sh` + `trailing_stop_sweep.sh` (TIER 1) + symbol-list overrides via `SYMBOLS=` env (TIER 2 + 3); no new tooling. `realistic_sweep.sh` is **5y continuous, NOT walk-forward** — do not substitute
 - Manual analysis time per tier: ≤ 2h. If exceeded, halt the tier and document why.
 
 ## Anti-discovery commitments (LOCKED)
@@ -156,6 +162,7 @@ When a tier runs, the operator must produce:
 | Date | Event | Action |
 |------|-------|--------|
 | 2026-05-27 | Rule locked | (this doc) |
+| 2026-05-28 | Audit + patches (mirror of auto-kill audit). Fixed: TIER 1 cells aligned to engine capability (trail-engage-threshold + 2-tier MLTP don't exist); cost-budget script ref corrected (`walk_forward.sh` not `realistic_sweep.sh`); activation-condition gate count 8→9; TIER 3 criterion E clarified as post-hoc journal arithmetic. Cells now executable end-to-end | Commit TBD |
 | TBD (≥ 2026-06-08) | First shadow reaches n=63, promotion rule applied | If REJECTED: this rule may activate |
 | TBD | TIER 1 sweep runs (if activated) | Pre-reg, run, verdict, accept/reject |
 | TBD | TIER 2 sweep runs (only if TIER 1 yields zero) | Same |
