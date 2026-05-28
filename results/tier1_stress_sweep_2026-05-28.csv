@@ -1,0 +1,5 @@
+cell,role,exit_mode,param_r,param_frac,W1_net,W2_net,W3_net,mean_net,wins,verdict,trades_total
+0,BASELINE,0,0,0,+18692,+512730,-97671,144584,2,POSITIVE,5572
+1,trail-interval-2R,1,2.0,0,-79069,+403439,-205733,39546,1,NEGATIVE,5957
+2,trail-interval-3R,1,3.0,0,-30634,+486835,-116422,113260,1,NEGATIVE,5705
+3,mltp-mid-4R-half,2,4.0,0.5,+12413,+418760,-152158,93005,2,POSITIVE,6874
