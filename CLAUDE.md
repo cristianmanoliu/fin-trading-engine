@@ -15,6 +15,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Real-money:** ZERO. BinanceLive code complete. Gated on forward-paper criteria (below) + Layer 2 testnet (`--executor binance_live_testnet`) + Layer 3 7d shadow parity (`--layer3-binance-testnet-journal-dir DIR`, verdict via `scripts/layer3_verdict.sh`). Per `results/real_money_executor_architecture_decision_rule_2026-05-08.md`.
 
+**Layer 3 status (2026-05-29):** Layer 3 IS running on KAVAUSDT + ENSUSDT live engines via systemd drop-ins (`paper-live@{kava,ens}usdt.service.d/layer3.conf`, per `results/layer3_enablement_2026-05-19.md`) — Stub primary + BinanceLive(testnet) shadow on same ticks. NOT yet evaluable: the reconciler had no 418/429 backoff and self-extended a testnet IP ban for 10 days (2026-05-19→29), capturing ZERO parity data; fixed 2026-05-29 (reconciler backoff + `post_deploy_check §8b` / `weekly_audit` Stage 9 health guards). Parity data now accrues once KAVA/ENS fire a signal (~0.2-0.3/d) → watch `/var/log/paper-live/journal/layer3/`. The standalone `testnet-engine@.service` path is RETIRED (Layer 3 wrap superseded it). See `docs/findings/2026-05-29.md`.
+
 ## Session logs & pre-registration catalog
 
 Per-session narratives: `docs/findings/<date>.md`. Latest: `2026-05-12-pm.md`.
