@@ -117,6 +117,7 @@ Pre-registered now; activates when current milestone closes.
 
 - **`strategy_backlog_milestone2_2026-05-08.md`** — 8 mechanism ideas (A1 vol-regime / A2 ATR-sizing / B1 RSI-extremum / B2 BB-squeeze / C1 funding-extremum / D1 session-filter / F1 multi-TF-ensemble / G1 tick-imbalance) with locked verdict criteria, prioritization rubric, recommended top-5 selection
 - **`milestone2_runbook_decision_rule_2026-05-10.md`** — locked 5-phase execution sequence (A2 → A1 → C1 → B2 → D1), family-wise α=0.01 (Bonferroni at α_family=0.05, N=5), per-phase verdict template, mid-sequence rollback paths, audit-lens compliance contract for `scripts/milestone2_launch.sh`. Bridges the strategy backlog with the milestone-2 trigger conditions in `real_money_protocol`.
+- **`milestone2_addendum_overfit_gate_and_mechanisms_2026-05-30.md`** — PROPOSED (non-actionable). Adds a batch overfit-gate (PBO/DSR at N=grid-size, closing the within-idea param-search hole the N=5 Bonferroni misses; from the 2026-05-29 FRAGILE finding) + 3 new mechanism ideas not in the 8 (H1 delta-neutral funding *carry* ≠ C1 signal / H2 cross-sectional momentum / H3 failed-pump cascade short). Ratified at milestone-2 launch via the runbook's migration triggers.
 
 ---
 
