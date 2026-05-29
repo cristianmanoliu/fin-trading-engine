@@ -152,6 +152,28 @@ assert_eq "rehearsal exit 3 → INPUT_ERR"  "$(_classify_python_exit 3 "$REHEARS
 assert_eq "rehearsal exit 4 → UNEXPECTED" "$(_classify_python_exit 4 "$REHEARSAL_MODES" "$REHEARSAL_CONTINUE")" "UNEXPECTED"
 assert_eq "rehearsal exit 137 (SIGKILL) → UNEXPECTED" "$(_classify_python_exit 137 "$REHEARSAL_MODES" "$REHEARSAL_CONTINUE")" "UNEXPECTED"
 
+echo
+echo "Stage 9: _classify_layer3_health (Layer 3 reconcile-ban liveness)"
+# Stage 9 (2026-05-29) watches the Layer 3 testnet reconciler for a recurring
+# IP-ban. Input is the count of `positionRisk 418` lines over the last 24h
+# across Layer 3 engine logs. Contract:
+#   count <  THRESHOLD (10)  → OK         (occasional 418 is absorbed by backoff)
+#   count >= THRESHOLD       → DEGRADED   (ban active despite backoff — alert)
+#   count == -1 (sentinel)   → SSH_FAILURE (ssh/grep could not run — don't
+#                                            misreport a network blip as healthy)
+#   non-numeric / empty      → UNEXPECTED (fail-closed; never silently OK)
+# Distinguishing SSH_FAILURE from OK pins the same ssh-failure-vs-data-failure
+# pattern as _classify_validate_exit (F2).
+assert_eq "layer3 count 0 → OK"          "$(_classify_layer3_health 0)"   "OK"
+assert_eq "layer3 count 9 → OK"          "$(_classify_layer3_health 9)"   "OK"
+assert_eq "layer3 count 10 → DEGRADED"   "$(_classify_layer3_health 10)"  "DEGRADED"
+assert_eq "layer3 count 50 → DEGRADED"   "$(_classify_layer3_health 50)"  "DEGRADED"
+# REGRESSION: ssh/grep failure must NOT masquerade as healthy (0 bans).
+assert_eq "layer3 count -1 → SSH_FAILURE" "$(_classify_layer3_health -1)" "SSH_FAILURE"
+# REGRESSION: garbage input must NOT silently route to OK.
+assert_eq "layer3 empty → UNEXPECTED"    "$(_classify_layer3_health '')"  "UNEXPECTED"
+assert_eq "layer3 'abc' → UNEXPECTED"    "$(_classify_layer3_health abc)" "UNEXPECTED"
+
 # --- summary ---
 echo
 TOTAL=$((PASS + FAIL))

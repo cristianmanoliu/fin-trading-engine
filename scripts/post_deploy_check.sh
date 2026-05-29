@@ -459,6 +459,8 @@ ssh_remote "real_count=0
 real_list=''
 testnet_count=0
 testnet_list=''
+layer3_count=0
+layer3_list=''
 missing_count=0
 missing_list=''
 for sym in $SYMBOLS_LC; do
@@ -472,6 +474,15 @@ for sym in $SYMBOLS_LC; do
         missing_list=\"\$missing_list \$sym\"
         continue
     fi
+    # Layer 3 shadow-parity engines run --executor stub (so they DON'T match the
+    # real/testnet patterns below) PLUS a --layer3-binance-testnet-journal-dir
+    # flag that fans a BinanceLive(testnet) shadow on the same ticks. Before
+    # this branch they were silently bucketed as plain 'stub' (by absence) —
+    # masking the STAGE_1 parity gate's existence/health. Detect explicitly.
+    if [[ \"\$es\" == *'--layer3-binance-testnet-journal-dir'* ]]; then
+        layer3_count=\$((layer3_count + 1))
+        layer3_list=\"\$layer3_list \$sym\"
+    fi
     # Match the binance_live token exactly — trailing space (common, more args
     # follow) or end-of-string. Without the trailing-space anchor, the glob
     # '*--executor binance_live*' would falsely match binance_live_testnet too.
@@ -484,7 +495,7 @@ for sym in $SYMBOLS_LC; do
         testnet_list=\"\$testnet_list \$sym\"
     fi
 done
-echo \"\$real_count|\$real_list|\$testnet_count|\$testnet_list|\$missing_count|\$missing_list\""
+echo \"\$real_count|\$real_list|\$testnet_count|\$testnet_list|\$missing_count|\$missing_list|\$layer3_count|\$layer3_list\""
 TOTAL=$(echo "$SYMBOLS_LC" | wc -w | tr -d ' ')
 # PD-4: distinct ssh-failure path. Without this, an ssh failure (or a
 # remote-script crash that produces empty stdout) leaves EXEC_REPORT
@@ -497,10 +508,11 @@ if [[ "$SSH_EXIT" -ne 0 ]] || [[ -z "$SSH_REPLY" ]]; then
     warn "could not query executor modes on ${TARGET} (ssh exit=$SSH_EXIT, output empty=${SSH_REPLY:-y}) — executor state UNKNOWN"
 else
     EXEC_REPORT="$SSH_REPLY"
-    IFS='|' read -r REAL_COUNT REAL_LIST TESTNET_COUNT TESTNET_LIST MISSING_COUNT MISSING_LIST <<<"$EXEC_REPORT"
+    IFS='|' read -r REAL_COUNT REAL_LIST TESTNET_COUNT TESTNET_LIST MISSING_COUNT MISSING_LIST LAYER3_COUNT LAYER3_LIST <<<"$EXEC_REPORT"
     MISSING_COUNT="${MISSING_COUNT:-0}"
     REAL_COUNT="${REAL_COUNT:-0}"
     TESTNET_COUNT="${TESTNET_COUNT:-0}"
+    LAYER3_COUNT="${LAYER3_COUNT:-0}"
     if [[ "$MISSING_COUNT" != "0" ]]; then
         # Loud warn — empty ExecStart on N engines means we cannot tell their
         # executor mode at all. Section 1 may show those engines as "active" but
@@ -508,7 +520,13 @@ else
         warn "$MISSING_COUNT / $TOTAL engines have empty ExecStart (systemctl failed):$MISSING_LIST"
     fi
     if [[ "$REAL_COUNT" == "0" && "$TESTNET_COUNT" == "0" && "$MISSING_COUNT" == "0" ]]; then
-        ok "all $TOTAL engines on stub (paper-money) — pre-STAGE_1 expected state"
+        # Layer 3 engines are stub-for-real-money but run a testnet shadow — not
+        # "plain stub". Report them distinctly so the green line isn't misleading.
+        if [[ "$LAYER3_COUNT" == "0" ]]; then
+            ok "all $TOTAL engines on stub (paper-money) — pre-STAGE_1 expected state"
+        else
+            ok "$((TOTAL - LAYER3_COUNT)) / $TOTAL engines on plain stub; $LAYER3_COUNT on Layer 3 stub+testnet-shadow — pre-STAGE_1 expected state"
+        fi
     elif [[ "$REAL_COUNT" == "0" && "$TESTNET_COUNT" == "0" ]]; then
         # All visible engines are stub but some couldn't be inspected. Don't
         # report a green "all on stub" — the missing ones are unknowns.
@@ -529,6 +547,55 @@ else
             echo "  ⓘ  TESTNET executor active on $TESTNET_COUNT / $TOTAL engines:$TESTNET_LIST"
             echo "     (Layer 2 integration gate — orders go to testnet.binancefuture.com)"
         fi
+    fi
+    # Layer 3 shadow-parity is orthogonal to the executor-mode buckets above
+    # (a Layer 3 engine is stub-primary + testnet-shadow). Always surface it
+    # when present — it's the formally-required STAGE_1 gate.
+    if [[ "$LAYER3_COUNT" != "0" ]]; then
+        echo "  ⓘ  Layer 3 shadow-parity active on $LAYER3_COUNT / $TOTAL engines:$LAYER3_LIST"
+        echo "     (STAGE_1 same-tick parity gate — testnet shadow on production ticks)"
+    fi
+fi
+
+# ── 8b. Layer 3 reconcile health (rate-limit ban) ─────────────────────────────
+# The Layer 3 testnet PositionReconciler polls testnet positionRisk; a shared-IP
+# rate-limit can trigger a Binance IP ban that — pre the 2026-05-29 backoff fix —
+# the reconciler held open for 10 days, silently starving the STAGE_1 parity
+# gate (zero reconcile successes, empty journal/layer3/). The journal being
+# empty is NOT a usable signal (empty is normal until a signal fires ~0.2/d);
+# the direct symptom is sustained `positionRisk 418` in the engine log. Count
+# them over the last ~60 min for the Layer 3 engines discovered in §8. Threshold
+# 10/hr: backoff (120s) caps a fully-banned engine at ≤~30 attempts/hr, so ≥10
+# means the ban is active and the backoff is not clearing it. Skipped when no
+# Layer 3 engines exist. Subject to STRICT escalation like §4/5/6.
+echo ""
+echo "8b. Layer 3 reconcile health (rate-limit ban)"
+if [[ "$SSH_EXIT" -ne 0 || -z "$SSH_REPLY" ]]; then
+    warn "executor query failed in §8 — cannot assess Layer 3 reconcile health"
+elif [[ "${LAYER3_COUNT:-0}" == "0" ]]; then
+    ok "no Layer 3 engines deployed — reconcile-ban check not applicable"
+else
+    L3_BAN_THRESHOLD="${LAYER3_BAN_THRESHOLD:-10}"
+    # Count positionRisk 418 in the current + previous UTC hour for each L3 sym.
+    L3_BAN_COUNT=$(ssh -o BatchMode=yes -o ConnectTimeout=10 "${TARGET}" "
+        h_now=\$(date -u +%Y-%m-%dT%H)
+        h_prev=\$(date -u -d '1 hour ago' +%Y-%m-%dT%H 2>/dev/null || date -u -v-1H +%Y-%m-%dT%H)
+        total=0
+        for s in${LAYER3_LIST}; do
+            c=\$(grep -hE \"\$h_now|\$h_prev\" /var/log/paper-live/\${s}.log 2>/dev/null | grep -c 'positionRisk 418')
+            total=\$((total + c))
+        done
+        echo \"\$total\"" 2>/dev/null) || L3_BAN_COUNT=""
+    if [[ -z "$L3_BAN_COUNT" || ! "$L3_BAN_COUNT" =~ ^[0-9]+$ ]]; then
+        warn "could not count Layer 3 positionRisk 418 on ${TARGET} — reconcile health UNKNOWN"
+    elif (( L3_BAN_COUNT >= L3_BAN_THRESHOLD )); then
+        warn "Layer 3 reconcile DEGRADED: $L3_BAN_COUNT positionRisk 418 (IP-ban) in last ~60min (≥$L3_BAN_THRESHOLD) on:$LAYER3_LIST — STAGE_1 parity gate may be starving"
+        if [[ "$STRICT" == "1" ]]; then
+            notify_telegram WARN "post_deploy_check on $(hostname)" \
+                "Layer 3 reconcile DEGRADED — $L3_BAN_COUNT positionRisk 418 in last 60min on$LAYER3_LIST. Testnet IP ban active; STAGE_1 same-tick parity gate starving. This is the 2026-05-29 backoff-fix failure mode recurring — check testnet creds/outage."
+        fi
+    else
+        ok "Layer 3 reconcile healthy — $L3_BAN_COUNT positionRisk 418 in last ~60min (<$L3_BAN_THRESHOLD)"
     fi
 fi
 

@@ -83,6 +83,38 @@ _classify_python_exit() {
     echo "UNEXPECTED"
 }
 
+# Classify Layer 3 reconcile liveness from a 24h `positionRisk 418` ban count.
+# The Layer 3 testnet reconciler (pkg/execution/binance_live.go) polls testnet
+# positionRisk; a shared-IP rate-limit can trigger a Binance IP ban that — pre
+# the 2026-05-29 backoff fix — the reconciler held open for 10 days, silently
+# starving the STAGE_1 Layer 3 parity gate. This stage makes a recurring ban
+# visible even with no redeploy.
+#   count <  threshold (10) → OK          (occasional 418 absorbed by backoff)
+#   count >= threshold      → DEGRADED    (ban active despite backoff — alert)
+#   count == -1 (sentinel)  → SSH_FAILURE (ssh/grep could not run; do NOT
+#                                          misreport a network blip as healthy —
+#                                          same ssh-failure-vs-data-failure
+#                                          discipline as _classify_validate_exit)
+#   non-numeric / empty     → UNEXPECTED  (fail-closed; never silently OK)
+_classify_layer3_health() {
+    local count="$1"
+    local threshold="${LAYER3_BAN_THRESHOLD:-10}"
+    if [[ "$count" == "-1" ]]; then
+        echo "SSH_FAILURE"
+        return 0
+    fi
+    # Reject anything that isn't a non-negative integer.
+    if ! [[ "$count" =~ ^[0-9]+$ ]]; then
+        echo "UNEXPECTED"
+        return 0
+    fi
+    if (( count >= threshold )); then
+        echo "DEGRADED"
+    else
+        echo "OK"
+    fi
+}
+
 # Test entry-point: when this file is `source`d (instead of executed
 # directly), stop here so consumers get only the function definitions
 # without triggering the main orchestration flow.
@@ -549,6 +581,67 @@ Likely script crash, OOM, or env failure. Investigate before next cron firing.
 $REHEARSAL_OUTPUT"
         ;;
 esac
+
+# --- 9. Layer 3 reconcile liveness (silent-stall guard) ---
+# The Layer 3 testnet reconciler can silently lose its STAGE_1 parity gate if a
+# Binance IP ban recurs (creds expiry, testnet outage, a failure mode the
+# 2026-05-29 backoff fix doesn't cover). Count `positionRisk 418` over the last
+# 24h across Layer 3 engine logs (those whose ExecStart carries
+# --layer3-binance-testnet-journal-dir) and alert if the ban is sustained.
+# Non-fatal — never masks the drift verdict (DRIFT_EXIT preserved). Engines are
+# discovered dynamically so a fleet with no Layer 3 wrap is a clean no-op.
+LAYER3_BAN_COUNT=$(ssh -o BatchMode=yes -o ConnectTimeout=10 "$WEEKLY_AUDIT_VPS" '
+    units=$(systemctl list-units "paper-live@*.service" --no-legend --plain 2>/dev/null | awk "{print \$1}")
+    layer3_syms=""
+    for u in $units; do
+        es=$(systemctl show -p ExecStart --value "$u" 2>/dev/null)
+        case "$es" in *--layer3-binance-testnet-journal-dir*)
+            sym=$(echo "$u" | sed "s/paper-live@//; s/\.service//")
+            layer3_syms="$layer3_syms $sym" ;;
+        esac
+    done
+    [ -z "$layer3_syms" ] && { echo "NONE"; exit 0; }
+    # Window: last 24h. Match ISO dates for today + yesterday (UTC), count 418s.
+    d_today=$(date -u +%Y-%m-%d); d_yest=$(date -u -d "yesterday" +%Y-%m-%d 2>/dev/null || date -u -v-1d +%Y-%m-%d)
+    total=0
+    for s in $layer3_syms; do
+        c=$(grep -hE "$d_today|$d_yest" /var/log/paper-live/$s.log 2>/dev/null | grep -c "positionRisk 418")
+        total=$((total + c))
+    done
+    echo "$total"
+' 2>/dev/null) || LAYER3_BAN_COUNT="-1"
+LAYER3_BAN_COUNT="${LAYER3_BAN_COUNT:--1}"
+
+if [[ "$LAYER3_BAN_COUNT" == "NONE" ]]; then
+    echo "Stage 9 (Layer 3 liveness): no Layer 3 engines deployed — skipped"
+else
+    LAYER3_HEALTH=$(_classify_layer3_health "$LAYER3_BAN_COUNT")
+    echo "Stage 9 (Layer 3 liveness): 418-bans/24h=$LAYER3_BAN_COUNT → $LAYER3_HEALTH"
+    case "$LAYER3_HEALTH" in
+        OK) : ;;  # healthy — no alert
+        DEGRADED)
+            notify_telegram WARN "weekly_audit Layer 3 reconcile DEGRADED on $(hostname)" \
+"Layer 3 testnet reconciler logged $LAYER3_BAN_COUNT positionRisk 418 (IP-ban) responses
+in the last 24h (threshold ${LAYER3_BAN_THRESHOLD:-10}). The STAGE_1 same-tick parity gate
+may be starving — reconcile cannot confirm fills while banned.
+
+This is the failure mode fixed 2026-05-29 (reconciler 418 backoff). Recurrence means
+the backoff is not keeping up OR a new cause (testnet creds expired, testnet outage).
+Check: ssh $WEEKLY_AUDIT_VPS 'grep \"positionRisk 418\" /var/log/paper-live/{ens,kava}usdt.log | tail'"
+            ;;
+        SSH_FAILURE)
+            notify_telegram WARN "weekly_audit Layer 3 liveness: ssh failure" \
+"Could not query Layer 3 reconcile-ban count on $WEEKLY_AUDIT_VPS (ssh/grep failed).
+Layer 3 health UNKNOWN this cycle — not necessarily broken, but unverified. Investigate
+if it persists across cycles."
+            ;;
+        *)
+            notify_telegram WARN "weekly_audit Layer 3 liveness: UNEXPECTED" \
+"_classify_layer3_health returned an unexpected verdict for count='$LAYER3_BAN_COUNT'.
+Likely a script/parsing bug introduced in weekly_audit.sh. Investigate."
+            ;;
+    esac
+fi
 
 # --- Persist decision snapshots for longitudinal review ---
 SNAP_DIR="${REPO_ROOT}/results/decision_snapshots"
