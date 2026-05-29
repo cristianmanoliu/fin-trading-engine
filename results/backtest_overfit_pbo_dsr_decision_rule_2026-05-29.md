@@ -1,6 +1,8 @@
 # Backtest-Overfitting Quantification (PBO + Deflated Sharpe) — PRE-REGISTERED Decision Rule
 
 **Status:** LOCKED 2026-05-29, BEFORE generating any returns matrix or running any analysis. Committed as a standalone change prior to code/data.
+
+**Amendment 2026-05-29 (pre-data):** trial set corrected 40 cells → 34 distinct configs (6 duplicate baselines deduped; every sweep's cell-0 is the identical LIVE config). No data had been generated at amendment time. Documented per the charter's pre-reg update process.
 **Author:** Cristian Manoliu
 **Context:** Forward-paper is mid-flight (day ~21/60) and compute is idle. This is an
 ADVISORY robustness analysis on the EXISTING live edge — it spends zero forward-paper
@@ -27,9 +29,12 @@ Two estimators computed on a per-config monthly-NET returns matrix.
 
 ### Returns matrix M
 
-- **Columns N = 40 documented configs** — every cell of the seven `results/*_2026-05-19.csv`
-  sweeps (11 EMA×tf + 5 confluence + 6 vol + 3 side + 6 MLTP + 6 trail + 3 alt-signal).
-  Column 0 = LIVE baseline.
+- **Columns = 34 distinct documented configs** — the seven `results/*_2026-05-19.csv` sweeps
+  (11 EMA×tf + 5 confluence + 6 vol + 3 side + 6 MLTP + 6 trail + 3 alt-signal) total 40 cells,
+  but each sweep's cell-0 BASELINE is the *identical* LIVE config (verified: every sweep CSV
+  reports cell-0 NET 175021/645812/65044). The 6 redundant baselines are deduped to a single
+  LIVE column — duplicate columns would distort CSCV rank statistics. Net: 1 LIVE + 33 variants
+  = 34 distinct trials. Column 0 = LIVE baseline.
 - **Rows T ≈ 64** — calendar months 2020-12 → 2025-04. Each cell = portfolio monthly NET =
   equal-weight sum across the **57-symbol `universe` group**.
 - **Universe = full 57, NOT deployed-16** — a shortlist would re-inject the train-only-
@@ -65,29 +70,29 @@ Bailey & López de Prado (2014). All Sharpes per-period (monthly); annualize onl
 
 - `SR̂` = LIVE monthly Sharpe; `γ3`, `γ4` = skew, kurtosis of LIVE monthly returns; T ≈ 64.
 - `SR0 = √Var({SRₙ}) · [ (1−γ)·Z⁻¹(1−1/N) + γ·Z⁻¹(1−1/(N·e)) ]`, where γ = 0.5772
-  (Euler–Mascheroni), `Var({SRₙ})` is taken over the 40 configs' monthly Sharpes, Z⁻¹ is the
+  (Euler–Mascheroni), `Var({SRₙ})` is taken over the 34 configs' monthly Sharpes, Z⁻¹ is the
   standard-normal inverse-CDF.
 - `DSR = Φ( (SR̂ − SR0)·√(T−1) / √(1 − γ3·SR̂ + ((γ4−1)/4)·SR̂²) )`.
 - `PSR` = same formula with `SR0 = 0`. The gap `PSR − DSR` IS the multiple-testing haircut.
-- **N-sensitivity curve:** recompute `SR0` and `DSR` at **N ∈ {40, 80, 120}** (the matrix stays
-  40 columns; only the trial-count in `SR0` varies, modeling undocumented/ad-hoc search).
-  Report the DSR(N) curve and the N at which DSR crosses 0.95.
+- **N-sensitivity curve:** recompute `SR0` and `DSR` at **N ∈ {34, 68, 102}** (1×/2×/3× the
+  distinct count; the matrix stays 34 columns, only the trial-count in `SR0` varies, modeling
+  undocumented/ad-hoc search). Report the DSR(N) curve and the N at which DSR crosses 0.95.
 
 ## Decision rule (LOCKED — mechanical, ADVISORY)
 
 | Estimator | Healthy | Middle | Alarm |
 |:---|:---|:---|:---|
 | **PBO** | < 0.50 | 0.50–0.75 | > 0.75 |
-| **DSR (N=40)** | > 0.95 | 0.90–0.95 | < 0.90 |
+| **DSR (N=34)** | > 0.95 | 0.90–0.95 | < 0.90 |
 | **Degradation slope** | ≥ 0.5 | 0–0.5 | < 0 |
 
 Combined verdict:
 
 | Verdict | Condition | Effect on keep-going confidence |
 |:---|:---|:---|
-| **ROBUST** | PBO < 0.50 AND DSR(40) > 0.95 AND slope ≥ 0.5 | UP — edge survives the search-haircut |
+| **ROBUST** | PBO < 0.50 AND DSR(34) > 0.95 AND slope ≥ 0.5 | UP — edge survives the search-haircut |
 | **MARGINAL** | any one estimator in its middle band, none in alarm | NEUTRAL — plausibly real but search-inflated |
-| **FRAGILE** | PBO > 0.75 OR DSR(40) < 0.90 OR slope < 0 | DOWN — strong overfitting signature; document prominently |
+| **FRAGILE** | PBO > 0.75 OR DSR(34) < 0.90 OR slope < 0 | DOWN — strong overfitting signature; document prominently |
 
 ## Pre-registered predictions (written before running)
 
@@ -95,9 +100,9 @@ Combined verdict:
    should usually hold its OOS rank. Expect ~0.2–0.4.
 2. **PSR ≫ DSR** — the search haircut is the whole point; expect a visible gap.
 3. **Positive skew helps DSR** — shorts-only 6:1 has rare-big-win positive skew; the `−γ3·SR̂`
-   term in the DSR denominator raises DSR vs a naive Sharpe. DSR may clear 0.95 at N=40 despite
+   term in the DSR denominator raises DSR vs a naive Sharpe. DSR may clear 0.95 at N=34 despite
    lumpy monthly returns.
-4. **DSR degrades with N** — by N=120 it may slip below 0.95; the crossing-N quantifies how much
+4. **DSR degrades with N** — by N=102 it may slip below 0.95; the crossing-N quantifies how much
    undocumented search the edge can absorb before becoming indistinguishable from luck.
 5. **Degradation slope positive but < 1** — some OOS shrinkage, not a collapse.
 
@@ -106,7 +111,7 @@ Combined verdict:
 - No changing S, the universe, the cost stack, the trial set, the metric, or T after seeing results.
 - No swapping the performance metric (monthly Sharpe) post-hoc for a flattering one.
 - No re-running CSCV under a different block scheme to find a lower PBO.
-- No extending the matrix beyond the 40 documented configs. Inventing configs = a fresh search
+- No extending the matrix beyond the 34 distinct documented configs. Inventing configs = a fresh search
   = DoF burn, and requires its own pre-registration.
 - A FRAGILE outcome updates confidence DOWN; it is not a license to retry with different settings.
 
@@ -126,7 +131,7 @@ non-trivial MARGINAL/FRAGILE mass.
 
 - `results/backtest_overfit_pbo_dsr_decision_rule_2026-05-29.md` — this file
 - `cmd/backtest --journal-dir` — additive flag that enables matrix generation (to be added)
-- `scripts/overfit_matrix_gen.sh` — runs the 40 configs × 57 symbols, reduces journals (to be added)
+- `scripts/overfit_matrix_gen.sh` — runs the 34 configs × 57 symbols, reduces journals (to be added)
 - `results/overfit_returns_matrix_2026-05-29.csv` — the T×N matrix (generated)
 - `scripts/backtest_overfit_analysis.py` — CSCV + DSR/PSR + N-curve (to be added)
 - `results/backtest_overfit_pbo_dsr_2026-05-29.txt` — raw analysis output (generated)
