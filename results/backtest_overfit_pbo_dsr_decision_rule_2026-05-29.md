@@ -42,7 +42,14 @@ Two estimators computed on a per-config monthly-NET returns matrix.
 - Each config is run as a **continuous 5y backtest per symbol** (concatenated monthly CSVs,
   per the no-month-segmentation invariant — segmenting inflates ~5%), slip=5/fee=10,
   funding=historical. Per-trade journals (`--journal-dir`) are reduced to monthly NET by
-  bucketing each closed trade into its **exit month**.
+  pairing each `close` event with its preceding `open` and bucketing the trade's NET into the
+  **exchange entry month** (the `open` event's `ts`). NOTE (pre-data correction 2026-05-29):
+  backtest `close`-event `ts` is wall-clock (`time.Now()` in `Stub.closePosition`,
+  `pkg/execution/stub.go:738,855`), so exit-time cannot be used for replay bucketing; the
+  `open` `ts` is the true exchange timestamp (`stub.go:467`). Entry vs exit month differs only
+  for trades spanning a month boundary and applies identically to all configs, so it cannot
+  bias the cross-config comparison. The Stub is deliberately NOT modified — changing
+  live-journal timestamps during forward-paper would be a forbidden behavior change.
 - **Ragged history is expected:** not all 57 symbols exist in 2020-12 (e.g. LDO from 2023-06,
   AAVE from 2024-03). A symbol with no data in a month contributes nothing that month; the
   equal-weight aggregate is over symbols live that month. Early months therefore span fewer
