@@ -6,12 +6,10 @@ Each exit code has ≥1 test that constructs the bad-input condition explicitly.
 from __future__ import annotations
 
 import json
-import re
 import subprocess
 import sys
 from pathlib import Path
 
-import pytest
 
 ROOT = Path(__file__).parent.parent
 SCRIPT = ROOT / "scripts" / "signal_journal_reconcile.py"

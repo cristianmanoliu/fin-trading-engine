@@ -27,7 +27,6 @@ from __future__ import annotations
 
 import json
 import sys
-from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
@@ -72,10 +71,6 @@ def load_journal_opens(journal_dir: Path) -> tuple[list[dict[str, Any]], list[st
                 continue
             try:
                 rec = json.loads(raw)
-                missing = JOURNAL_REQUIRED_FIELDS - {"exit", "pnl_pts", "pnl_usd",
-                                                     "outcome", "mfe_r", "mae_r",
-                                                     "gross_usd", "fee_usd", "slip_usd",
-                                                     "funding_usd", "notional_usd"} - set(rec.keys())
                 # Only the non-omitempty fields are required.
                 actual_required = {"event", "symbol", "ts"}
                 actual_missing = actual_required - set(rec.keys())
