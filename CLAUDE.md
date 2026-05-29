@@ -98,6 +98,15 @@ ssh root@178.105.24.230 'tail -f /var/log/paper-live/btcusdt.log'
 
 # Post-deploy operational health audit — RUN AFTER EVERY redeploy.sh
 ./scripts/post_deploy_check.sh
+
+# Pull VPS journals → local cache (idempotent rsync; remote READ-ONLY). Run before dashboard.
+bash scripts/journal_fetch.sh                    # default VPS host
+bash scripts/journal_fetch.sh root@178.105.24.230
+
+# Local forward-paper monitoring UI (localhost:8080 only). Reads results/journal_cache/
+# (populate via journal_fetch.sh first) + results/drift_check_history.jsonl.
+# Routes: /status /cohorts /symbol/<SYM> /healthz
+go run ./cmd/dashboard --journal-dir results/journal_cache --results-dir results --port 8080
 ```
 
 **Post-deploy validation is mandatory.** After ANY `deploy/redeploy.sh`, run `scripts/post_deploy_check.sh`. 13 audit sections: engines active, watchdog timers, binary md5, tick freshness, ERROR logs, rate-limit, position recoveries, executor mode, funding-CSV staleness, disk/log size, drift cron freshness, restart-loop, live-config compliance. Sections 4/5/6 apply 5-min uptime gate. `STRICT=1` exits non-zero + fires Telegram WARN (CI-friendly).

@@ -71,6 +71,7 @@ Tick source (CSV replay or Binance WebSocket)
 ```
 cmd/
   backtest/         CSV-replay backtest harness
+  dashboard/        Local forward-paper monitoring UI (localhost:8080; reads results/journal_cache)
   engine/           Live Binance Futures WebSocket entry point (--executor stub | binance_live_testnet | binance_live)
   journal_diff/     Layer 3 shadow-parity comparator (per-trade pnl tolerance ≤0.5%)
   journal_report/   Live-vs-backtest reconciliation
