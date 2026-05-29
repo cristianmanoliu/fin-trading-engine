@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -2184,5 +2185,95 @@ func TestOrderRouter_SendOrder_MalformedAvgPrice_ReturnsError(t *testing.T) {
 	}
 	if res.Status != "ERROR" || res.RejectCode != "PARSE" {
 		t.Errorf("Status/RejectCode = %q/%q, want ERROR/PARSE", res.Status, res.RejectCode)
+	}
+}
+
+// ── PositionReconciler: rate-limit (418/429) backoff ─────────────────────────
+//
+// Root cause (2026-05-29): the Layer 3 testnet reconciler polled
+// /fapi/v2/positionRisk every 60s with NO 418/429 handling. On a shared-NAT
+// testnet IP, occasional collective 429s trigger a 418 IP ban ("banned until
+// T"); Binance EXTENDS that ban on every request received while banned. The
+// reconciler's ban-blind 60s polling therefore held the ban open indefinitely
+// (941 bans over 10 days, zero successful reconciles, empty Layer 3 journal).
+// The sibling aggTrade poller already backs off on 418/429
+// (pkg/marketdata/binance.go) — the reconciler must mirror that: on a
+// rate-limit response, STOP polling for a cooldown LONGER than the normal poll
+// interval so the ban can expire instead of being continuously re-extended.
+
+func TestIsRateLimitErr_Classifies418And429(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"418 banned", fmt.Errorf(`positionRisk 418: {"code":-1003,"msg":"Way too many requests; IP banned until 123"}`), true},
+		{"429 limit", fmt.Errorf(`positionRisk 429: {"code":-1003,"msg":"Too many requests"}`), true},
+		{"wrapped 418", fmt.Errorf("reconcile: %w", fmt.Errorf("positionRisk 418: banned")), true},
+		{"500 server error", fmt.Errorf("positionRisk 500: internal"), false},
+		{"parse error", fmt.Errorf("parse positionRisk: unexpected token"), false},
+		{"nil", nil, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isRateLimitErr(tc.err); got != tc.want {
+				t.Errorf("isRateLimitErr(%v) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestPositionReconciler_Run_BacksOffOnRateLimit(t *testing.T) {
+	// A server that always returns 418. The naive (buggy) loop would re-poll
+	// every PollInterval (clamped floor 30s) — but the bug is that it polls AT
+	// ALL during a ban, extending it. The fix: after a 418, wait
+	// RateLimitBackoff (which is LONGER than the poll interval) before the next
+	// attempt. We assert the loop paces its calls by RateLimitBackoff, not by
+	// the (shorter) poll interval — i.e. consecutive calls are ≥ backoff apart.
+	var (
+		mu        sync.Mutex
+		callTimes []time.Time
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		mu.Lock()
+		callTimes = append(callTimes, time.Now())
+		mu.Unlock()
+		w.WriteHeader(http.StatusTeapot) // 418
+		_, _ = w.Write([]byte(`{"code":-1003,"msg":"Way too many requests; IP(1.2.3.4) banned until 999"}`))
+	}))
+	defer srv.Close()
+
+	r := newReconcilerForTest(t, srv.URL)
+	r.HTTPClient = srv.Client()
+	// Backoff LONGER than poll interval, but both tiny for the test. This is
+	// the crux: backoff must dominate the cadence when rate-limited.
+	r.PollInterval = 50 * time.Millisecond
+	r.RateLimitBackoff = 300 * time.Millisecond
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- r.Run(ctx, "BTCUSDT") }()
+	time.Sleep(1 * time.Second)
+	cancel()
+	<-done
+
+	mu.Lock()
+	defer mu.Unlock()
+	// Initial reconcile + ticker. If the loop ignored backoff and polled at the
+	// 50ms interval, we'd see ~20 calls in 1s. With a 300ms rate-limit backoff
+	// dominating, we expect far fewer (~3-4). Assert ≤ 6 to leave scheduling
+	// slack while still failing the buggy (no-backoff) implementation.
+	if len(callTimes) == 0 {
+		t.Fatal("reconciler made no calls")
+	}
+	if len(callTimes) > 6 {
+		t.Errorf("reconciler polled %d times in 1s under sustained 418 — backoff not applied (expected ≤6 at 300ms backoff; ~20 at the 50ms poll interval = bug)", len(callTimes))
+	}
+	// And verify spacing: consecutive calls ≥ ~backoff apart (allow 20% slack).
+	for i := 1; i < len(callTimes); i++ {
+		gap := callTimes[i].Sub(callTimes[i-1])
+		if gap < 240*time.Millisecond {
+			t.Errorf("call %d→%d gap %v < backoff floor (240ms) — loop re-polled before backoff elapsed", i-1, i, gap)
+		}
 	}
 }
