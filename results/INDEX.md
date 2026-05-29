@@ -39,6 +39,7 @@ Backtest investigation set on 5y × 16-57 symbols. Pre-registered analyses estab
 - `bootstrap_ci_verdict_2026-05-07.md` — block bootstrap CI on annual NET (mean +$130k/yr; walk-forward 95% [-$111k, +$372k]); regime variance dominates trade-level autocorrelation
 - `sample_split_bootstrap_decision_rule_2026-05-07.md` + `_verdict_*.md` — train/test independence check (ROBUST_BOTH)
 - `edge_stability_decision_rule_2026-05-07.md` + `_verdict_*.md` — edge stable across regimes (STABLE_EDGE)
+- `backtest_overfit_pbo_dsr_decision_rule_2026-05-29.md` + `_verdict_*.md` — PBO (CSCV) + Deflated Sharpe on the 34-config search (**FRAGILE**: DSR(34)=0.64<0.95 — LIVE's edge doesn't clear the multiple-testing haircut; PSR=0.97 so significant in isolation; advisory only, not a kill)
 
 #### Strategy categories (Cat A through Cat X)
 - Cat A: `cat_a_decision_rule_2026-05-06.md`, `cat_a_macd_bb_verdict_2026-05-07.md`

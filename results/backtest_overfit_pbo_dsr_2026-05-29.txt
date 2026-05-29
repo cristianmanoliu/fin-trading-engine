@@ -1,0 +1,18 @@
+========================================================================
+BACKTEST-OVERFITTING ANALYSIS — PBO (CSCV) + Deflated Sharpe
+pre-reg: results/backtest_overfit_pbo_dsr_decision_rule_2026-05-29.md
+========================================================================
+matrix: 64 months × 34 configs   (LIVE col = 'LIVE')
+LIVE monthly Sharpe = 0.2273  (annualized 0.787)
+
+PBO                         = 0.4698
+degradation slope (OOS~IS)  = -0.8737
+OOS prob-of-loss (n*)       = 0.0904
+IS-best concentration       = 0.4082  (modal config 'rsi_14')
+  LIVE is IS-best in          0.0113 of folds
+
+Deflated Sharpe N-sensitivity:
+  N=  34:  DSR=0.6420  PSR=0.9690  SR0=0.1830  skew=+0.422  kurt=3.427
+  N=  68:  DSR=0.5694  PSR=0.9690  SR0=0.2060  skew=+0.422  kurt=3.427
+  N= 102:  DSR=0.5286  PSR=0.9690  SR0=0.2186  skew=+0.422  kurt=3.427
+========================================================================
