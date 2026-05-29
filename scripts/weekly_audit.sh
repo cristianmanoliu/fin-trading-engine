@@ -627,11 +627,11 @@ may be starving — reconcile cannot confirm fills while banned.
 
 This is the failure mode fixed 2026-05-29 (reconciler 418 backoff). Recurrence means
 the backoff is not keeping up OR a new cause (testnet creds expired, testnet outage).
-Check: ssh $WEEKLY_AUDIT_VPS 'grep \"positionRisk 418\" /var/log/paper-live/{ens,kava}usdt.log | tail'"
+Run: ssh $WEEKLY_AUDIT_VPS 'grep \"positionRisk 418\" /var/log/paper-live/{ens,kava}usdt.log | tail'"
             ;;
         SSH_FAILURE)
-            notify_telegram WARN "weekly_audit Layer 3 liveness: ssh failure" \
-"Could not query Layer 3 reconcile-ban count on $WEEKLY_AUDIT_VPS (ssh/grep failed).
+            notify_telegram WARN "weekly_audit Layer 3 liveness: VPS query failed" \
+"Could not query Layer 3 reconcile-ban count on $WEEKLY_AUDIT_VPS (remote query failed).
 Layer 3 health UNKNOWN this cycle — not necessarily broken, but unverified. Investigate
 if it persists across cycles."
             ;;

@@ -145,7 +145,7 @@ def main() -> int:
     else:
         print(f"    α={alpha:.2f}: suspicious at n ≥ {crit_n_alpha}")
     if crit_n_01 is None:
-        print(f"    α=0.01:  never reaches significance within 10k trades")
+        print("    α=0.01:  never reaches significance within 10k trades")
     else:
         print(f"    α=0.01:  suspicious at n ≥ {crit_n_01}")
     print()
