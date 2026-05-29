@@ -7,6 +7,7 @@ Usage:   backtest_overfit_analysis.py <matrix_csv> [--live-col LIVE] [--S 16]
 import argparse
 import csv
 import sys
+from collections import Counter
 from itertools import combinations
 
 import numpy as np
@@ -24,7 +25,10 @@ def sharpe(x):
 def cscv_pbo(M, S=16):
     """Combinatorially-Symmetric CV → PBO, degradation slope, OOS prob-of-loss.
 
-    M: T×N return matrix. Returns (pbo, slope, oos_prob_loss, lambdas).
+    M: T×N return matrix. Returns (pbo, slope, oos_prob_loss, lambdas, nstar_list).
+    nstar_list = the IS-best config index per fold (used to gauge selection
+    concentration — when one config wins most folds the degradation slope is a
+    regression-to-mean artifact of complementary splits, not an overfit signal).
     """
     M = np.asarray(M, dtype=float)
     T, N = M.shape
@@ -34,7 +38,7 @@ def cscv_pbo(M, S=16):
     M = M[: rows_per * S]
     blocks = [np.arange(i * rows_per, (i + 1) * rows_per) for i in range(S)]
     half = S // 2
-    lambdas, is_star, oos_star, oos_loss = [], [], [], []
+    lambdas, is_star, oos_star, oos_loss, nstar_list = [], [], [], [], []
     for train_combo in combinations(range(S), half):
         tr = np.concatenate([blocks[b] for b in train_combo])
         te = np.concatenate([blocks[b] for b in range(S) if b not in train_combo])
@@ -47,10 +51,11 @@ def cscv_pbo(M, S=16):
         is_star.append(is_perf[nstar])
         oos_star.append(oos_perf[nstar])
         oos_loss.append(1.0 if M[te, nstar].sum() < 0 else 0.0)
+        nstar_list.append(nstar)
     lambdas = np.array(lambdas)
     pbo = float(np.mean(lambdas <= 0))
     slope = float(np.polyfit(is_star, oos_star, 1)[0])
-    return pbo, slope, float(np.mean(oos_loss)), lambdas
+    return pbo, slope, float(np.mean(oos_loss)), lambdas, nstar_list
 
 
 def deflated_sharpe(returns, all_sharpes, N, T=None):
@@ -92,9 +97,14 @@ def main():
     T, Ncfg = M.shape
     live_idx = labels.index(args.live_col)
 
-    pbo, slope, oos_loss, lambdas = cscv_pbo(M, S=args.S)
+    pbo, slope, oos_loss, lambdas, nstar_list = cscv_pbo(M, S=args.S)
     all_sr = [sharpe(M[:, j]) for j in range(Ncfg)]
     live_ret = M[:, live_idx]
+
+    counts = Counter(nstar_list)
+    modal_idx, modal_cnt = counts.most_common(1)[0]
+    concentration = modal_cnt / len(nstar_list)
+    live_share = counts.get(live_idx, 0) / len(nstar_list)
 
     print("=" * 72)
     print("BACKTEST-OVERFITTING ANALYSIS — PBO (CSCV) + Deflated Sharpe")
@@ -107,6 +117,11 @@ def main():
     print(f"PBO                         = {pbo:.4f}")
     print(f"degradation slope (OOS~IS)  = {slope:.4f}")
     print(f"OOS prob-of-loss (n*)       = {oos_loss:.4f}")
+    print(f"IS-best concentration       = {concentration:.4f}  (modal config '{labels[modal_idx]}')")
+    print(f"  LIVE is IS-best in          {live_share:.4f} of folds")
+    if concentration > 0.5:
+        print("  NOTE: concentration > 0.5 → degradation slope is a regression-to-mean")
+        print("        artifact of complementary splits, NOT an overfit signal; rely on PBO + DSR.")
     print()
     print("Deflated Sharpe N-sensitivity:")
     for n in (Ncfg, 2 * Ncfg, 3 * Ncfg):

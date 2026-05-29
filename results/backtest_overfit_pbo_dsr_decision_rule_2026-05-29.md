@@ -101,6 +101,15 @@ Combined verdict:
 | **MARGINAL** | any one estimator in its middle band, none in alarm | NEUTRAL — plausibly real but search-inflated |
 | **FRAGILE** | PBO > 0.75 OR DSR(34) < 0.90 OR slope < 0 | DOWN — strong overfitting signature; document prominently |
 
+**Slope-interpretation caveat (pre-data, 2026-05-29):** the degradation slope is an overfit
+signal ONLY when in-sample selection is DISPERSED across configs. When one config wins the IS
+comparison in most folds (**IS-best concentration > 0.5** — plausible here, since LIVE clustered
+at the top of the 05-19 sweeps), the OLS slope of OOS~IS Sharpe is a regression-to-mean artifact
+of CSCV's complementary train/test splits, NOT overfitting — a +5σ synthetic dominator yields
+slope ≈ −0.95 at concentration 1.0 *with PBO = 0*. The analysis reports IS-best concentration;
+**when it exceeds 0.5, `slope < 0` is excluded from the FRAGILE trigger** and the verdict rests on
+PBO + DSR (slope reported as context only). This refinement was made before any matrix was generated.
+
 ## Pre-registered predictions (written before running)
 
 1. **PBO < 0.5** — LIVE survived 31 perturbations and uniquely won W3 (05-19), so the IS-best

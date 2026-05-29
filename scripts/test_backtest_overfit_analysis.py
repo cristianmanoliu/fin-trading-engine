@@ -17,16 +17,18 @@ def test_pbo_genuine_best_is_low():
     T, N = 64, 10
     M = rng.normal(0, 1, (T, N))
     M[:, 0] += 5.0  # config 0 genuinely best
-    pbo, slope, oos_loss, _ = cscv_pbo(M, S=16)
+    pbo, slope, oos_loss, _, nstar_list = cscv_pbo(M, S=16)
     assert pbo < 0.05
     assert oos_loss == 0.0
+    # config 0 dominates → it is IS-best in every fold
+    assert all(n == 0 for n in nstar_list)
 
 
 def test_pbo_pure_noise_is_mid():
     # IID noise, no real edge → IS-best is random OOS → PBO ≈ 0.5.
     rng = np.random.default_rng(1)
     M = rng.normal(0, 1, (64, 20))
-    pbo, _, _, _ = cscv_pbo(M, S=16)
+    pbo, _, _, _, _ = cscv_pbo(M, S=16)
     assert 0.35 < pbo < 0.65
 
 
