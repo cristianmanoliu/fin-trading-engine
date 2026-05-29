@@ -6,10 +6,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Strategy status (2026-05-10)
 
-**Live:** 16 paper-trading engines on Hetzner VPS (1 live + 3 shadows each: alt5-15-336, alt5-15-504, bb20). Journal-replay on startup prevents orphaned positions.
+**Live:** 16 paper-trading engines on Hetzner VPS (1 live + **8 shadows** each). Journal-replay on startup prevents orphaned positions. KAVAUSDT + ENSUSDT additionally run a Layer 3 testnet shadow (see Layer 3 status below).
 - **Live config:** `--signal-tf 4H --side-filter short --target-rr 6.0 --max-hold-hours 504 --funding-csv-dir data/funding --fee-bps 10 --stop-slippage-bps 5` (EMA 9/21). 6-window walk-forward validated.
-- **Shadows:** A = EMA 5/15 + mh336; B = EMA 5/15 + mh504.
-- **Deployed:** 16 symbols in `configs/symbols.yaml:deployed`. Selection adds variance not edge. Rate-limit: 16 × 10s × 20w = 1920/min (cap 2400).
+- **Shadows (8, source: `deploy/systemd/paper-live@.service` `--shadow`):** `alt5-15-336` (EMA 5/15 mh336), `alt5-15-504` (5/15 mh504), `bb20` (Bollinger 20/2.0σ mh504 — only non-EMA), `alt5-21-504`, `alt7-14-504`, `alt10-30-504`, `alt12-26-504`, `alt21-50-504` (all EMA fast/slow mh504). The last 5 added 2026-05-26 (`ema_tf_exploratory_grid_2026-05-19`). All research-only, promotion-LOCKED. Shadows share the live engine's tick stream (zero extra REST weight).
+- **Deployed:** 16 symbols in `configs/symbols.yaml:deployed`. Selection adds variance not edge. Rate-limit: 16 × 10s × 20w = 1920/min (cap 2400) — shadows add nothing (same in-process tick stream).
 
 **Validation:** SUPPORTIVE walk-forward. Mean +$130k/yr, 95% CI [−$111k, +$372k]. Bootstrap CI is tighter but **anchor to walk-forward** (2.8× wider — regime-variance dominates). See `results/bootstrap_ci_verdict_2026-05-07.md`.
 
