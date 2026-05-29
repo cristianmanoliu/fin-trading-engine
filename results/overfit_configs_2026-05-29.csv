@@ -1,0 +1,35 @@
+label,extra_flags
+LIVE,
+ema_4H_7_14,--ema-fast-period 7 --ema-slow-period 14
+ema_4H_10_30,--ema-fast-period 10 --ema-slow-period 30
+ema_4H_12_26,--ema-fast-period 12 --ema-slow-period 26
+ema_4H_5_21,--ema-fast-period 5 --ema-slow-period 21
+ema_4H_8_34,--ema-fast-period 8 --ema-slow-period 34
+ema_4H_21_50,--ema-fast-period 21 --ema-slow-period 50
+ema_1D_5_15,--signal-tf 1D --ema-fast-period 5 --ema-slow-period 15
+ema_1D_9_21,--signal-tf 1D --ema-fast-period 9 --ema-slow-period 21
+ema_1D_10_30,--signal-tf 1D --ema-fast-period 10 --ema-slow-period 30
+ema_1D_7_28,--signal-tf 1D --ema-fast-period 7 --ema-slow-period 28
+confl_9_21,--confluence-1d-mode --confluence-fast 9 --confluence-slow 21
+confl_5_15,--confluence-1d-mode --confluence-fast 5 --confluence-slow 15
+confl_21_50,--confluence-1d-mode --confluence-fast 21 --confluence-slow 50
+confl_13_34,--confluence-1d-mode --confluence-fast 13 --confluence-slow 34
+vol_0.80,--vol-filter-mode --max-vol-annualized 0.80
+vol_1.00,--vol-filter-mode --max-vol-annualized 1.00
+vol_1.20,--vol-filter-mode --max-vol-annualized 1.20
+vol_1.50,--vol-filter-mode --max-vol-annualized 1.50
+vol_2.00,--vol-filter-mode --max-vol-annualized 2.00
+side_long,--side-filter long
+side_both,--side-filter both
+mltp_2R_half,--multi-level-tp-mode --mid-r 2.0 --mid-frac 0.5
+mltp_3R_half,--multi-level-tp-mode --mid-r 3.0 --mid-frac 0.5
+mltp_4R_half,--multi-level-tp-mode --mid-r 4.0 --mid-frac 0.5
+mltp_3R_third,--multi-level-tp-mode --mid-r 3.0 --mid-frac 0.33
+mltp_3R_twothirds,--multi-level-tp-mode --mid-r 3.0 --mid-frac 0.67
+trail_0.5R,--trailing-stop-mode --trail-interval-r 0.5
+trail_1.0R,--trailing-stop-mode --trail-interval-r 1.0
+trail_1.5R,--trailing-stop-mode --trail-interval-r 1.5
+trail_2.0R,--trailing-stop-mode --trail-interval-r 2.0
+trail_3.0R,--trailing-stop-mode --trail-interval-r 3.0
+macd_12_26_9,--macd-mode --macd-fast 12 --macd-slow 26 --macd-signal 9
+rsi_14,--rsi-mode --rsi-period 14
