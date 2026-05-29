@@ -17,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -1189,6 +1190,15 @@ type PositionReconciler struct {
 	QtyTolerance       float64
 	EntryPriceBpsLimit float64
 
+	// RateLimitBackoff is the cooldown the Run loop waits after a 418/429
+	// from the exchange before polling again. It MUST exceed PollInterval —
+	// otherwise polling continues at tick cadence during an IP ban, which
+	// Binance extends on every request-while-banned, holding the ban open
+	// indefinitely (see the 2026-05-29 Layer 3 testnet reconciler incident).
+	// Zero → defaultRateLimitBackoff. Mirrors the aggTrade poller's 60s
+	// backoff in pkg/marketdata/binance.go.
+	RateLimitBackoff time.Duration
+
 	Notifier *notify.Notifier
 
 	// Local position view + drift map per symbol. Populated by
@@ -1492,6 +1502,35 @@ func detectDrift(hasLocal bool, local reconcilerPosition, hasExch bool, exch Exc
 	return false, ""
 }
 
+// defaultRateLimitBackoff is the cooldown after a 418/429 before the
+// reconciler polls again. 120s deliberately exceeds both the poll interval
+// and a typical short Binance IP ban so the ban can expire instead of being
+// re-extended by a poll-while-banned. (The aggTrade poller uses 60s; the
+// reconciler uses longer because its calls are rarer and the cost of a missed
+// reconcile cycle is low — staleness alerts, not data loss.)
+const defaultRateLimitBackoff = 120 * time.Second
+
+// isRateLimitErr reports whether err is a Binance 418 (IP banned) or 429
+// (rate limit exceeded) response from the positionRisk endpoint. Matches the
+// error format produced by FetchExchangePosition ("positionRisk <code>: ...").
+// Used by the Run loop to switch from poll-interval cadence to a longer
+// rate-limit cooldown — continuing to poll during a 418 ban extends it.
+func isRateLimitErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := err.Error()
+	return strings.Contains(s, "positionRisk 418") || strings.Contains(s, "positionRisk 429")
+}
+
+// effectiveRateLimitBackoff returns RateLimitBackoff or the default when unset.
+func (r *PositionReconciler) effectiveRateLimitBackoff() time.Duration {
+	if r.RateLimitBackoff <= 0 {
+		return defaultRateLimitBackoff
+	}
+	return r.RateLimitBackoff
+}
+
 // effectivePollInterval clamps PollInterval to the locked [30s, 300s] band
 // and substitutes the 60s default when unset. Exposed (lowercase) to permit
 // direct unit tests of the clamp without spinning the loop.
@@ -1530,6 +1569,11 @@ func (r *PositionReconciler) Run(ctx context.Context, symbol string) error {
 	// (caller of Run is typically the engine startup goroutine).
 	if _, err := r.ReconcileSymbol(ctx, symbol); err != nil {
 		slog.Warn("reconcile error (initial)", "symbol", symbol, "err", err)
+		if isRateLimitErr(err) {
+			if !r.sleepBackoff(ctx, symbol) {
+				return ctx.Err()
+			}
+		}
 	}
 
 	ticker := time.NewTicker(r.effectivePollInterval())
@@ -1542,8 +1586,37 @@ func (r *PositionReconciler) Run(ctx context.Context, symbol string) error {
 		case <-ticker.C:
 			if _, err := r.ReconcileSymbol(ctx, symbol); err != nil {
 				slog.Warn("reconcile error", "symbol", symbol, "err", err)
+				// On a 418/429, STOP polling for a cooldown longer than the
+				// tick interval. Continuing to poll at tick cadence during an
+				// IP ban extends the ban (Binance pushes "banned until" forward
+				// on every request-while-banned) — see the 2026-05-29 Layer 3
+				// testnet incident. Mirrors pkg/marketdata/binance.go's
+				// aggTrade backoff.
+				if isRateLimitErr(err) {
+					if !r.sleepBackoff(ctx, symbol) {
+						return ctx.Err()
+					}
+				}
 			}
 		}
+	}
+}
+
+// sleepBackoff waits effectiveRateLimitBackoff() or until ctx is canceled.
+// Returns true if the backoff elapsed normally, false if ctx was canceled
+// (caller should return). Logged at Warn so the operator sees the reconciler
+// has paused for a rate-limit cooldown rather than silently going quiet.
+func (r *PositionReconciler) sleepBackoff(ctx context.Context, symbol string) bool {
+	d := r.effectiveRateLimitBackoff()
+	slog.Warn("reconcile rate-limited, backing off",
+		"symbol", symbol, "backoff", d)
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-t.C:
+		return true
 	}
 }
 
