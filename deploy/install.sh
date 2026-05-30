@@ -37,10 +37,18 @@ if [[ ! -f "$ENV_FILE" ]]; then
         echo "       Or set them in your shell before running install.sh." >&2
         exit 1
     fi
+    # Plain KEY=VALUE (no `export`) is REQUIRED for systemd EnvironmentFile=
+    # to parse these (paper-live@.service, watchdog, digest). `export KEY=VAL`
+    # makes systemd log "Ignoring invalid environment assignment" and drop the
+    # var → engine-side Telegram + signal-context silently no-op. Cron
+    # consumers auto-export via `set -a` in their crontab lines
+    # (install_{funding,layer3,daily_digest}_cron.sh), so children still
+    # inherit. Do NOT re-add `export` here. (Regression history: commit
+    # d6d6061 added `export` for cron and silently broke all 16 engines.)
     cat > "$ENV_FILE" <<EOF
-export TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
-export TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
-export PAPER_LIVE_SIGNAL_CONTEXT_DIR=/var/log/paper-live/signal-context
+TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
+PAPER_LIVE_SIGNAL_CONTEXT_DIR=/var/log/paper-live/signal-context
 EOF
     chmod 600 "$ENV_FILE"
     chown paperlive:paperlive "$ENV_FILE"
