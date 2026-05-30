@@ -197,9 +197,10 @@ The 6-stage `weekly_audit.sh` cron exits with the **drift wrapper's** code so `l
 ### Scenario: drift detector fires (exit 1)
 
 1. Cross-check: `python3 scripts/live_vs_backtest_drift.py --verbose` — see WHICH metric tripped.
-2. Investigate: was there a regime change in the past week? Check `results/forward_paper_snapshots/<recent>.txt` — single-sym concentration shift, slip drift, etc.
-3. Decision: per `results/drift_firing_investigation_decision_rule_2026-05-08.md` triage A/B/C. **Single firing alone is INVESTIGATION, not auto-kill.**
-4. If a second firing lands ≥7 days later → drift wrapper exits 4 → auto-kill candidate. Execute kill per `results/auto_kill_execution_decision_rule_2026-05-08.md`.
+2. **Censoring check (cross-check 9, ratified 2026-05-30).** If the firing is only on `mfe_r` / `win_pnl` / low-`WR`: is `mae_r` flat (live≈backtest) AND are open positions mostly favorable (`scripts/forward_paper_status.sh`) AND are closed winners still few (<~15)? **All yes → winner-censoring, NOT degradation → continue per cadence regardless of direction.** Structural through forward-paper's first ~60d (6:1 RR → winners close slow, so the closed sample is loser-biased). Any no — especially `mae_r` drifting adverse, or opens going to stop — → real signal, proceed. See `results/drift_detector_censoring_blindspot_finding_2026-05-30.md`.
+3. Investigate: regime change in the past week? Check `results/forward_paper_snapshots/<recent>.txt` — single-sym concentration shift, slip drift, etc.
+4. Decision: per `results/drift_firing_investigation_decision_rule_2026-05-08.md` triage A/B/C. **Single firing alone is INVESTIGATION, not auto-kill.**
+5. Second firing ≥7 days later → drift wrapper exits 4 → auto-kill candidate. **Re-run the censoring check (step 2) BEFORE executing** — the operator-in-loop gate must confirm it's not censoring. Then execute per `results/auto_kill_execution_decision_rule_2026-05-08.md`.
 
 ### Scenario: kill_protocol_check fires (exit 1)
 
@@ -278,9 +279,12 @@ Things that look like signals but aren't:
 - **Low-n PnL within power floor.** At n<50 trades, the `forward_paper_resolution` script returns CONTINUE (Rule 3). Don't react to absolute PnL numbers; the math at n=9 is meaningless. **Single-trade WR = 0% or 100%; single-symbol concentration = 100%; drawdown = 100% of any loss.** All trip threshold gates spuriously without n_trades floor.
 - **Threshold-only KILL verdicts.** `forward_paper_status.sh` may show KILL on advisory criteria (PnL, single-sym, HODL underperformance). Per kill-bar mis-calibration verdict 2026-05-07, these are advisory only. Cross-check drift detector before acting.
 - **Backtest re-runs / strategy tuning mid-milestone.** Locked rule. Forbidden until forward-paper resolves.
-- **Reshuffling deployed-32.** Adding/removing symbols mid-flight invalidates the locked symbol set.
+- **Reshuffling deployed-16.** Adding/removing symbols mid-flight invalidates the locked symbol set.
 - **Daily emotional reads.** Yesterday's losing trade doesn't predict next quarter. Bootstrap CI is wide.
 - **`post_deploy_check.sh §3` warning after 2026-05-22 module rename.** Since commit ce6621d (`trading-engine` → `fin-trading-engine`), §3 hot-file md5s diverge between local + VPS due to import-path strings ONLY, NOT functional code. The VPS engine binary (built 2026-05-19) is semantically current. Running `deploy/sync.sh` purely to silence §3 would force a 16-engine rebuild + restart for zero functional gain, disrupting mid-MONITORING paper-trading state. Wait for the next legitimate redeploy (real code change or STAGE_1 flip) to resolve the cosmetic delta.
+- **Auto-killing on a censoring firing.** `mfe_r`/`win_pnl`/low-`WR` drift while `mae_r` is flat + open positions are green = winner-censoring (6:1 RR → winners close slow), NOT degradation. Run cross-check 9 (drift-fires scenario step 2) before any kill. Structural through ~60d forward-paper.
+- **Reading a 0-byte cron log as a dead cron.** VPS logs logrotate daily 00:00, so mid-week `funding_refresh.log` / `daily_digest.log` are empty by design. Check `.log.1` / `.log.N.gz` + `grep CRON /var/log/syslog*` for the actual exec before concluding failure.
+- **Assuming engine-side Telegram works.** As of 2026-05-29 the engines' `TELEGRAM_*` are dropped by systemd (`export`-prefix env bug); engine startup/shutdown/CRITICAL alerts are a silent no-op until the env is fixed + engines restarted (runbook: `results/telegram_env_systemd_fix_runbook_2026-05-30.md`; `post_deploy_check §8c` flags it). Drift-kill (local launchd) + daily_digest/funding (cron) are unaffected.
 
 ---
 
@@ -294,6 +298,7 @@ Things that look like signals but aren't:
 | When can I promote to STAGE_1? | `forward_paper_outcome_resolution_decision_rule_2026-05-10.md` (LIMBO rule) |
 | What's the Layer 3 acceptance criterion? | `real_money_executor_architecture_decision_rule_2026-05-08.md` |
 | Why are threshold gates advisory? | `kill_bar_recal_verdict_2026-05-07.md` |
+| When is a drift firing censoring-noise? | `drift_detector_censoring_blindspot_finding_2026-05-30.md` (+ cross-check 9 in the firing rule) |
 | Daily-loss cap per stage? | `real_money_protocol_decision_rule_2026-05-08.md` §Kill |
 
 Master index: `results/INDEX.md`.
