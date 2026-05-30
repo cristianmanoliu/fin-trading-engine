@@ -69,7 +69,7 @@ go test ./pkg/marketdata/...
 
 ## Per-Symbol Configs
 
-8 per-symbol YAMLs in `configs/` (BTC/ETH/BNB/SOL/XRP/LINK/LTC/DOGE) pin falsified Option C settings (`min_rr: 1.0, target_rr: 5.0, stake_usd: 1000`) — NOT migrated to P4-Combined. Candidate strategy runs via CLI overrides on `configs/default.yaml` (`--signal-tf 4H --target_rr 6.0 --side-filter short --max-hold-hours 336 --funding-csv-dir data/funding`). `run_backtest.sh` is legacy-wired; new P4-Combined sweeps use `scripts/run_p4_variant.sh` + `scripts/p4_oos_persistence.sh` (which build their own configs and skip the per-symbol YAMLs).
+8 per-symbol YAMLs in `configs/` (BTC/ETH/BNB/SOL/XRP/LINK/LTC/DOGE) pin falsified Option C settings (`min_rr: 1.0, target_rr: 5.0, stake_usd: 1000`) — NOT migrated to P4-Combined. Candidate strategy runs via CLI overrides on `configs/default.yaml` (`--signal-tf 4H --target-rr 6.0 --side-filter short --max-hold-hours 504 --funding-csv-dir data/funding`). `run_backtest.sh` is legacy-wired; new P4-Combined sweeps use `scripts/run_p4_variant.sh` + `scripts/p4_oos_persistence.sh` (which build their own configs and skip the per-symbol YAMLs).
 
 ## Paper-Live (VPS)
 
@@ -79,12 +79,12 @@ The production run is on Hetzner CX23 at `178.105.24.230`. Use `deploy/` scripts
 # Sync code + rebuild + restart one symbol and tail log
 ./deploy/redeploy.sh             # btcusdt (default)
 ./deploy/redeploy.sh ethusdt     # specific symbol
-./deploy/redeploy.sh all         # all 8, no tail
+./deploy/redeploy.sh all         # all 16, no tail
 
 # Sync only (no restart)
 ./deploy/sync.sh
 
-# Check all 8 engines
+# Check all 16 engines
 ssh root@178.105.24.230 'systemctl status "paper-live@*.service" --no-pager | grep -E "●|Active:"'
 
 # Tail a log
@@ -186,7 +186,7 @@ The `Runner.Run` select loop handles four channels: `candle4H`, `candle30m`, `ca
 
 ## Strategy Logic
 
-**Candidate strategy (P4-Combined, post-fees backtest leader):** EMA9×EMA21 crossover on the **4H** signal timeframe, with a **wick-based stop** and **fixed 6:1 R:R** take-profit. A bearish 4H EMA cross opens a SHORT (longs are filtered out via `--side-filter short`). Any open short older than **336 hours (14 days)** is force-closed at the current tick price. Funding cost is accrued from per-symbol historical Binance funding-rate CSVs (`data/funding/{SYMBOL}.csv`) — longs pay positive funding, shorts receive it; net aggregate over the 5y sample is roughly zero, not a benefit.
+**Candidate strategy (P4-Combined, post-fees backtest leader):** EMA9×EMA21 crossover on the **4H** signal timeframe, with a **wick-based stop** and **fixed 6:1 R:R** take-profit. A bearish 4H EMA cross opens a SHORT (longs are filtered out via `--side-filter short`). Any open short older than **504 hours (21 days)** is force-closed at the current tick price (the live `--max-hold-hours`; the original P4-Combined candidate used 336h). Funding cost is accrued from per-symbol historical Binance funding-rate CSVs (`data/funding/{SYMBOL}.csv`) — longs pay positive funding, shorts receive it; net aggregate over the 5y sample is roughly zero, not a benefit.
 
 Cost-geometry rationale: on the 5m timeframe, wick stops are tight (~0.18% on BTC at p50) which forces ~500× implicit leverage to size each trade to a $1k stake, which makes round-trip taker fees eat the entire edge (Option C falsification). The 4H wick is wider, implicit leverage drops, fee per trade as a fraction of risked $ falls below the gross edge.
 
@@ -238,6 +238,7 @@ Key levels (used by absorption/breakout only): PDH, PDL, and optional manual `zo
 | `pkg/funding` | Constant + Historical providers, per-side sign, boundary exclusion, `LastTS` |
 | `pkg/notify` | Telegram POST body + tier retries + bot-token redaction; no-op when env unset |
 | `cmd/journal_diff` | Layer 3 parity comparator: pnl ≤0.5%, signal divergence, exit-code contract |
+| `cmd/journal_report` | Per-symbol journal summary + reruns backtest over the same range to surface a live-vs-backtest drift column (`cli_test.go`) |
 
 ## Known Bugs
 
