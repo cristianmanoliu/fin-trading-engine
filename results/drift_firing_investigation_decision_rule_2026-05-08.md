@@ -184,3 +184,45 @@ The rule re-opens for design when:
 - `scripts/forward_paper_status.sh` — cross-check 2 + 7
 - `scripts/post_deploy_check.sh` — cross-check 1
 - `CLAUDE.md ## Forward-paper go/no-go criteria → Kill mechanism` — operational doctrine
+
+---
+
+## Amendment 2026-05-30 — cross-check 9 (winner-censoring)
+
+**Trigger:** Migration-trigger-1 (first firing occurred 2026-05-27; reviewed in
+`results/drift_firings/2026-05-27-B-general-lown-censoring.md`). Rationale + full mechanism:
+`results/drift_detector_censoring_blindspot_finding_2026-05-30.md`. This amendment is **additive** to
+the locked cross-check set (does not alter tiers A/B/C triggers or the auto-kill rule).
+
+**Why:** the detector loads **closed trades only** (`live_vs_backtest_drift.py` emits a `Trade` on
+`close` events) and compares them against a fully-resolved backtest. Under the live config (6:1 R:R,
+336–504h max-hold) losers stop fast and winners ride slow, so the early closed sample is **loser-biased
+(winner-censored)** while the backtest is uncensored. This *guarantees* apparent drift in
+`mfe_r` / `win_pnl` / low-`WR` during the fill-in window, independent of true performance. The existing
+playbook's directional-consistency branch can misread **coherent-censoring** (mfe_r low + win_pnl low,
+once a few winners close) as "real degradation → intensify."
+
+### Cross-check 9 — censoring discriminator (TRIAGE-B/C; also at the exit-4 pre-execution gate)
+
+When the **only** firing metrics are censoring-sensitive (`mfe_r`, `win_pnl`, low-`WR`), classify as
+**censoring-benign** iff **ALL** hold:
+1. **`mae_r` flat** (live ≈ backtest, not Bonferroni-significant). MAE is censoring-*insensitive*
+   (adverse excursion is early for every trade) — if it drifts adverse, that is **real degradation**.
+2. **Open positions predominantly favorable** (`forward_paper_status.sh`: majority riding toward target,
+   not clustered toward stop).
+3. **`n_closed_winners` below the power floor (≈15)** — `mfe_r`/`win_pnl` are otherwise degenerate.
+
+**Decision:** all hold → **censoring-benign; continue per cadence REGARDLESS of direction-coherence**
+(overrides the directional-consistency branch for these metrics). Any fail → treat as **real**; proceed
+on the normal path (intensify / kill). The caveat **expires** when `n_closed_winners ≥ 15`, or
+forward-paper elapsed ≥ 2× max-hold past first fills, or any censoring-insensitive drift appears.
+
+**At wrapper exit 4 (auto-kill candidate):** the operator-in-loop gate (`auto_kill_execution_decision_
+rule_2026-05-08.md`, "operator disagrees" edge case) MUST run cross-check 9 before executing. A
+censoring-benign exit-4 is held, not executed; the ≥7d anchor stays armed for the next firing.
+
+**Not in scope of this amendment (deferred):** raising the auto-kill *arming* threshold to n≥50 (to match
+the calibration anchor) is **re-tuning**, which `drift_detector_time_to_detection_verdict_2026-05-08.md`
+explicitly forbids within this milestone ("❌ Reframing the bands… fresh pre-registration in a future
+milestone"). It is logged as a **milestone-2 candidate**, not ratified here. Until then the n<50 caution
+is handled manually via this cross-check + the operator gate.
