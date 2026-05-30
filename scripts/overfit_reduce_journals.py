@@ -57,6 +57,7 @@ def reduce_label(journals_root: str, label: str) -> dict[str, float]:
 
     month_pnl: dict[str, float] = {}
     malformed_closes = 0
+    malformed_lines = 0
     total_closes = 0
 
     for fpath in files:
@@ -70,6 +71,10 @@ def reduce_label(journals_root: str, label: str) -> dict[str, float]:
                     try:
                         obj = json.loads(raw_line)
                     except json.JSONDecodeError:
+                        # Count + surface corrupt lines rather than silently
+                        # dropping them — truncated/disk-full journal writes
+                        # would otherwise understate the matrix with no signal.
+                        malformed_lines += 1
                         continue
 
                     event = obj.get("event", "")
@@ -99,6 +104,12 @@ def reduce_label(journals_root: str, label: str) -> dict[str, float]:
         except OSError as e:
             print(f"WARNING: cannot read {fpath}: {e}", file=sys.stderr)
 
+    if malformed_lines > 0:
+        print(
+            f"WARNING: {label}: {malformed_lines} malformed JSON line(s) skipped "
+            "(truncated/corrupt journal writes — matrix may understate trades)",
+            file=sys.stderr,
+        )
     if malformed_closes > 0:
         print(
             f"WARNING: {label}: {malformed_closes}/{total_closes} close events "
