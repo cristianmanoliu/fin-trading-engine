@@ -599,6 +599,38 @@ else
     fi
 fi
 
+# ── 8c. Engine env-file systemd validity (export-prefix rejection) ────────────
+# systemd EnvironmentFile= parses KEY=VALUE literally and REJECTS `export KEY=VAL`
+# (logs "Ignoring invalid environment assignment" and DROPS the var). Regression
+# 2026-05-29: commit d6d6061 added `export` to /etc/paper-live/env for cron-child
+# inheritance, which silently unset TELEGRAM_* + PAPER_LIVE_SIGNAL_CONTEXT_DIR on
+# every engine → pkg/notify FromEnv no-op → engine-side Telegram alerts dead with
+# zero error surfaced. §5 (ERROR-level) misses it (no error is logged). Detect at
+# the root cause: any `^export ` line in the env file. Counts lines only — never
+# prints values (token-safe). Fix + activation:
+# results/telegram_env_systemd_fix_runbook_2026-05-30.md. STRICT-escalated.
+echo ""
+echo "8c. Engine env-file systemd validity (export-prefix)"
+ENV_PROBE=$(ssh -o BatchMode=yes -o ConnectTimeout=10 "${TARGET}" \
+    'if [ -f /etc/paper-live/env ]; then grep -c "^export " /etc/paper-live/env || true; else echo MISSING; fi' 2>/dev/null)
+ENV_SSH_EXIT=$?
+if [[ "$ENV_SSH_EXIT" -ne 0 ]]; then
+    warn "could not read /etc/paper-live/env on ${TARGET} (ssh exit=$ENV_SSH_EXIT) — engine env validity UNKNOWN"
+elif [[ "$ENV_PROBE" == "MISSING" ]]; then
+    warn "/etc/paper-live/env absent on ${TARGET} — engine env validity UNKNOWN (fresh box?)"
+elif [[ ! "$ENV_PROBE" =~ ^[0-9]+$ ]]; then
+    warn "unexpected env-file probe result on ${TARGET} — engine env validity UNKNOWN"
+elif (( ENV_PROBE > 0 )); then
+    warn "$ENV_PROBE export-prefixed line(s) in /etc/paper-live/env — systemd rejects them; engine TELEGRAM_*/signal-context silently disabled"
+    warn "  → fix: results/telegram_env_systemd_fix_runbook_2026-05-30.md (strip export + set -a crons + restart)"
+    if [[ "$STRICT" == "1" ]]; then
+        notify_telegram WARN "post_deploy_check on $(hostname)" \
+            "Engine env-file has $ENV_PROBE export-prefixed line(s) — systemd EnvironmentFile rejects them, so engine-side Telegram + signal-context are silently OFF on all engines. Fix per results/telegram_env_systemd_fix_runbook_2026-05-30.md."
+    fi
+else
+    ok "engine env-file is systemd-valid (no export-prefixed lines)"
+fi
+
 # ── 9. Funding CSV staleness ──────────────────────────────────────────────────
 # cmd/engine logs `slog.Warn("funding CSV is stale; ...")` once at startup if
 # the loaded historical funding CSV's last entry is >7d old. Section 5
