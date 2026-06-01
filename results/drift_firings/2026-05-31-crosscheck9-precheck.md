@@ -122,3 +122,69 @@ Neither of those is present today.
 - Detector: `python3 scripts/live_vs_backtest_drift.py` (pure read-only, no history mutation)
 - History NOT mutated by this investigation (wrapper not invoked)
 - Decision rule: `results/drift_firing_investigation_decision_rule_2026-05-08.md:205-218`
+
+---
+
+## Update — 2026-06-01 (n=40 closed)
+
+Re-read for 06-07 pre-confirmation per §Disposition.
+
+### Condition 1 — `mae_r` flat ✓ PASS (unchanged)
+
+```
+mae_r losers: n=38  min=1.0000  max=1.0710  mean=1.0104  p50=1.0050
+>1.071 (prior max): 0 trades
+```
+
+Max unchanged at 1.071. Mean +0.0005 vs 2026-05-31 reading (1.0099→1.0104). **No deepening.**
+Backtest p90=1.03, p99=1.19. Live max still below p90.
+
+### Condition 2 — Open positions mixed ⚠ PARTIAL
+
+7 open SHORT positions as of 2026-06-01 ~11:32 UTC. Live prices from Binance USDT-M Futures:
+
+| Symbol       | Entry    | Current  | Target   | Stop     | Status |
+|---|---|---|---|---|---|
+| 1000SHIBUSDT | 0.005711 | 0.005450 | 0.004884 | 0.005849 | ✓ favorable (+32% to tgt) |
+| DOTUSDT      | 1.256000 | 1.169000 | 1.122340 | 1.278280 | ✓ favorable (+65% to tgt) |
+| KAVAUSDT     | 0.058800 | 0.055700 | 0.051240 | 0.060060 | ✓ favorable (+41% to tgt) |
+| ROSEUSDT     | 0.010270 | 0.008880 | 0.004803 | 0.011181 | ✓ favorable (+25% to tgt) |
+| 1INCHUSDT    | 0.085000 | 0.085400 | 0.068274 | 0.087788 | ⚠ adverse vs entry (+0.5%) |
+| ADAUSDT      | 0.230900 | 0.231400 | 0.189875 | 0.237737 | ⚠ adverse vs entry (+0.2%) |
+| IMXUSDT      | 0.158400 | 0.159200 | 0.117810 | 0.165165 | ⚠ adverse vs entry (+0.5%) |
+
+4 favorable (well between entry and target), 3 adverse vs entry (all <0.6% above entry, far from stops).
+Net assessment: majority favorable; 3 adverse are noise-level deviations, not stop-approach.
+**Condition 2: PASS** — no positions near stop; 4 clear winners-in-progress; 3 barely adverse.
+
+### Condition 3 — `n_closed_winners < ~15` ✓ PASS
+
+```
+outcome breakdown: 38 STOP, 2 TARGET
+```
+
+Still 2 winners. No new targets hit since 2026-05-31.
+
+### Shadow observations (research-only, non-actionable)
+
+Shadows at same n-range show mae_r max 1.005–1.125, consistent with live.
+Notable: `alt5-15-336` (n=66) and `alt5-15-504` (n=62) both at WR≈24%, pnl +$35k — faster EMAs generate more signals, already past stat-power floor. Research-only per charter lock.
+
+### 06-01 Verdict
+
+**ALL THREE CONDITIONS PASS → CENSORING-BENIGN → HOLD.**
+
+No condition changed since 2026-05-31. Mae_r flat, majority of opens favorable, winners still unclosed.
+3 slightly adverse opens (all <0.6% through entry, all 7–18% from stops) do not flip Condition 2.
+
+### Updated 06-07 disposition
+
+Same as original: when launchd fires Sunday ~09:00 local (= ~06-07 or 06-08):
+- Re-run `python3 scripts/live_vs_backtest_drift.py --live-source local --live-dir results/journal_cache`
+- Extract losers-only mae_r — watch for any new max materially above 1.071
+- Check if 1INCH/ADA/IMX adverse positions hit stop (would be normal STOP outcomes, not evidence of deepening)
+- If mae_r max still ≤~1.10 and no mass stop-deepening: update this section, record HOLD, do not honor exit-4 kill
+
+**The only readings that would flip to real edge-death before 06-07 remain unchanged:**
+- mae_r loser max meaningfully above 1.10–1.15 (new structural break)
+- Open positions en-masse hitting stops with adverse excursion (not just entry crossing)
