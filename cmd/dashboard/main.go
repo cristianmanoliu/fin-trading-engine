@@ -43,6 +43,15 @@ func loadStateOrError(w http.ResponseWriter) (*State, bool) {
 	return st, true
 }
 
+// isStale reports whether the newest journal file is older than the 1h staleness
+// threshold (zero mtime = nothing read = stale). Shared by every page so the
+// stale banner isn't index-only — a fail-open where /cohorts and /status showed
+// verdicts with no freshness context.
+func isStale(st *State) bool {
+	mtime := st.NewestCacheMtime()
+	return mtime.IsZero() || time.Since(mtime) > time.Hour
+}
+
 // handleIndex — forward-paper gate dashboard.
 func handleIndex(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
@@ -64,16 +73,13 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 		Stale     bool
 	}
 
-	mtime := st.NewestCacheMtime()
-	stale := !mtime.IsZero() && time.Since(mtime) > time.Hour
-
 	data := pageData{
 		State:     st,
 		Drift:     drift,
 		LiveGates: st.Live.Gates(),
 		Verdict:   st.Live.OverallVerdict(),
 		Now:       time.Now().UTC().Format("2006-01-02 15:04 UTC"),
-		Stale:     stale,
+		Stale:     isStale(st),
 	}
 	renderTemplate(w, tmplIndex, data)
 }
@@ -87,8 +93,9 @@ func handleStatus(w http.ResponseWriter, r *http.Request) {
 	type pageData struct {
 		State *State
 		Now   string
+		Stale bool
 	}
-	renderTemplate(w, tmplStatus, pageData{State: st, Now: time.Now().UTC().Format("2006-01-02 15:04 UTC")})
+	renderTemplate(w, tmplStatus, pageData{State: st, Now: time.Now().UTC().Format("2006-01-02 15:04 UTC"), Stale: isStale(st)})
 }
 
 // handleCohorts — live vs shadows side-by-side with equity curves.
@@ -104,8 +111,9 @@ func handleCohorts(w http.ResponseWriter, r *http.Request) {
 		State   *State
 		CurveSVG template.HTML
 		Now     string
+		Stale   bool
 	}
-	renderTemplate(w, tmplCohorts, pageData{State: st, CurveSVG: svg, Now: time.Now().UTC().Format("2006-01-02 15:04 UTC")})
+	renderTemplate(w, tmplCohorts, pageData{State: st, CurveSVG: svg, Now: time.Now().UTC().Format("2006-01-02 15:04 UTC"), Stale: isStale(st)})
 }
 
 // handleSymbol — drill-down for one symbol.
@@ -171,20 +179,34 @@ func handleSymbol(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleHealthz — simple health endpoint.
+// handleHealthz — health endpoint. Returns 200 + "OK" only when the cache is
+// fresh, has data, and the drift detector is clean. Otherwise 503 + "DEGRADED"
+// with machine-readable reason tokens (STALE / NO_DATA / DRIFT_KILL / ...), so a
+// poller or operator never reads green while monitoring is stale or a kill has
+// fired. See healthReport + docs/AUDIT_LENS.md.
 func handleHealthz(w http.ResponseWriter, r *http.Request) {
 	st, err := LoadState(*flagJournalDir)
 	if err != nil {
 		http.Error(w, "error: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	drift := LoadDriftStatus(*flagResultsDir)
+	ok, status, reasons := healthReport(st, drift, time.Hour)
+
 	mtime := st.NewestCacheMtime()
 	total := 0
 	for _, c := range st.AllCohorts() {
 		total += c.TotalTrades
 	}
-	fmt.Fprintf(w, "OK\ncache_mtime=%s\ntotal_terminal_trades=%d\n",
-		mtime.Format(time.RFC3339), total)
+
+	if !ok {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}
+	fmt.Fprintf(w, "%s\ncache_mtime=%s\ntotal_terminal_trades=%d\n",
+		status, mtime.Format(time.RFC3339), total)
+	for _, rsn := range reasons {
+		fmt.Fprintf(w, "reason=%s\n", rsn)
+	}
 }
 
 func renderTemplate(w http.ResponseWriter, tmpl *template.Template, data any) {
@@ -385,6 +407,7 @@ var tmplIndex = mustParse("index", `
 </body></html>`)
 
 var tmplStatus = mustParse("status", `
+{{if .Stale}}<div class="stale-banner">⚠ Cache stale — last journal file &gt;1h old. Run: bash scripts/journal_fetch.sh</div>{{end}}
 <div class="section">
 <h2>Open positions — all cohorts</h2>
 <p class="meta">{{.Now}}</p>
@@ -433,6 +456,7 @@ var tmplStatus = mustParse("status", `
 </body></html>`)
 
 var tmplCohorts = mustParse("cohorts", `
+{{if .Stale}}<div class="stale-banner">⚠ Cache stale — last journal file &gt;1h old. Run: bash scripts/journal_fetch.sh</div>{{end}}
 <div class="section">
 <h2>Cohort comparison</h2>
 <p class="meta">{{.Now}}</p>
