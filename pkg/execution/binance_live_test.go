@@ -2277,3 +2277,114 @@ func TestPositionReconciler_Run_BacksOffOnRateLimit(t *testing.T) {
 		}
 	}
 }
+
+// TestPositionReconciler_Run_SurvivesSustained418_DoesNotExitGoroutine is the
+// literal regression test for the 2026-05-29 Layer 3 testnet incident. The
+// incident root cause was NOT just "polled during a ban" — it was that the
+// reconciler goroutine EXITED on the rate-limit error, which closed the tick
+// channel, looked like a clean shutdown to systemd, triggered an infinite
+// restart loop, and re-polled-while-banned on every restart, holding the ban
+// open for 10 days (see CLAUDE.md Bug 4 invariant + memory
+// project-layer3-reconciler-backoff).
+//
+// The sibling TestPositionReconciler_Run_BacksOffOnRateLimit asserts PACING
+// (calls are backoff-spaced) but NOT SURVIVAL: a buggy impl that did
+// `if isRateLimitErr(err) { return err }` after one backoff would still make
+// ≤6 backoff-spaced calls and PASS that test. This test closes that gap by
+// asserting Run keeps running across multiple sustained-418 cycles and returns
+// ONLY when ctx is canceled — and returns ctx.Canceled, never the 418 error.
+func TestPositionReconciler_Run_SurvivesSustained418_DoesNotExitGoroutine(t *testing.T) {
+	var calls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		w.WriteHeader(http.StatusTeapot) // 418, every time
+		_, _ = w.Write([]byte(`{"code":-1003,"msg":"IP banned until 999"}`))
+	}))
+	defer srv.Close()
+
+	r := newReconcilerForTest(t, srv.URL)
+	r.HTTPClient = srv.Client()
+	// Tiny intervals so several backoff cycles elapse within the test window.
+	r.PollInterval = 20 * time.Millisecond
+	r.RateLimitBackoff = 80 * time.Millisecond
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- r.Run(ctx, "BTCUSDT") }()
+
+	// While ctx is live, Run must NOT return — even under sustained 418. A
+	// buggy `return err`-on-rate-limit impl would deliver on `done` here.
+	select {
+	case err := <-done:
+		t.Fatalf("Run exited on its own under sustained 418 (err=%v) — goroutine must survive until ctx cancel; this is the 2026-05-29 incident's restart-loop root cause", err)
+	case <-time.After(500 * time.Millisecond):
+		// Good: still running after multiple backoff cycles.
+	}
+
+	// Must have actually hit the rate-limit path (the initial reconcile fires
+	// a 418 → sleepBackoff). Note: effectivePollInterval clamps to a 30s floor,
+	// so the *ticker* branch cannot fire inside this sub-second window — the
+	// reachable-fast 418 is the initial reconcile's. Survival past that single
+	// backoff is the exact behavior the incident violated (the buggy impl
+	// `return err`-ed instead of looping on, exiting the goroutine).
+	if got := atomic.LoadInt32(&calls); got < 1 {
+		t.Fatalf("server saw %d calls — initial-reconcile 418/backoff path not exercised", got)
+	}
+
+	// Now cancel: Run must return promptly, and with ctx.Canceled — never the
+	// underlying 418 error (operators distinguish "we shut it down" from "the
+	// exchange rejected us").
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("Run err = %v, want context.Canceled (must not surface the 418 as the exit reason)", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run did not return within 2s of ctx cancel")
+	}
+}
+
+// TestPositionReconciler_Run_CtxCancelDuringBackoff_ReturnsPromptly asserts a
+// shutdown/kill is not blocked for a full RateLimitBackoff (120s in prod) when
+// the cancel lands mid-backoff. sleepBackoff selects on ctx.Done, so Run must
+// return well before the backoff timer would have elapsed. Without this, a
+// CONFIRM kill issued during an active testnet ban would hang up to 120s.
+func TestPositionReconciler_Run_CtxCancelDuringBackoff_ReturnsPromptly(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests) // 429
+		_, _ = w.Write([]byte(`{"code":-1003,"msg":"Too many requests"}`))
+	}))
+	defer srv.Close()
+
+	r := newReconcilerForTest(t, srv.URL)
+	r.HTTPClient = srv.Client()
+	// Backoff deliberately LONG so that, if Run ignored ctx during sleep, the
+	// test would time out rather than pass. Poll interval tiny so we enter the
+	// backoff almost immediately via the initial reconcile.
+	r.PollInterval = 10 * time.Millisecond
+	r.RateLimitBackoff = 30 * time.Second
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- r.Run(ctx, "BTCUSDT") }()
+
+	// Let the initial reconcile hit 418/429 and enter sleepBackoff, then cancel
+	// mid-backoff.
+	time.Sleep(50 * time.Millisecond)
+	start := time.Now()
+	cancel()
+	select {
+	case err := <-done:
+		if elapsed := time.Since(start); elapsed > 2*time.Second {
+			t.Errorf("Run returned %v after cancel — blocked on the %v backoff instead of honoring ctx", elapsed, r.RateLimitBackoff)
+		}
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("Run err = %v, want context.Canceled", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatalf("Run did not return within 5s of cancel — backoff (%v) blocked ctx cancellation", r.RateLimitBackoff)
+	}
+}
