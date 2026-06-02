@@ -374,6 +374,12 @@ Selected commits to study for examples of each lens mode in action.
 - `6dc3836` — `cmd/kill_switch` PARTIAL exit-code fix (HIGH, real-money
   operator path)
 - `2cb6c12` — `btc_hodl_benchmark.py` 2 MED + first test scaffold
+- `fb3feaa` — `cmd/dashboard` `/healthz` returned literal "OK" on stale/empty
+  cache AND on a live drift exit-4 AUTO-KILL (first audit of this file;
+  observability tooling). Fixed via `healthReport` → 503/DEGRADED + greppable
+  `reason=` tokens (STALE/NO_DATA/DRIFT_KILL/DRIFT_MISSING/DRIFT_DEAD); +
+  stale-banner extended from index-only to `/cohorts`+`/status`. Same
+  distinct-status remedy as `6dc3836`.
 
 ### Lens-as-design-tool (prospective)
 
