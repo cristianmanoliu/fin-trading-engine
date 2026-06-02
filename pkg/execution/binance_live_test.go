@@ -2121,6 +2121,152 @@ func TestKillSwitch_KillAll_PartialFill_ReportedAsPARTIAL(t *testing.T) {
 	}
 }
 
+// TestKillSwitch_KillAll_FirstPositionExhaustsRetry_SecondStillCloses is the
+// REAL cascade-prevention test. The existing _DoesNotCascadeToOtherPositions
+// can't observe a cascade — its mock returns 200 on call 2+, so the trailing
+// position was always going to succeed regardless of what the first did. The
+// genuine hazard the retry guards against: the FIRST position exhausts BOTH
+// attempts (sustained 418/429 → FAILED), and that failure must NOT abort
+// iteration or poison the SECOND position, which gets its own clean attempt.
+// This is the worst-case panic-kill scenario (one symbol stuck rate-limited,
+// the rest must still close).
+func TestKillSwitch_KillAll_FirstPositionExhaustsRetry_SecondStillCloses(t *testing.T) {
+	// BTC → 429 on every attempt (sustained ban for that symbol).
+	// ETH → 200 (clean). Discriminate on the symbol query param SendOrder sets.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("symbol") == "BTCUSDT" {
+			w.WriteHeader(429)
+			_, _ = w.Write([]byte(`{"code":-1003,"msg":"too many requests"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"orderId":7,"status":"FILLED","executedQty":"0.5","avgPrice":"3000"}`))
+	}))
+	defer srv.Close()
+	r := &OrderRouter{APIBaseURL: srv.URL, APIKey: "k", APISecret: "s", HTTPClient: srv.Client()}
+	k := &KillSwitch{Router: r, RateLimitBackoff: time.Millisecond}
+
+	res, err := k.KillAll(context.Background(),
+		[]ClosePosition{
+			{Symbol: "BTCUSDT", Side: models.Long, Quantity: 0.5},
+			{Symbol: "ETHUSDT", Side: models.Long, Quantity: 0.5},
+		}, "cascade-prevention test")
+
+	// One position failed → aggregated err non-nil, but iteration must have
+	// continued to ETH.
+	if err == nil {
+		t.Fatal("expected aggregated err (BTC exhausted its retry); got nil")
+	}
+	if len(res.Outcomes) != 2 {
+		t.Fatalf("outcomes = %d, want 2 — iteration must continue past the failed first position", len(res.Outcomes))
+	}
+	bySym := map[string]KillOutcome{}
+	for _, o := range res.Outcomes {
+		bySym[o.Symbol] = o
+	}
+	if got := bySym["BTCUSDT"].Status; got != "FAILED" {
+		t.Errorf("BTCUSDT status = %q, want FAILED (sustained 429, retry exhausted)", got)
+	}
+	if got := bySym["ETHUSDT"].Status; got != "CLOSED" {
+		t.Errorf("ETHUSDT status = %q, want CLOSED — the first position's rate-limit must NOT cascade to the second", got)
+	}
+}
+
+// TestKillSwitch_KillAll_CtxCancelDuringBackoff_RecordsFailedAndContinues
+// covers the bespoke ctx-cancel-during-backoff branch (binance_live.go ~L1793),
+// which had ZERO coverage. Scenario: an operator's kill_switch CLI ctx times out
+// (or operator Ctrl-C) WHILE a position is sleeping off a rate-limit backoff —
+// the highest-stakes moment in the system. The loop must record that position as
+// FAILED with the distinctive "canceled during backoff" reason (not a generic
+// failure, so the operator knows to re-run), and must still CONTINUE to the next
+// position rather than aborting the whole kill.
+func TestKillSwitch_KillAll_CtxCancelDuringBackoff_RecordsFailedAndContinues(t *testing.T) {
+	var btcCalls int32
+	firstBTCLanded := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("symbol") == "BTCUSDT" {
+			if atomic.AddInt32(&btcCalls, 1) == 1 {
+				close(firstBTCLanded) // signal: first BTC attempt has returned 429
+			}
+			w.WriteHeader(429)
+			_, _ = w.Write([]byte(`{"code":-1003,"msg":"too many requests"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"orderId":8,"status":"FILLED","executedQty":"0.5","avgPrice":"3000"}`))
+	}))
+	defer srv.Close()
+	r := &OrderRouter{APIBaseURL: srv.URL, APIKey: "k", APISecret: "s", HTTPClient: srv.Client()}
+	// Backoff LONG so the cancel lands squarely inside the backoff select, not
+	// after it (which would let BTC retry). Tests cancel deterministically once
+	// the first BTC 429 has returned.
+	k := &KillSwitch{Router: r, RateLimitBackoff: 30 * time.Second}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	type result struct {
+		res KillResult
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		res, err := k.KillAll(ctx,
+			[]ClosePosition{
+				{Symbol: "BTCUSDT", Side: models.Long, Quantity: 0.5},
+				{Symbol: "ETHUSDT", Side: models.Long, Quantity: 0.5},
+			}, "ctx-cancel-during-backoff test")
+		done <- result{res, err}
+	}()
+
+	// Wait until BTC's first attempt has been served a 429, then give the loop a
+	// brief moment to finish reading the response and reach the backoff select
+	// before canceling. Backoff is 30s, so a short settle window reliably lands
+	// the cancel INSIDE the select (not on the in-flight request, which would
+	// surface as a NETWORK error instead of the canceled-during-backoff path).
+	<-firstBTCLanded
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+
+	var got result
+	select {
+	case got = <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("KillAll did not return promptly after ctx cancel during backoff — backoff blocked the cancel")
+	}
+
+	if got.err == nil {
+		t.Fatal("expected aggregated err (BTC canceled during backoff); got nil")
+	}
+	if len(got.res.Outcomes) != 2 {
+		t.Fatalf("outcomes = %d, want 2 — must continue to ETH after BTC's canceled backoff", len(got.res.Outcomes))
+	}
+	bySym := map[string]KillOutcome{}
+	for _, o := range got.res.Outcomes {
+		bySym[o.Symbol] = o
+	}
+	btc := bySym["BTCUSDT"]
+	if btc.Status != "FAILED" {
+		t.Errorf("BTCUSDT status = %q, want FAILED", btc.Status)
+	}
+	if !strings.Contains(strings.ToLower(btc.Error), "canceled during") {
+		t.Errorf("BTCUSDT error = %q, want the distinctive 'canceled during ... backoff' reason (operator must distinguish this from a generic failure)", btc.Error)
+	}
+	// BTC must have made exactly ONE attempt — the retry was preempted by cancel.
+	if got := atomic.LoadInt32(&btcCalls); got != 1 {
+		t.Errorf("BTC SendOrder calls = %d, want 1 (cancel must preempt the retry, not let it fire)", got)
+	}
+	// The KEY invariant: iteration CONTINUED past BTC's canceled backoff — ETH
+	// got an outcome recorded rather than the loop aborting. (ETH itself FAILS
+	// via NETWORK because the batch ctx is now canceled — that's correct: a
+	// single batch-wide ctx means post-cancel attempts can't succeed. What
+	// matters here is that the loop didn't bail early and BTC's outcome carries
+	// the distinctive reason so the operator knows to re-run.)
+	eth, ok := bySym["ETHUSDT"]
+	if !ok {
+		t.Fatal("ETHUSDT outcome missing — loop aborted after BTC's canceled backoff instead of continuing")
+	}
+	if eth.Status != "FAILED" {
+		t.Errorf("ETHUSDT status = %q, want FAILED (batch ctx canceled → NETWORK error); the point is the outcome EXISTS, proving iteration continued", eth.Status)
+	}
+}
+
 
 // ── Audit-pass regression tests (2026-05-09 PM Go-side audit) ────────────────
 
