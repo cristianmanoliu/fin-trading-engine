@@ -24,6 +24,12 @@ const (
 	// Do NOT lower this without recomputing: at 6s × 16 the fleet sat in 50% rate-limit backoff.
 	restPollInterval = 10 * time.Second
 	restPollLimit    = 500
+	// defaultAggTradeRateLimitBackoff is the cooldown after a 418/429 before the
+	// aggTrade poll loop retries. 60s deliberately exceeds restPollInterval so a
+	// poll-while-banned can't re-extend a Binance IP ban (Bug 4 / the 2026-05-29
+	// reconciler incident shares this hazard). Overridable via
+	// BinanceFutures.RateLimitBackoff for tests only.
+	defaultAggTradeRateLimitBackoff = 60 * time.Second
 )
 
 // BinanceFutures streams aggTrade events from Binance USDT-M Futures.
@@ -37,6 +43,17 @@ type BinanceFutures struct {
 	symbol        string
 	backfillHours int
 	conn          *websocket.Conn
+
+	// RestPollInterval overrides the steady-state aggTrade poll cadence. Zero →
+	// restPollInterval (10s). Production leaves this unset; only tests set it (to
+	// drive the poll loop in milliseconds). Do NOT lower the production default
+	// without recomputing the rate-limit budget — see the const comment.
+	RestPollInterval time.Duration
+	// RateLimitBackoff overrides the cooldown after a 418/429 before the
+	// aggTrade loop polls again. Zero → defaultAggTradeRateLimitBackoff (60s).
+	// Must exceed RestPollInterval and a typical short IP ban so the ban can
+	// expire instead of being re-extended by a poll-while-banned (Bug 4).
+	RateLimitBackoff time.Duration
 }
 
 func NewBinanceFutures(wsURL, restURL, symbol string, backfillHours int) *BinanceFutures {
@@ -373,6 +390,24 @@ func (b *BinanceFutures) readLoop(ctx context.Context, conn *websocket.Conn, ch 
 	}
 }
 
+// effectiveRestPollInterval returns RestPollInterval or the 10s production
+// default when unset. Mirrors PositionReconciler.effectivePollInterval.
+func (b *BinanceFutures) effectiveRestPollInterval() time.Duration {
+	if b.RestPollInterval <= 0 {
+		return restPollInterval
+	}
+	return b.RestPollInterval
+}
+
+// effectiveRateLimitBackoff returns RateLimitBackoff or the 60s production
+// default when unset. Mirrors PositionReconciler.effectiveRateLimitBackoff.
+func (b *BinanceFutures) effectiveRateLimitBackoff() time.Duration {
+	if b.RateLimitBackoff <= 0 {
+		return defaultAggTradeRateLimitBackoff
+	}
+	return b.RateLimitBackoff
+}
+
 // aggTradeLoop polls GET /fapi/v1/aggTrades using fromId pagination to deliver
 // every trade with zero gaps. Called automatically when WebSocket stalls.
 func (b *BinanceFutures) aggTradeLoop(ctx context.Context, ch chan<- models.Tick) {
@@ -398,7 +433,7 @@ func (b *BinanceFutures) aggTradeLoop(ctx context.Context, ch chan<- models.Tick
 
 	slog.Info("REST aggTrade polling active", "symbol", b.symbol, "fromID", lastID)
 
-	ticker := time.NewTicker(restPollInterval)
+	ticker := time.NewTicker(b.effectiveRestPollInterval())
 	defer ticker.Stop()
 
 	client := &http.Client{Timeout: 10 * time.Second}
@@ -439,14 +474,17 @@ func (b *BinanceFutures) aggTradeLoop(ctx context.Context, ch chan<- models.Tick
 			continue
 		}
 
-		// 418 = IP banned; 429 = rate limit exceeded. Back off 60s — do not exit.
+		// 418 = IP banned; 429 = rate limit exceeded. Back off — do not exit.
+		// The backoff MUST exceed the poll interval so we don't re-extend a
+		// Binance IP ban by polling-while-banned (Bug 4).
 		if resp.StatusCode == 418 || resp.StatusCode == 429 {
-			slog.Warn("aggTrade poll: rate limited, backing off 60s",
-				"symbol", b.symbol, "status", resp.StatusCode)
+			backoff := b.effectiveRateLimitBackoff()
+			slog.Warn("aggTrade poll: rate limited, backing off",
+				"symbol", b.symbol, "status", resp.StatusCode, "backoff", backoff)
 			select {
 			case <-ctx.Done():
 				return
-			case <-time.After(60 * time.Second):
+			case <-time.After(backoff):
 			}
 			continue
 		}

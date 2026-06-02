@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -521,5 +522,134 @@ func TestBackfillRespectsContext(t *testing.T) {
 	// context is acceptable — both prove the cancellation propagated.
 	if err == nil {
 		t.Errorf("expected error from cancelled context, got nil")
+	}
+}
+
+// aggTradeRateLimitHandler is a test double for /fapi/v1/aggTrades that serves a
+// valid latest-ID once (so aggTradeLoop's initial-ID fetch succeeds and the loop
+// reaches its steady-state poll), then returns HTTP 418 forever — simulating a
+// sustained Binance IP ban. It records call counts for assertions.
+//
+//   - The initial-ID probe uses limit=1 with NO fromId → serve a valid 1-row body.
+//   - Every steady-state poll uses fromId=<n> → serve 418.
+type aggTradeRateLimitHandler struct {
+	probeCalls int32 // /aggTrades?...&limit=1 with no fromId (latest-ID fetch)
+	pollCalls  int32 // /aggTrades?...&fromId=... (steady-state poll)
+}
+
+func (h *aggTradeRateLimitHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Query().Get("fromId") == "" {
+		atomic.AddInt32(&h.probeCalls, 1)
+		w.Header().Set("Content-Type", "application/json")
+		// One trade so latestAggTradeID parses an ID and the loop proceeds.
+		_, _ = w.Write([]byte(`[{"a":1000,"p":"100.0","q":"1.0","T":1700000000000}]`))
+		return
+	}
+	atomic.AddInt32(&h.pollCalls, 1)
+	w.WriteHeader(http.StatusTeapot) // 418 — IP banned, every steady-state poll
+	_, _ = w.Write([]byte(`{"code":-1003,"msg":"Way too many requests; IP banned until 999"}`))
+}
+
+// TestAggTradeLoop_SurvivesSustained418_DoesNotExitGoroutine is the regression
+// test for the ORIGINAL Bug 4 incident (CLAUDE.md: "On 418/429, back off 60s and
+// retry — never exit the goroutine (closes tick channel → 'clean' shutdown →
+// infinite systemd restart loop)"). This invariant — the load-bearing one for the
+// live data feed — had ZERO test coverage before this.
+//
+// The loop must NOT return on a 418; it must enter the rate-limit backoff and keep
+// running until ctx is canceled. A buggy `return`-on-418 would close the tick
+// channel and (in prod) trigger the systemd restart-loop that self-extended the
+// 2026-05-29 testnet ban for 10 days.
+func TestAggTradeLoop_SurvivesSustained418_DoesNotExitGoroutine(t *testing.T) {
+	h := &aggTradeRateLimitHandler{}
+	server := httptest.NewServer(h)
+	defer server.Close()
+
+	b := NewBinanceFutures("ws://unused", server.URL, "TESTUSDT", 0)
+	// Tiny intervals so the first poll fires immediately and the backoff is short
+	// enough to observe survival without waiting the prod 60s. Production leaves
+	// both unset → the 10s/60s defaults (asserted byte-for-byte by a sibling test).
+	b.RestPollInterval = 5 * time.Millisecond
+	b.RateLimitBackoff = 20 * time.Millisecond
+
+	ch := make(chan models.Tick, 16)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan struct{})
+	go func() { b.aggTradeLoop(ctx, ch); close(done) }()
+
+	// While ctx is live, the loop must NOT exit under sustained 418. A buggy
+	// `return`-on-418 impl would close `done` here.
+	select {
+	case <-done:
+		t.Fatalf("aggTradeLoop exited on its own under sustained 418 — goroutine must survive until ctx cancel (Bug 4: exit → closed tick channel → systemd restart loop → re-poll-while-banned)")
+	case <-time.After(300 * time.Millisecond):
+		// Good: still polling across multiple 418/backoff cycles.
+	}
+
+	// Confirm the steady-state 418 path was actually exercised (not stalled in the
+	// initial-ID fetch) — otherwise survival proves nothing about the hot path.
+	if got := atomic.LoadInt32(&h.pollCalls); got < 2 {
+		t.Fatalf("server saw %d steady-state polls in 300ms — expected ≥2 sustained-418 cycles; line-443 backoff path not exercised", got)
+	}
+
+	// Cancel: the loop must return promptly.
+	cancel()
+	select {
+	case <-done:
+		// Good.
+	case <-time.After(2 * time.Second):
+		t.Fatal("aggTradeLoop did not return within 2s of ctx cancel")
+	}
+}
+
+// TestAggTradeLoop_CtxCancelDuringBackoff_ReturnsPromptly asserts a shutdown is
+// not blocked for a full RateLimitBackoff (60s in prod) when the cancel lands
+// while the loop is sleeping off a 418. The backoff select must honor ctx.Done.
+func TestAggTradeLoop_CtxCancelDuringBackoff_ReturnsPromptly(t *testing.T) {
+	h := &aggTradeRateLimitHandler{}
+	server := httptest.NewServer(h)
+	defer server.Close()
+
+	b := NewBinanceFutures("ws://unused", server.URL, "TESTUSDT", 0)
+	// Poll fires fast; backoff is LONG so that if the loop ignored ctx during the
+	// backoff sleep, this test would time out rather than pass.
+	b.RestPollInterval = 5 * time.Millisecond
+	b.RateLimitBackoff = 30 * time.Second
+
+	ch := make(chan models.Tick, 16)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan struct{})
+	go func() { b.aggTradeLoop(ctx, ch); close(done) }()
+
+	// Let the loop fetch the initial ID, fire the first poll (418), and enter the
+	// backoff sleep, then cancel mid-backoff.
+	time.Sleep(100 * time.Millisecond)
+	start := time.Now()
+	cancel()
+	select {
+	case <-done:
+		if elapsed := time.Since(start); elapsed > 2*time.Second {
+			t.Errorf("aggTradeLoop returned %v after cancel — blocked on the %v backoff instead of honoring ctx", elapsed, b.RateLimitBackoff)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatalf("aggTradeLoop did not return within 5s of cancel — backoff (%v) blocked ctx cancellation", b.RateLimitBackoff)
+	}
+}
+
+// TestBinanceFutures_RateLimitDefaults_MatchProductionLiterals locks the
+// production cadence: when RestPollInterval / RateLimitBackoff are left unset
+// (the prod path — NewBinanceFutures sets neither), the effective values MUST be
+// the historical 10s poll / 60s backoff. This is the byte-for-byte guard that the
+// testability refactor changed NO runtime behavior. (CLAUDE.md: "Do NOT lower
+// [restPollInterval] without recomputing" — this test fails loudly if anyone does.)
+func TestBinanceFutures_RateLimitDefaults_MatchProductionLiterals(t *testing.T) {
+	b := NewBinanceFutures("ws://unused", "http://unused", "TESTUSDT", 0)
+	if got := b.effectiveRestPollInterval(); got != 10*time.Second {
+		t.Errorf("default poll interval = %v, want 10s (production literal)", got)
+	}
+	if got := b.effectiveRateLimitBackoff(); got != 60*time.Second {
+		t.Errorf("default rate-limit backoff = %v, want 60s (production literal)", got)
 	}
 }
