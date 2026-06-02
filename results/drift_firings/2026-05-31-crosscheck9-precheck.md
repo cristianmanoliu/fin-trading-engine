@@ -279,3 +279,30 @@ made concrete. No edge-death signal present.
 Three consecutive readings (05-31, 06-01, 06-02) all CENSORING-BENIGN with mae_r
 pinned at 1.071 max. The 06-07 exit-4 resolves to HOLD unless a structural break
 appears in the next 5 days.
+
+### Tooling — committed cross-check producer (2026-06-02)
+
+The Condition-1 (losers mae_r) + Condition-3 (winner count) blocks above are now
+produced by a committed, tested, read-only script instead of an ephemeral /tmp
+recipe:
+
+```
+bash scripts/journal_fetch.sh root@178.105.24.230   # refresh cache (read-only rsync)
+python3 scripts/crosscheck9_losers_mae.py            # emits the doc blocks + verdict
+```
+
+Exit codes: 0 = HOLD-consistent (losers mae_r max ≤ 1.10 AND mean ≤ 1.05);
+1 = FLIP candidate (structural deepening — escalate to honor-kill review);
+2 = NO DATA. Reads top-level `results/journal_cache/*.jsonl` only (LIVE engine;
+subdirs skipped by construction). Does NOT touch `drift_check_history.jsonl` and
+does NOT run the `run_drift_check.sh` wrapper. Validated 2026-06-02: reproduces
+the 06-02 block byte-for-byte (n=38, max=1.0710, mean=1.0104, p50=1.0050).
+
+**Condition 2 (open positions favorable) is still operator-checked** — it needs
+live marks (`GET https://fapi.binance.com/fapi/v1/ticker/price`), which the script
+deliberately does not fetch. On 06-07: run the script for Conditions 1 & 3, do the
+manual price check for Condition 2, then append a 06-07 section and record the
+disposition.
+
+Tests: `python3 -m unittest scripts.test_crosscheck9_losers_mae` (9 tests, incl.
+subdir-leak guard + FLIP-trigger guards).
