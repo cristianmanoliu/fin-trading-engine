@@ -188,3 +188,94 @@ Same as original: when launchd fires Sunday ~09:00 local (= ~06-07 or 06-08):
 **The only readings that would flip to real edge-death before 06-07 remain unchanged:**
 - mae_r loser max meaningfully above 1.10–1.15 (new structural break)
 - Open positions en-masse hitting stops with adverse excursion (not just entry crossing)
+
+---
+
+## Update — 2026-06-02 (n=41 closed) — 06-07 PRE-STAGE
+
+Re-read for 06-07 pre-confirmation. Drift history UNCHANGED since 2026-05-31
+(4 fires, anchor 2026-05-27, latest 2026-05-31T06:07:36Z). **The post-06-03
+weekly cadence run has NOT landed yet** — exit-4 7d-pair still pending as
+predicted. Detector run pure read-only (`live_vs_backtest_drift.py`, wrapper
+NOT invoked, history NOT mutated).
+
+### Detector output (2026-06-02, live n=37 in detector window)
+
+```
+pnl_per_trade   +310.89 → -730.29   Δ-1041.18   p=0.0001   ★ DRIFT
+mfe_r             +2.29 → +0.94      Δ-1.36       p=0.0000   ★ DRIFT
+mae_r             +0.95 → +0.97      Δ+0.02       p=0.4204   ✓ ok
+loss_pnl_abs   +1065.34 → +1110.17   Δ+44.83      p=0.0002   · single-test
+win_pnl        +5129.12 → +5917.66   Δ+788.54     p=0.0000   ★ DRIFT
+WR                22.2% → 5.4%        Δ-16.81pp    p=0.0143   ✓ ok
+```
+
+Same canonical censoring fingerprint: `mfe_r`★ + `win_pnl`★, `mae_r`✓ flat
+(p=0.4204 >> 0.0002). Winner truncation, not adverse excursion.
+
+### Condition 1 — `mae_r` flat ✓ PASS (unchanged)
+
+```
+mae_r losers: n=38  min=1.0000  max=1.0710  mean=1.0104  p50=1.0050
+>1.071 (prior max): 0 trades
+>1.10 (edge-death threshold): 0 trades
+```
+
+**Max unchanged at 1.0710. Mean unchanged at 1.0104** vs 2026-06-01. Zero
+deepening across 3 readings (05-31, 06-01, 06-02). Backtest p90=1.03, p99=1.19;
+live max still below backtest p90.
+
+### Condition 2 — Open positions ✓ PASS (IMPROVED vs 06-01)
+
+6 open SHORT (was 7; **DOTUSDT closed TARGET — see below**). Live Binance prices:
+
+| Symbol       | Entry    | Current  | Target   | Stop     | %→target | Status |
+|---|---|---|---|---|---|---|
+| 1000SHIBUSDT | 0.005711 | 0.005434 | 0.004884 | 0.005849 | 33.5% | ✓ favorable |
+| KAVAUSDT     | 0.058800 | 0.054900 | 0.051240 | 0.060060 | 51.6% | ✓ favorable |
+| ROSEUSDT     | 0.010270 | 0.008980 | 0.004803 | 0.011181 | 23.6% | ✓ favorable |
+| ADAUSDT      | 0.230900 | 0.222900 | 0.189875 | 0.237737 | 19.5% | ✓ favorable (flipped fav since 06-01) |
+| 1INCHUSDT    | 0.085000 | 0.083800 | 0.068274 | 0.087788 |  7.2% | ✓ favorable (flipped fav since 06-01) |
+| IMXUSDT      | 0.158400 | 0.158800 | 0.117810 | 0.165165 | -1.0% | ⚠ adverse-vs-entry (94% buffer to stop) |
+
+**5/6 favorable (was 4/7 on 06-01).** 1INCH + ADA flipped from adverse→favorable.
+IMX sole adverse, -1.0% above entry, still 94% of entry→stop gap as buffer — noise,
+not stop-approach. Condition 2 strengthened.
+
+### Condition 3 — `n_closed_winners < ~15` ✓ PASS
+
+```
+outcome breakdown: 38 STOP, 3 TARGET (= 3 closed winners)
+```
+
+3 winners vs the ~15 threshold. **New winner since 06-01: DOTUSDT booked TARGET
+2026-06-02 07:03:15Z, +$5,944.38, mfe_r=6.015, mae_r=0.988.** This is the direct
+censoring prediction realized — the 06-01 doc flagged DOT as "+65% to target,
+favorable winner-in-progress"; it matured to the 6:1 exit exactly as the censoring
+thesis required. Three winners now: SHIB +$5,915, ENS +$5,920, DOT +$5,944 — all
+~6:1, all healthy at close.
+
+### 06-02 Verdict
+
+**ALL THREE CONDITIONS PASS → CENSORING-BENIGN → HOLD.**
+
+Stronger than 06-01: mae_r still flat (zero deepening, 3 readings), opens improved
+to 5/6 favorable, and a third winner booked at full 6:1 — the censoring blind-spot
+made concrete. No edge-death signal present.
+
+### 06-07 disposition (mechanical — when launchd fires Sunday exit-4)
+
+1. **DO NOT honor the kill.** Auto-kill candidate ≠ auto-kill. Operator-in-loop.
+2. `bash scripts/journal_fetch.sh` → `python3 scripts/live_vs_backtest_drift.py
+   --live-source local --live-dir results/journal_cache` (read-only; **never** the
+   wrapper `run_drift_check.sh` — it appends history and manufactures the 7d pair).
+3. Extract losers-only mae_r. **Flip-to-edge-death triggers (else HOLD):**
+   - new max materially > 1.10–1.15, or mean > 1.05
+   - open positions en-masse hitting stops with adverse excursion
+4. Watch IMX: if it hits stop, that's a normal STOP outcome (mae_r ~1.0), NOT
+   evidence of deepening. Only mass adverse-stop or a structural mae_r break flips.
+5. Append a 06-07 section here; record HOLD if conditions hold.
+
+Three consecutive readings (05-31, 06-01, 06-02) all CENSORING-BENIGN with mae_r
+pinned at 1.071 max. The 06-07 exit-4 resolves to HOLD unless a structural break
+appears in the next 5 days.
