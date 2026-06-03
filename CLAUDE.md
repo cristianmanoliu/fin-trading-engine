@@ -23,7 +23,7 @@ Per-session narratives: `docs/findings/<date>.md`. Latest: `2026-05-12-pm.md`.
 Pre-registration catalog: `results/INDEX.md` (58 docs: 28 decision rules + 25 verdicts + 5 syntheses).
 Cumulative audit: 91 fail-opens closed across 8 sessions; pattern locks on silent-on-corrupt-input (5 impl) + ssh-failure-vs-data-failure (6 impl) + writer-equals-fixture (3 impl). See `docs/AUDIT_LENS.md`.
 
-**2026-05-19 research arc:** 6 pre-registered walk-forward sweeps mapping the strategy parameter landscape (EMA periods × timeframe / entry filters / side filter / exit mechanisms). Cross-cutting findings: LIVE config survives every structural perturbation tested; W3 (2025-2026) is filter-hostile; trail beats MLTP at loose thresholds; 2026-05-07 SUPPORTIVE findings don't replicate at slip=5 (cost-model fragility). All sweeps research-only, non-actionable per locked decision rule. **Index: `results/research_synthesis_2026-05-19.md`.**
+**2026-05-19 research arc:** 6 pre-registered walk-forward sweeps mapping the strategy parameter landscape (EMA periods × timeframe / entry filters / side filter / exit mechanisms). Cross-cutting findings: LIVE config survives every structural perturbation tested; W3 (2025-2026) is filter-hostile; trail beats MLTP at loose thresholds; 2026-05-07 SUPPORTIVE findings don't replicate at slip=5 (cost-model fragility). All sweeps research-only, non-actionable per locked decision rule. **Index: `results/research_synthesis_2026-05-19.md`.** For the "is there anything solid in backtest we never deployed?" question, the closed-backlog ledger is `docs/RESEARCH_BACKLOG.md` (answer: no — every positive finding is already a shadow; the strategy-class search is closed).
 
 ## Build & Run
 

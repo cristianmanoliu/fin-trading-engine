@@ -190,6 +190,13 @@ The 6-stage `weekly_audit.sh` cron exits with the **drift wrapper's** code so `l
 | `cmd/journal_validate` | Journal self-consistency (cross-month opens, duplicates). |
 | `cmd/journal_report` | Trade-level summary. |
 
+### Reference docs
+
+| Doc | Purpose |
+|---|---|
+| `docs/RESEARCH_BACKLOG.md` | "Is there anything solid in backtest we never deployed?" → closed-backlog ledger (answer: no; every positive finding is already a shadow). |
+| `results/research_synthesis_2026-05-19.md` | Full 7-sweep research arc (data of record). |
+
 ---
 
 ## Scenario playbook
