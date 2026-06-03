@@ -3,8 +3,10 @@
 #
 # Runs on VPS via cron at 09:00 UTC. Produces a single-message digest with:
 #   - LIVE: trades (with delta from yesterday), W/L, PnL, named wins,
-#     open positions with entry prices, WR vs backtest, power-floor countdown
-#   - Shadows: comparison table with divergence detection
+#     open positions with R-multiples + dollar unrealized PnL,
+#     realized/unrealized/net totals, WR vs backtest, power-floor countdown
+#   - Shadows: compact per-algo block with ELI5 description, trades/WR/open,
+#     realized/unrealized/net PnL
 #   - New-trade narrative (trades since last digest)
 #
 # Persists a snapshot after each run so the next run can compute deltas.
@@ -18,6 +20,7 @@
 #   SNAPSHOT_DIR     — where to persist daily snapshots (default: /var/log/paper-live/digest_snapshots)
 #   DRY_RUN=1        — print to stdout instead of sending Telegram
 #   FETCH_PRICES=1   — force price fetch even in DRY_RUN (default: skip in DRY_RUN)
+#   STAKE_USD        — stake per trade in USD for unrealized MTM sizing (default: 1000)
 #
 # Exit codes:
 #   0  — success (message sent or printed)
@@ -48,6 +51,9 @@ _SNAPSHOT_DIR_USER_SET="${SNAPSHOT_DIR+1}"
 SNAPSHOT_DIR="${SNAPSHOT_DIR:-/var/log/paper-live/digest_snapshots}"
 DRY_RUN="${DRY_RUN:-0}"
 FETCH_PRICES="${FETCH_PRICES:-0}"
+# Stake per trade in USD — used for dollar unrealized MTM sizing.
+# Mirror of pkg/execution/stub.go StakeUSDT (default $1000/trade).
+STAKE_USD="${STAKE_USD:-1000}"
 
 # DRY_RUN must not mutate production state. The snapshot write at the end
 # of the script is unconditional (by design — the production cron needs it
@@ -182,11 +188,60 @@ compute_r() {
     }'
 }
 
+# ── Compute dollar unrealized MTM PnL for one open position ─────────────────
+# Mirrors the sizing formula in pkg/execution/stub.go:
+#   units = STAKE_USD / |entry - stop|
+#   SHORT unreal = units * (entry - price)   (positive when price fell)
+#   LONG  unreal = units * (price - entry)   (positive when price rose)
+# Returns a formatted "+NNN.NN" string, or empty on bad inputs.
+compute_unreal_usd() {
+    local side="$1" entry="$2" stop="$3" price="$4"
+    awk -v side="$side" -v entry="$entry" -v stop="$stop" \
+        -v price="$price" -v stake="$STAKE_USD" '
+    BEGIN {
+        stop_dist = (entry > stop) ? (entry - stop) : (stop - entry)
+        if (stop_dist == 0 || entry == 0 || price == 0 || stake == 0) { print ""; exit }
+        units = stake / stop_dist
+        if (side == "SHORT") unreal = units * (entry - price)
+        else                 unreal = units * (price - entry)
+        printf "%+.0f", unreal
+    }'
+}
+
 # ── Determine if we should fetch prices ─────────────────────────────────────
 do_fetch="0"
 if [[ "$DRY_RUN" != "1" ]] || [[ "$FETCH_PRICES" == "1" ]]; then
     do_fetch="1"
 fi
+
+# ── ELI5 descriptions keyed by shadow label (static; human display name) ────
+# Fallback "Strategy" for any future labels not yet listed.
+declare -A ELI5
+ELI5["live"]="Baseline trend-flip. Slowest EMA pair (9/21) — enters shorts late, fewest winners. The current live pick."
+ELI5["alt5-15-336"]="Fast trend-flip, 14-day max-hold. Earliest entries → most trades, top converter so far."
+ELI5["alt5-15-504"]="Fast trend-flip (5/15), 21-day max-hold. Same early entries but lets winners run a week longer."
+ELI5["alt5-21-504"]="Fast-in (EMA5) / medium-out (EMA21) flip. Slightly later exits than 5/15."
+ELI5["alt7-14-504"]="Medium-fast trend-flip (7/14). Between live and 5/15 on entry timing."
+ELI5["alt10-30-504"]="Slow, wide-gap flip (10/30). Few signals — only acts on confirmed big moves."
+ELI5["alt12-26-504"]="MACD-style 12/26 flip. Classic periods, moderate trade frequency."
+ELI5["alt21-50-504"]="Slowest trend-flip (21/50). Only the biggest sustained moves; rare signals."
+ELI5["bb20"]="Mean-reversion, not trend. Shorts when price stretches >2σ above its 20-period Bollinger band. Only non-EMA algo."
+
+# ── Build a price cache (fetch each symbol once; reused by live + all shadows)
+# Populated lazily when do_fetch=1 the first time a symbol is needed.
+declare -A _price_cache
+
+_cached_price() {
+    local sym="$1"
+    if [[ -v _price_cache["$sym"] ]]; then
+        echo "${_price_cache[$sym]}"
+        return
+    fi
+    local p
+    p=$(fetch_price "$sym")
+    _price_cache["$sym"]="${p:-}"
+    echo "${p:-}"
+}
 
 # ── Load yesterday's snapshot ────────────────────────────────────────────────
 YESTERDAY="$(date -u -d "yesterday" '+%Y-%m-%d' 2>/dev/null || \
@@ -294,7 +349,8 @@ if [[ -n "$live_win_data" ]]; then
     fi
 fi
 
-# Open positions with entry prices and R-multiples
+# Open positions with entry prices, R-multiples, and dollar unrealized PnL
+live_unreal_total="0"
 if [[ -n "$live_open_data" ]]; then
     open_count=0
     open_lines=""
@@ -302,20 +358,31 @@ if [[ -n "$live_open_data" ]]; then
         [[ "$_tag" != "OPEN" ]] && continue
         open_count=$(( open_count + 1 ))
         r_str=""
+        u_str=""
         if [[ "$do_fetch" == "1" ]] && [[ -n "$sym" ]]; then
-            price=$(fetch_price "$sym")
+            price=$(_cached_price "$sym")
             if [[ -n "$price" ]]; then
                 r=$(compute_r "$side" "$entry" "$stop" "$price")
                 [[ -n "$r" ]] && r_str=" R=${r}"
+                u=$(compute_unreal_usd "$side" "$entry" "$stop" "$price")
+                if [[ -n "$u" ]]; then
+                    u_str=" (\$${u})"
+                    live_unreal_total=$(awk -v a="$live_unreal_total" -v b="$u" 'BEGIN{printf "%.2f", a+b}')
+                fi
             fi
         fi
-        open_lines="${open_lines}    ${sym} ${side} @ ${entry}${r_str}"$'\n'
+        open_lines="${open_lines}    ${sym} ${side} @ ${entry}${r_str}${u_str}"$'\n'
     done <<< "$live_open_data"
     if [[ "$open_count" -gt 0 ]]; then
         MSG+=$'\n'"  Open: ${open_count}"
         MSG+=$'\n'"${open_lines%$'\n'}"
     fi
 fi
+
+# Realized / Unrealized / Net totals for LIVE
+live_unreal_int=$(awk -v u="$live_unreal_total" 'BEGIN{printf "%+.0f", u}')
+live_net_int=$(awk -v r="$live_pnl" -v u="$live_unreal_total" 'BEGIN{printf "%+.0f", r+u}')
+MSG+=$'\n'"  Realized: \$${live_pnl_int}  Unrealized: \$${live_unreal_int}  Net: \$${live_net_int}"
 
 # New trades since yesterday (narrative)
 if [[ -n "$live_new_trades" ]] && [[ -n "$YESTERDAY" ]]; then
@@ -375,12 +442,13 @@ if [[ -d "$shadow_base" ]]; then
     MSG+=$'\n'
     MSG+=$'\n'"SHADOWS"
 
-    # Collect shadow data for comparison
+    # Collect shadow data for comparison (kept for divergence check snapshot)
     declare -A shadow_trades shadow_pnl shadow_wins
 
     for label_dir in "${shadow_base}"/*/; do
         [[ -d "$label_dir" ]] || continue
         label_name=$(basename "$label_dir")
+        # Human-readable display name: uppercase, dashes→spaces
         label_upper=$(echo "$label_name" | tr '[:lower:]' '[:upper:]' | tr '-' ' ')
 
         shadow_files=( "${label_dir}"*-*.jsonl )
@@ -398,7 +466,6 @@ if [[ -d "$shadow_base" ]]; then
             s_wins=$(echo   "$stats_line" | awk -F'\t' '{print $3}')
             s_pnl=$(echo    "$stats_line" | awk -F'\t' '{print $4}')
         fi
-        s_open_count=$(echo "$shadow_raw" | grep -c "^OPEN" || echo 0)
 
         shadow_trades[$label_name]=$s_trades
         shadow_pnl[$label_name]=$s_pnl
@@ -407,14 +474,39 @@ if [[ -d "$shadow_base" ]]; then
         s_pnl_int=$(awk -v p="$s_pnl" 'BEGIN{printf "%+.0f", p}')
         s_wr=""
         if [[ "$s_trades" -gt 0 ]]; then
-            s_wr=$(awk -v w="$s_wins" -v t="$s_trades" 'BEGIN{printf "%.0f", w*100/t}')
-            s_wr="${s_wr}%"
+            s_wr=$(awk -v w="$s_wins" -v t="$s_trades" 'BEGIN{printf "%.0f%%", w*100/t}')
         fi
 
-        MSG+=$'\n'"  ${label_upper}: ${s_trades} trades WR=${s_wr} PnL=\$${s_pnl_int} open=${s_open_count}"
+        # Dollar unrealized PnL: sum over open positions using shared price cache
+        s_unreal_total="0"
+        s_open_count=0
+        while IFS=$'\t' read -r _tag sym side entry stop target; do
+            [[ "$_tag" != "OPEN" ]] && continue
+            s_open_count=$(( s_open_count + 1 ))
+            if [[ "$do_fetch" == "1" ]] && [[ -n "$sym" ]]; then
+                price=$(_cached_price "$sym")
+                if [[ -n "$price" ]]; then
+                    u=$(compute_unreal_usd "$side" "$entry" "$stop" "$price")
+                    [[ -n "$u" ]] && s_unreal_total=$(awk -v a="$s_unreal_total" -v b="$u" 'BEGIN{printf "%.2f", a+b}')
+                fi
+            fi
+        done <<< "$(echo "$shadow_raw" | grep "^OPEN" || true)"
 
-        # Build JSON for snapshot
-        shadow_json_parts="${shadow_json_parts}\"${label_name}\":{\"trades\":${s_trades},\"pnl\":${s_pnl},\"wins\":${s_wins}},"
+        s_unreal_int=$(awk -v u="$s_unreal_total" 'BEGIN{printf "%+.0f", u}')
+        s_net_int=$(awk -v r="$s_pnl" -v u="$s_unreal_total" 'BEGIN{printf "%+.0f", r+u}')
+
+        # ELI5 description (static map; fallback for unknown future labels)
+        s_eli5="${ELI5[$label_name]:-Strategy. Research-only shadow cohort.}"
+
+        # Compact per-algo block
+        MSG+=$'\n'
+        MSG+=$'\n'"  ${label_upper}"
+        MSG+=$'\n'"  ELI5: ${s_eli5}"
+        MSG+=$'\n'"  Trades ${s_trades}  WR ${s_wr}  Open ${s_open_count}"
+        MSG+=$'\n'"  Realized \$${s_pnl_int}  Unrealized \$${s_unreal_int}  Net \$${s_net_int}"
+
+        # Build JSON for snapshot (additive: add unreal field)
+        shadow_json_parts="${shadow_json_parts}\"${label_name}\":{\"trades\":${s_trades},\"pnl\":${s_pnl},\"wins\":${s_wins},\"unreal\":${s_unreal_total}},"
     done
 
     # Divergence detection: delegate to shadow_divergence.sh ONELINE mode.
@@ -529,7 +621,7 @@ else
     shadow_json="{}"
 fi
 cat > "$SNAPSHOT_FILE" <<SNAP
-{"live_trades":${live_trades},"live_pnl":${live_pnl},"live_wins":${live_wins},"date":"${TODAY}","shadows":${shadow_json}}
+{"live_trades":${live_trades},"live_pnl":${live_pnl},"live_wins":${live_wins},"live_unreal":${live_unreal_total},"date":"${TODAY}","shadows":${shadow_json}}
 SNAP
 
 # ── Snapshot cleanup (keep 30 days) ──────────────────────────────────────────
