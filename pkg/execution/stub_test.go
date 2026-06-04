@@ -826,6 +826,71 @@ func TestJournalCloseEventCostFields(t *testing.T) {
 	}
 }
 
+// TestJournalEventTS_UsesExchangeTime locks the invariant that both the open and
+// the close journal events carry the EXCHANGE timestamp (signal time on open,
+// exit-tick time on close) — never the wall-clock time.Now() at write. A close
+// event's ts is the exit-fill time, which is price data; per the "Exchange
+// timestamps only — time.Now() is never used for price data" invariant it must
+// reflect the tick, not the host clock. Regression guard for the time.Now() bug
+// at stub.go closePosition/recordPartialClose.
+func TestJournalEventTS_UsesExchangeTime(t *testing.T) {
+	dir := t.TempDir()
+	stub := &Stub{
+		StakeUSDT:   1000,
+		ExactFills:  true,
+		JournalPath: dir,
+		Symbol:      "X",
+	}
+	// Fixed exchange times in the past — distinct from each other and from any
+	// plausible wall-clock "now" the test could run at. If the engine stamped
+	// time.Now(), neither assertion below could pass.
+	entryTS := time.Date(2026, 6, 4, 2, 0, 0, 0, time.UTC)
+	exitTS := time.Date(2026, 6, 4, 2, 3, 14, 0, time.UTC)
+	wantEntry := entryTS.Format(time.RFC3339)
+	wantExit := exitTS.Format(time.RFC3339)
+
+	stub.OnSignal(&models.Signal{
+		Symbol: "X", Side: models.Short,
+		EntryPrice: 50000, StopLoss: 50100, TakeProfit: 49500,
+		Timestamp: entryTS,
+	})
+	// Short target = 49500 → TARGET at the injected exit tick time.
+	stub.OnTick(models.Tick{Symbol: "X", Timestamp: exitTS, Price: 49500})
+
+	matches, err := filepath.Glob(filepath.Join(dir, "X-*.jsonl"))
+	if err != nil || len(matches) == 0 {
+		t.Fatal("no journal file created")
+	}
+	var openTS, closeTS string
+	for _, m := range matches {
+		f, err := os.Open(m)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sc := bufio.NewScanner(f)
+		for sc.Scan() {
+			var rec map[string]any
+			if err := json.Unmarshal(sc.Bytes(), &rec); err != nil {
+				t.Fatalf("invalid JSON: %s", sc.Text())
+			}
+			switch rec["event"] {
+			case "open":
+				openTS, _ = rec["ts"].(string)
+			case "close":
+				closeTS, _ = rec["ts"].(string)
+			}
+		}
+		f.Close()
+	}
+
+	if openTS != wantEntry {
+		t.Errorf("open ts: want exchange time %q, got %q", wantEntry, openTS)
+	}
+	if closeTS != wantExit {
+		t.Errorf("close ts: want exchange exit time %q, got %q (time.Now() bug?)", wantExit, closeTS)
+	}
+}
+
 // ── RecoverFromJournal tests ──────────────────────────────────────────────
 
 // writeJournal writes the given JSON-serialized lines to <dir>/<symbol>-<month>.jsonl.

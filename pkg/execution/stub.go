@@ -665,6 +665,21 @@ func (s *Stub) OnTick(tick models.Tick) {
 	}
 }
 
+// journalTS renders a close-event timestamp from the exchange exit time. The
+// close event's ts is the exit-fill time — price data — so it must carry the
+// tick's exchange timestamp, mirroring the open event (which uses sig.Timestamp),
+// per the "Exchange timestamps only — time.Now() is never used for price data"
+// invariant. exitTime is always a real tick time in the live (journal-writing)
+// path, including the Summary force-close (LastTime) and deferred-win
+// (deferredWinMinute) paths. The time.Now() fallback covers only the degenerate
+// case of a zero exitTime (no tick ever applied) and preserves prior behavior there.
+func journalTS(exitTime time.Time) string {
+	if exitTime.IsZero() {
+		return time.Now().UTC().Format(time.RFC3339)
+	}
+	return exitTime.UTC().Format(time.RFC3339)
+}
+
 // recordPartialClose emits a tradeResult for a partial close at midFrac of the original
 // position size. Position remains open with reduced RemainingFrac. Used by B2 multi-level TP.
 func (s *Stub) recordPartialClose(exitPrice float64, exitTime time.Time, frac float64) {
@@ -735,7 +750,7 @@ func (s *Stub) recordPartialClose(exitPrice float64, exitTime time.Time, frac fl
 	s.appendJournal(journalEntry{
 		Event:      "close",
 		Symbol:     s.Symbol,
-		TS:         time.Now().UTC().Format(time.RFC3339),
+		TS:         journalTS(exitTime),
 		Side:       sig.Side.String(),
 		Entry:      sig.EntryPrice,
 		Exit:       exitPrice,
@@ -852,7 +867,7 @@ func (s *Stub) closePosition(exitPrice float64, exitTime time.Time, won bool) {
 	s.appendJournal(journalEntry{
 		Event:      "close",
 		Symbol:     s.Symbol,
-		TS:         time.Now().UTC().Format(time.RFC3339),
+		TS:         journalTS(exitTime),
 		Side:       sig.Side.String(),
 		Entry:      sig.EntryPrice,
 		Exit:       exitPrice,
