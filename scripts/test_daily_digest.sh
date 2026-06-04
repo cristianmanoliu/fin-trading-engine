@@ -116,13 +116,21 @@ assert_contains "T1 LIVE header" "$out" "LIVE"
 assert_contains "T1 3 trades"    "$out" "Trades: 3"
 assert_contains "T1 WR 33.3%"    "$out" "33.3%"
 assert_contains "T1 PnL +4000"   "$out" "+4000"
+# Post-tax realized: 16% on +4000 gain → 4000 - 640 = +3360
+assert_contains "T1 live post-tax +3360" "$out" "Post-tax: Realized \$+3360"
+assert_contains "T1 post-tax label"      "$out" "(est, 16% on gains)"
 assert_contains "T1 open SHORT"  "$out" "SHORT"
 assert_contains "T1 ETHUSDT"     "$out" "ETHUSDT"
 
 # Shadow alt5-15-336 → ALT5 15 336 (uppercase + dash→space)
 assert_contains "T1 ALT5 15 336 header" "$out" "ALT5 15 336"
-assert_contains "T1 shadow 2 trades"    "$out" "2 trades"
+# Shadow block renders "Trades N  WR X%  Open Y" (compact per-algo format
+# since cfe7982). Was "2 trades" pre-reshape — stale assertion only caught
+# on Linux/CI bash (macOS skips this suite at bash<4), reddening CI silently.
+assert_contains "T1 shadow trades count"    "$out" "Trades 2"
 assert_contains "T1 shadow +8000"       "$out" "+8000"
+# Shadow post-tax realized: 16% on +8000 → 8000 - 1280 = +6720
+assert_contains "T1 shadow post-tax +6720" "$out" "Post-tax: Realized \$+6720"
 
 # BB20 shadow — empty directory → no trades yet
 assert_contains "T1 BB20 header"     "$out" "BB20"

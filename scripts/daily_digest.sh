@@ -208,6 +208,27 @@ compute_unreal_usd() {
     }'
 }
 
+# ── Post-tax realized PnL (RO crypto income tax, illustrative) ───────────────
+# Romanian tax on virtual-currency transfer gains: 16% (Law 141/2025, gains
+# from 2026 onward; 2025 gains were 10%) applied to the POSITIVE annual net
+# realized gain. Tax is on realized gains only — unrealized open-position MTM
+# is never a taxable event — and is floored at 0 (a net-loss year owes no
+# income tax). Crucially this is an ESTIMATE: paper trading incurs no real tax,
+# perpetual-futures-vs-spot characterization is still unconfirmed, intra-year
+# loss-offset is modeled but cross-year carry-forward is contested (EY: not
+# carryforward-able). CASS (capped health contribution) is NOT included. Do not
+# wire this into any go/no-go or drift path — kill criteria use PRE-TAX PnL.
+# Returns formatted "+NNN" post-tax realized; equals input when input ≤ 0.
+TAX_RATE="${TAX_RATE:-0.16}"
+compute_post_tax_realized() {
+    local realized="$1"
+    awk -v r="$realized" -v rate="$TAX_RATE" '
+    BEGIN {
+        tax = (r > 0) ? r * rate : 0
+        printf "%+.0f", r - tax
+    }'
+}
+
 # ── Determine if we should fetch prices ─────────────────────────────────────
 do_fetch="0"
 if [[ "$DRY_RUN" != "1" ]] || [[ "$FETCH_PRICES" == "1" ]]; then
@@ -383,6 +404,10 @@ fi
 live_unreal_int=$(awk -v u="$live_unreal_total" 'BEGIN{printf "%+.0f", u}')
 live_net_int=$(awk -v r="$live_pnl" -v u="$live_unreal_total" 'BEGIN{printf "%+.0f", r+u}')
 MSG+=$'\n'"  Realized: \$${live_pnl_int}  Unrealized: \$${live_unreal_int}  Net: \$${live_net_int}"
+# Post-tax (RO 16% on positive realized only; estimate, see compute_post_tax_realized)
+live_post_tax_realized=$(compute_post_tax_realized "$live_pnl")
+live_after_tax_net=$(awk -v r="$live_post_tax_realized" -v u="$live_unreal_total" 'BEGIN{printf "%+.0f", r+u}')
+MSG+=$'\n'"  Post-tax: Realized \$${live_post_tax_realized}  Net \$${live_after_tax_net}  (est, 16% on gains)"
 
 # New trades since yesterday (narrative)
 if [[ -n "$live_new_trades" ]] && [[ -n "$YESTERDAY" ]]; then
@@ -504,6 +529,9 @@ if [[ -d "$shadow_base" ]]; then
         MSG+=$'\n'"  ELI5: ${s_eli5}"
         MSG+=$'\n'"  Trades ${s_trades}  WR ${s_wr}  Open ${s_open_count}"
         MSG+=$'\n'"  Realized \$${s_pnl_int}  Unrealized \$${s_unreal_int}  Net \$${s_net_int}"
+        s_post_tax_realized=$(compute_post_tax_realized "$s_pnl")
+        s_after_tax_net=$(awk -v r="$s_post_tax_realized" -v u="$s_unreal_total" 'BEGIN{printf "%+.0f", r+u}')
+        MSG+=$'\n'"  Post-tax: Realized \$${s_post_tax_realized}  Net \$${s_after_tax_net}  (est, 16% on gains)"
 
         # Build JSON for snapshot (additive: add unreal field)
         shadow_json_parts="${shadow_json_parts}\"${label_name}\":{\"trades\":${s_trades},\"pnl\":${s_pnl},\"wins\":${s_wins},\"unreal\":${s_unreal_total}},"
