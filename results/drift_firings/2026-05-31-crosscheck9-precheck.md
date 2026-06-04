@@ -306,3 +306,79 @@ disposition.
 
 Tests: `python3 -m unittest scripts.test_crosscheck9_losers_mae` (9 tests, incl.
 subdir-leak guard + FLIP-trigger guards).
+
+---
+
+## Update — 2026-06-04 (n=44 closed) — 06-07 PRE-CONFIRMATION (4th reading)
+
+Operator-requested re-run (`run cross-check 9`). Drift history UNCHANGED since
+2026-05-31 (4 fires, anchor 2026-05-27, latest 2026-05-31T06:07:36Z). **Post-06-03
+weekly cadence run still has NOT landed** — exit-4 7d-pair remains pending as
+predicted. Conditions 1 & 3 via committed `scripts/crosscheck9_losers_mae.py`
+(read-only, exit 0); Condition 2 via single-batch `fapi.binance.com/fapi/v1/ticker/price`.
+Wrapper `run_drift_check.sh` NOT invoked; `drift_check_history.jsonl` NOT mutated.
+
+### Condition 1 — `mae_r` flat ✓ PASS (unchanged, 4th identical reading)
+
+```
+mae_r losers: n=38  min=1.0000  max=1.0710  mean=1.0104  p50=1.0050
+>1.071 (prior max): 0 trades
+>1.10 (edge-death threshold): 0 trades
+```
+
+**Byte-identical to 05-31 / 06-01 / 06-02.** n=38, max=1.0710, mean=1.0104 — zero
+loser deepening across four readings spanning 4 days. No new losers since June 1
+(all June closes were wins). Backtest p90=1.03, p99=1.19; live max still below p90.
+
+### Condition 2 — Open positions favorable ✓ PASS (STRONGEST reading — 3/3)
+
+3 open SHORT (was 6 on 06-02; KAVA/ADA/SHIB booked TARGET in June, ROSE still open).
+Live Binance USDT-M marks 2026-06-04 ~18:51 UTC:
+
+| Symbol    | Entry    | Current  | Target   | Stop     | %→target | Status |
+|---|---|---|---|---|---|---|
+| 1INCHUSDT | 0.085000 | 0.076200 | 0.068274 | 0.087788 | 52.6% | ✓ favorable |
+| IMXUSDT   | 0.158400 | 0.145800 | 0.117810 | 0.165165 | 31.0% | ✓ favorable (flipped fav since 06-02) |
+| ROSEUSDT  | 0.010270 | 0.007590 | 0.004803 | 0.011181 | 49.0% | ✓ favorable |
+
+**3/3 favorable (was 5/6 on 06-02).** IMX — the sole adverse position on 06-02 —
+has flipped to 31% toward target. No position near its stop. All three are
+winners-in-progress.
+
+### Condition 3 — `n_closed_winners < ~15` ✓ PASS
+
+```
+outcome breakdown: 38 STOP, 6 TARGET
+n_closed_winners: 6
+```
+
+6 winners vs the ~15 threshold (was 3 on 06-02). **Three new winners since 06-02,
+all booked at full ~6:1 in the June regime flip:** DOTUSDT +$5,944 (06-02),
+KAVAUSDT +$6,008 (06-04), ADAUSDT +$5,977 (06-04), 1000SHIBUSDT +$5,866 (06-04).
+The censoring thesis realized again: positions flagged favorable-in-progress in the
+06-02 doc (SHIB, KAVA) matured to the 6:1 exit. June live: 7T 4W/3L, WR 57%,
++$20,531 — the regime that produced the May censoring has turned.
+
+### 06-04 Verdict
+
+**ALL THREE CONDITIONS PASS → CENSORING-BENIGN → HOLD.**
+
+Strongest reading in the series: mae_r still pinned (4 identical readings), opens
+now 3/3 favorable, winner count doubled 3→6 with three fresh 6:1 books. No
+edge-death signal anywhere. The censoring blind-spot interpretation is now
+corroborated by the regime flip — what looked like edge-death in May was winner
+truncation; June booked the suppressed winners.
+
+### 06-07 disposition (UNCHANGED — mechanical when launchd fires Sunday exit-4)
+
+1. **DO NOT honor the kill.** Auto-kill candidate ≠ auto-kill. Operator-in-loop.
+2. `bash scripts/journal_fetch.sh root@178.105.24.230` → `python3 scripts/crosscheck9_losers_mae.py`
+   (Conditions 1 & 3) + single-batch `fapi.binance.com/fapi/v1/ticker/price` (Condition 2).
+   **Never** the wrapper `run_drift_check.sh` (appends history → manufactures the 7d pair).
+3. Flip-to-edge-death triggers (else HOLD): losers mae_r new max > 1.10–1.15 OR
+   mean > 1.05; OR open positions en-masse hitting stops with adverse excursion.
+4. Append a 06-07 section; record HOLD if conditions hold.
+
+Four consecutive readings (05-31, 06-01, 06-02, 06-04) all CENSORING-BENIGN, mae_r
+pinned at 1.071 max. The 06-07 exit-4 resolves to HOLD barring a structural break
+in the next ~3 days.
