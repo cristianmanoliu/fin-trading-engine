@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // TestSignalContextWriter_AppendsAndRotates verifies the writer:
@@ -103,7 +104,13 @@ func TestSignalContextWriter_WriteFailureClearsHandleForRetry(t *testing.T) {
 		t.Fatalf("setup close: %v", cerr)
 	}
 	w.file = closedFile
-	w.month = "2026-05" // matches what time.Now() Format produces today
+	// MUST equal the month Write() derives from time.Now() so the
+	// month-rollover branch does NOT fire — otherwise Write reopens a fresh
+	// handle, the planted dead fd is never used, and the write-failure path
+	// under test never runs. Hardcoding a literal month (e.g. "2026-05") made
+	// this a time-bomb: it passed only during that calendar month and reddened
+	// CI on the next month's UTC rollover (broke 2026-06-01). Derive it live.
+	w.month = time.Now().UTC().Format("2006-01")
 
 	// First Write — internal Write call on the closed handle fails.
 	w.Write(SignalContext{

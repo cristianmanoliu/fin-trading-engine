@@ -72,6 +72,14 @@ jobs:
           # decision-grade scripts. Project tests against 3.14 locally.
           python-version: '3.11'
 
+      - name: Install Python test dependencies
+        run: |
+          # The stats scripts (drift detector, overfit/PBO, binomial monitor)
+          # import numpy + scipy; without this step the loop below dies at the
+          # first import with ModuleNotFoundError (reddened CI from 2026-06).
+          python3 -m pip install --quiet --upgrade pip
+          python3 -m pip install --quiet -r requirements-dev.txt
+
       - name: Run unittest test files
         run: |
           # Each test_*.py is a self-contained unittest.main() entry.

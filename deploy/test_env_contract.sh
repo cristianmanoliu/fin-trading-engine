@@ -13,7 +13,7 @@
 #
 # Run: bash deploy/test_env_contract.sh   (exit 0 = contract holds, 1 = violated)
 set -uo pipefail
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/.." || exit 1
 FAIL=0
 pass() { echo "  ok   $*"; }
 fail() { echo "  FAIL $*"; FAIL=$((FAIL + 1)); }
@@ -41,6 +41,7 @@ done
 # 3. functional: plain env + set -a actually exports to a child process.
 tmp=$(mktemp)
 printf 'X_CONTRACT_TOK=abc\n' > "$tmp"
+# shellcheck source=/dev/null  # sourcing a runtime mktemp path is the point of this test
 got=$(set -a; . "$tmp"; set +a; bash -c 'printf "%s" "${X_CONTRACT_TOK:-}"')
 rm -f "$tmp"
 if [[ "$got" == "abc" ]]; then

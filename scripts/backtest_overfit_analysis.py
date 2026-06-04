@@ -6,7 +6,6 @@ Usage:   backtest_overfit_analysis.py <matrix_csv> [--live-col LIVE] [--S 16]
 """
 import argparse
 import csv
-import sys
 from collections import Counter
 from itertools import combinations
 

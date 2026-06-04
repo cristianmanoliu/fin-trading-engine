@@ -1,5 +1,4 @@
 import numpy as np
-import pytest
 from backtest_overfit_analysis import cscv_pbo, deflated_sharpe, sharpe
 
 

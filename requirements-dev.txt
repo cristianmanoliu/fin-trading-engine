@@ -1,0 +1,8 @@
+# Python dev/test dependencies for scripts/test_*.py (CI: .github/workflows/test.yml).
+# The decision-grade analysis scripts (drift detector, overfit/PBO analysis,
+# binomial monitor, bootstrap CI) import numpy + scipy; without these the CI
+# python-tests job dies at the first import with ModuleNotFoundError. Unpinned
+# (latest) is acceptable here — these are test-only stats libs, not shipped in
+# any engine binary (the Go engine has zero Python runtime dependency).
+numpy
+scipy
