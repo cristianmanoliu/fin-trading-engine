@@ -64,3 +64,7 @@ resume-claude.sh
 docs/superpowers/
 results/signal_context_cache/
 results/journal_cache/
+
+# regime-gate harness outputs (regenerable data artifacts)
+tasks/regime_gate_results/
+data/anchor/
