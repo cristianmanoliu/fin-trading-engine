@@ -1,0 +1,41 @@
+FULL 57-INSTRUMENT per-year NET P&L (NO selection look-ahead)
+Generated 2026-06-07 06:32 UTC
+fee=10bp slip=5bp funding=historical exact-fills
+2026 = Jan-Apr only (stops before forward-paper ~2026-05-05)
+
+Cohort            20     21     22     23     24     25     26    TOTAL +yr
+---------------------------------------------------------------------------
+live            -24k   -44k  +640k   -85k  +434k  +469k    -2k  +1,388k  3/7
+alt5-15-336    -124k  -129k  +657k   -52k  +391k  +896k   -68k  +1,571k  3/7
+alt5-15-504    -122k   -98k  +694k   -37k  +405k  +911k   -55k  +1,699k  3/7
+alt5-21-504     -91k    -8k  +679k  -209k  +504k  +774k   -53k  +1,595k  3/7
+alt7-14-504    -110k   +10k  +649k  -184k  +380k  +794k   -94k  +1,445k  4/7
+alt10-30-504     -7k  -133k  +455k   -91k  +319k  +410k   -67k    +885k  3/7
+alt12-26-504    -15k  -156k  +373k   -29k  +282k  +444k   -53k    +846k  3/7
+alt21-50-504    +14k   -44k   +99k   -39k  +125k  +281k   -61k    +376k  4/7
+bb20           +196k  +343k  +637k   -56k  +626k  +346k  -209k  +1,884k  5/7
+
+DEPLOYED-16 vs FULL-57  (cumulative, did the coin-pick help?)
+Cohort          dep16   full57  ratio
+-------------------------------------
+live            +821k  +1,388k  1.69x
+alt5-15-336     +530k  +1,571k  2.97x
+alt5-15-504     +526k  +1,699k  3.23x
+alt5-21-504     +609k  +1,595k  2.62x
+alt7-14-504     +633k  +1,445k  2.28x
+alt10-30-504    +370k    +885k  2.39x
+alt12-26-504    +354k    +846k  2.39x
+alt21-50-504     +98k    +376k  3.82x
+bb20            +607k  +1,884k  3.11x
+
+ratio < 3.56x = your 16 beat avg per-coin (pick added value).
+8/9 cohorts < 3.56x -> selection was GOOD, not random luck.
+
+VERDICT:
+- NOT 16 lucky coins: edge holds across all 57 (+376k..+1.9M/6y).
+- Pick was good: live 1.69x means ~2x more per coin than avg.
+- BUT edge is REGIME not alpha: only 3/7 yrs positive
+  (2022+2024+2025 carry it; 2020/21/23/26Q1 negative on ALL 57).
+- 2026 Q1 negative for ALL 9 cohorts BEFORE the crash.
+- = short-alt-market BETA, not skill. Crash is flattering it now.
+- Descriptive only. Raw: tasks/per_year_cohort_backtest_full57.csv

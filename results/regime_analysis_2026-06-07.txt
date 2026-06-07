@@ -1,0 +1,29 @@
+REGIME ANALYSIS: why the strategy wins/loses each year
+Generated 2026-06-07 06:40 UTC | full 57-instrument universe
+
+Yr     BTC%  Alt~% down% regime            live
+------------------------------------------------
+2020   +303   +61%   34% alt bull          -24k LOSS
+2021    +60 +1585%   14% ALT MANIA         -44k LOSS
+2022    -64   -75%  100% ALT BEAR/crash   +640k WIN 
+2023   +156  +170%   12% alt bull          -85k LOSS
+2024   +121   +31%   55% choppy-down      +434k WIN 
+2025     -6   -61%   91% ALT BEAR/crash   +469k WIN 
+2026    -13   -20%   91% ALT BEAR/crash     -2k LOSS
+
+Pearson r(%alts-down , profit) = +0.72  -> STRONG
+
+THE PATTERN (you called it):
+- This is NOT a strategy. It's a SHORT on the altcoin market.
+- More coins fall = more profit (r=+0.72).
+- WINS only in bear/crash yrs: 2022(-75%), 2025(-61%), 2024(choppy).
+- LOSES every alt BULL yr: 2020, 2021, 2023. + bleeding 2026.
+- CONSECUTIVE LOSSES: 2020+2021 back-to-back (-24k,-44k).
+- 2022 alone (+640k) carries the entire +1.4M lifetime total.
+  Strip 2022 -> 3 wins / 3-4 losses, no persistence.
+
+IMPLICATION for 'no consecutive negative years':
+- Every EMA/BB short variant tested = the SAME beta trade.
+- Crypto bull markets cluster + last 12+ mo (2020-21, 2023).
+- So this class STRUCTURALLY can't avoid multi-year drawdowns.
+- Current crash is flattering it, same as 2022/2025 did.

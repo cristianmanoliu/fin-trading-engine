@@ -1,0 +1,26 @@
+Per-year NET P&L by cohort — deployed-16 backtest
+Generated 2026-06-07 05:33 UTC
+fee=10bp slip=5bp funding=historical exact-fills
+2026 = Jan-Apr only (stops before forward-paper ~2026-05-05)
+
+Cohort            20     21     22     23     24     25     26    TOTAL    WR
+-----------------------------------------------------------------------------
+live            +11k   +69k  +365k   -54k  +216k  +193k   +22k    +821k 21.5%
+alt5-15-336     -45k    -9k  +290k   -69k  +106k  +241k   +17k    +530k 20.3%
+alt5-15-504     -54k    +3k  +307k   -80k   +90k  +240k   +19k    +526k 18.7%
+alt5-21-504     -24k   +36k  +353k   -86k  +164k  +170k    -3k    +609k 19.8%
+alt7-14-504     -42k    -2k  +373k   -79k  +148k  +221k   +14k    +633k 19.4%
+alt10-30-504    +15k    -6k  +150k   +14k  +148k  +134k   -86k    +370k 19.5%
+alt12-26-504     +8k   -48k  +137k   +44k  +147k  +145k   -80k    +354k 19.5%
+alt21-50-504     +8k    +2k   +32k   -28k   +43k   +77k   -35k     +98k 18.5%
+bb20            +69k  +134k  +232k   +44k  +104k  +127k  -103k    +607k 20.0%
+
+Notes:
+- live (9/21) wins cumulative (+821k) & fewest down-years (1).
+- 2022 dominates every cohort (shorts-only downtrend year).
+- 2026 Q1: slow EMAs + bb20 already deeply negative BEFORE crash
+  (alt10-30 -86k, alt12-26 -80k, bb20 -103k, alt21-50 -35k).
+- Crash-flattered forward-paper shadow gains contradict the 6y
+  record: shadows underperform live and decay into current regime.
+- Descriptive only, NOT an edge claim (deployed-16 has selection
+  look-ahead). Raw: tasks/per_year_cohort_backtest.csv
