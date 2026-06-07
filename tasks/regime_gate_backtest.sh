@@ -24,6 +24,9 @@ cd "$ROOT"
 if [[ "${1:-}" == "--worker" ]]; then
   shift
   sym="$1"; start_ms="$2"; end_ms="$3"; side="$4"; year="$5"; start_date="$6"; end_date="$7"
+  # RG_* env (WORKDIR/DATA_DIR/BASE_CFG/BINARY/FUNDING_DIR/BASE_FLAGS) MUST be
+  # exported by the parent invocation; `set -u` makes a missing one fail fast
+  # (helpful if you run --worker by hand for a one-off debug).
   merged="$(mktemp "$RG_WORKDIR/m.${sym}.XXXXXXXX")"
   found=0
   sy="${start_date:0:4}"; sm="${start_date:5:2}"
@@ -155,4 +158,15 @@ xargs -P "$JOBS" -L 1 bash "$SELF" --worker < "$JOBLIST" \
 cat "$ROWS" >> "$OUT"
 rm -f "$ROWS"
 
-echo "→ Wrote $OUT ($(($(wc -l < "$OUT")-1)) rows)" >&2
+# Guard against silent total failure. The 0-rows-from-N-jobs failure mode has
+# bitten twice (uppercase side-filter; export -f not importing) — each time
+# every worker exited 0 with no output, indistinguishable from a healthy run
+# under `|| true`. A combo SHOULD always produce rows (every regime has trading
+# symbols). 0 rows from >0 jobs = a real defect (bad flag / binary crash / jq
+# missing), not an empty regime — surface it loudly.
+RESULT_ROWS=$(( $(wc -l < "$OUT") - 1 ))
+JOB_COUNT=$(wc -l < "$JOBLIST")
+if [[ $JOB_COUNT -gt 0 && $RESULT_ROWS -eq 0 ]]; then
+  echo "WARN: 0 data rows from $JOB_COUNT jobs ($OUT) — check side-filter value, binary exit code, jq availability" >&2
+fi
+echo "→ Wrote $OUT ($RESULT_ROWS rows)" >&2
