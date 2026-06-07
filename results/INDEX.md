@@ -54,6 +54,9 @@ Backtest investigation set on 5y × 16-57 symbols. Pre-registered analyses estab
 - Cat X (Bybit cross-exchange): `cat_x_bybit_replication_decision_rule_2026-05-08.md` + `_verdict_*.md` (ROBUST)
 - Synthesis: `holy_grail_synthesis_2026-05-07.md` — strategy-class search summary
 
+#### Regime timing (entry-selection follow-up, 2026-06-07)
+- `btc_regime_gate_backtest_decision_rule_2026-06-07.md` — pre-reg for a BTC-anchored time-varying direction gate (SHORT/LONG/FLAT). Tests whether conditioning direction on a BTC momentum anchor beats hardcoded always-short OUT-OF-SAMPLE (walk-forward, full-57, live costs). Locked success criteria incl. "no consecutive losing years" + parameter-stability gate. Research-only; no live/shadow change in scope. Working copy: `docs/superpowers/specs/2026-06-07-btc-regime-gate-backtest-design.md`.
+
 #### Cost / fee modeling
 - `cost_stack_sensitivity_2026-05-07.md` — sensitivity at fee=6/8/10/12/15 bp
 - `slip_cliff_verdict_2026-05-07.md` — slippage cliff at ~81bp (kill criterion 25bp has substantial margin)
