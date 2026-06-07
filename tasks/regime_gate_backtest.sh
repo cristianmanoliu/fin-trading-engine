@@ -65,12 +65,12 @@ fi
 
 X="${1:?need X}"; Y="${2:?need Y}"; Z="${3:?need Z}"
 MODE="${MODE:-gate}"   # gate | baseline
-ANCHOR="$ROOT/data/anchor/BTCUSDT-1d.csv"
+ANCHOR="${ANCHOR:-$ROOT/data/anchor/BTCUSDT-1d.csv}"
 BINARY="$ROOT/bin/backtest"
 DATA_DIR="$ROOT/data"
 FUNDING_DIR="$ROOT/data/funding"
 BASE_CFG="$ROOT/configs/default.yaml"
-RESDIR="$ROOT/tasks/regime_gate_results"
+RESDIR="${RESDIR:-$ROOT/tasks/regime_gate_results}"
 mkdir -p "$RESDIR"
 
 tag="X${X}_Y${Y}_Z${Z}"; [[ "$MODE" == "baseline" ]] && tag="${tag}_baseline"

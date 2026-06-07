@@ -67,6 +67,7 @@ results/journal_cache/
 
 # regime-gate harness outputs (regenerable data artifacts)
 tasks/regime_gate_results/
+tasks/breadth_regime_gate_results/
 data/anchor/
 
 # per-session diagnostic script outputs (regenerable)
