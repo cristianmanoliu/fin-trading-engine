@@ -16,6 +16,7 @@ cd "$ROOT"
 OUTDIR="$ROOT/data/anchor"
 OUT="$OUTDIR/BTCUSDT-1d.csv"
 mkdir -p "$OUTDIR"
+trap 'rm -f "$OUT.raw"' EXIT
 
 # Collect BTC 1m CSVs (symlinks). `find` deref via cat works on symlinks.
 mapfile -t FILES < <(find "$ROOT/data" -maxdepth 1 -name 'BTCUSDT-1m-*.csv' | sort)
