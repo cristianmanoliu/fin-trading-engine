@@ -1,0 +1,35 @@
+SHORT vs LONG vs BOTH — live config (EMA9/21), full 57 universe
+Generated 2026-06-07 06:59 UTC
+fee=10bp slip=5bp funding=hist exact-fills | 2026=Jan-Apr only
+
+Yr      alt%  dn%     SHORT      LONG      BOTH
+----------------------------------------------------
+2020    +61%  34%      -24k L    +54k W    -26k L
+2021  +1585%  14%      -44k L   +171k W   +149k W
+2022    -75% 100%     +640k W   -353k L   +237k W
+2023   +170%  12%      -85k L    -56k L    -13k L
+2024    +31%  55%     +434k W    +38k W   +394k W
+2025    -61%  91%     +469k W   -506k L    -67k L
+2026    -20%  91%       -2k L   -253k L   -155k L
+----------------------------------------------------
+TOT                 +1,388k     -905k     +520k
++yr                      3/7        3/7        3/7
+
+VERDICT — NO entry skill, only direction:
+- SHORT & LONG are near-perfect MIRRORS:
+  2022 crash: SHORT +640k / LONG -353k
+  2021 mania: SHORT  -44k / LONG +171k
+  2020 bull:  SHORT  -24k / LONG  +54k
+- The EMA cross does NOT pick good trades. The only 'alpha'
+  is the --side-filter flag (= a directional bet).
+- BOTH-sides (let EMA choose dir) = the honest skill test:
+  +520k but only 3/7 yrs, loses 2023+2025+2026 (consecutive).
+  It even turns SHORT's best yrs (2025,2026) into LOSSES —
+  the indicator ADDS losing longs on dead-cat bounces.
+- 2023 loses in ALL 3 modes. No version has an answer for
+  a grind-up-with-chop year.
+
+CONCLUSION: no config of this class meets 'no consecutive
+losing years' — entry signal carries no win/lose info, only
+the market's multi-year direction does. It's beta, not alpha.
+Raw: tasks/side_filter_test.csv

@@ -382,3 +382,48 @@ truncation; June booked the suppressed winners.
 Four consecutive readings (05-31, 06-01, 06-02, 06-04) all CENSORING-BENIGN, mae_r
 pinned at 1.071 max. The 06-07 exit-4 resolves to HOLD barring a structural break
 in the next ~3 days.
+
+---
+
+### 06-07 reading — REAL CALL (launchd fired 2026-06-07T06:00:05Z, exit 1 DRIFT_FIRED)
+
+The scheduled weekly launchd drift detector fired this morning: exit 1 DRIFT_FIRED
+(★ DRIFT on `win_pnl`, single-test flags on `mfe_r`/`loss_pnl_abs`). This is the
+05-27 ↔ 06-07 firing pair (≥7 days apart) → the locked kill criterion #1 is
+satisfied, so the mechanical sibling checks (`kill_protocol_check`,
+`forward_paper_resolution`) both stamp **KILL**. Per the locked protocol, that is
+an **auto-kill _candidate_, not an auto-kill** — the cross-check 9 censoring gate
+overrides. Ran the disposition (read-only, NOT `run_drift_check.sh`):
+
+**Condition 1 — losers `mae_r` flat:** ✓ PASS
+```
+mae_r losers: n=38  min=1.0000  max=1.0710  mean=1.0104  p50=1.0050
+>1.071 (prior max): 0 trades   |   >1.10 (edge-death): 0 trades
+```
+mae_r still pinned at the 1.071 max (5th identical reading: 05-31, 06-01, 06-02,
+06-04, 06-07). No structural deepening — losers stop at exactly stop distance =
+censoring, not edge-death.
+
+**Condition 2 — open positions favorable:** ✓ PASS
+```
+IMXUSDT  SHORT  entry=0.15840  now=0.12740  stop=0.16517  R=+4.58  FAVORABLE
+```
+The single live open short is +4.58R toward target, nowhere near its stop. Live
+marks via single batched `fapi.binance.com/fapi/v1/ticker/price`.
+
+**Condition 3 — `n_closed_winners < ~15`:** ✓ PASS
+```
+outcome breakdown: 38 STOP, 8 TARGET   |   n_closed_winners=8 (<15)
+```
+Winner count rose 6→8 since 06-04 — two more suppressed winners matured to 6:1 in
+the June regime flip, exactly the censoring-recovery thesis. Still well under 15.
+
+### 06-07 Verdict
+
+**ALL THREE CONDITIONS PASS → CENSORING-BENIGN → HOLD.** Fifth consecutive
+HOLD-consistent reading. The market crash (06-05 finding) is the canonical
+censoring regime, which *reinforces* HOLD: favorable open/shadow P&L is BETA to a
+falling market, not edge. **The drift-detector kill is NOT honored.** No protocol
+change; no positions closed; forward-paper continues (n=46 < 63 power floor,
+29 < 60 day floor). Did NOT run `scripts/run_drift_check.sh` (would manufacture an
+additional 7d pair). Next scheduled launchd: ~2026-06-14.
