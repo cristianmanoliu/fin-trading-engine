@@ -56,6 +56,7 @@ Backtest investigation set on 5y × 16-57 symbols. Pre-registered analyses estab
 
 #### Regime timing (entry-selection follow-up, 2026-06-07)
 - `btc_regime_gate_backtest_decision_rule_2026-06-07.md` — pre-reg for a BTC-anchored time-varying direction gate (SHORT/LONG/FLAT). Tests whether conditioning direction on a BTC momentum anchor beats hardcoded always-short OUT-OF-SAMPLE (walk-forward, full-57, live costs). Locked success criteria incl. "no consecutive losing years" + parameter-stability gate. Research-only; no live/shadow change in scope. Working copy: `docs/superpowers/specs/2026-06-07-btc-regime-gate-backtest-design.md`.
+- `btc_regime_gate_backtest_verdict_2026-06-07.md` — **POSITIVE** (all 3 criteria). Walk-forward OOS gate +$700k vs always-short baseline −$77k; all 4 folds independently picked the SAME (X=5,Y=30,Z=30) — anti-overfit signature; top-6-by-fit combos all positive OOS (plateau, not spike). Edge is 2023-concentrated ("don't be short in the alt-bull"). Confirms direction-on-regime carries OOS signal where per-trade entry does not. Caveats: 2023-dependent, episode-length confound, gross-of-switching-cost, BTC-proxy-for-breadth. **NOT a promotion trigger** — earns a separate productionization discussion (alt-breadth anchor next; then Approach B → shadow). Forward-paper/drift protocol untouched.
 
 #### Cost / fee modeling
 - `cost_stack_sensitivity_2026-05-07.md` — sensitivity at fee=6/8/10/12/15 bp
