@@ -124,6 +124,9 @@ echo "symbol,year,label,net_pnl,trades,wins" > "$OUT"
 
 BASE_FLAGS="--signal-tf 4H --fee-bps 10 --stop-slippage-bps 5 \
             --exact-fills --include-boundary --max-hold-hours 504"
+# Shadow override: append extra flags (e.g. --ema-fast-period 5 --ema-slow-period 15).
+# Duplicate flags → last value wins (Go flag package). Allows max-hold-hours override too.
+[[ -n "${EXTRA_BASE_FLAGS:-}" ]] && BASE_FLAGS="$BASE_FLAGS $EXTRA_BASE_FLAGS"
 
 # Config passed to worker re-invocations via env (RG_* namespace).
 export RG_WORKDIR="$WORKDIR" RG_DATA_DIR="$DATA_DIR" RG_BASE_CFG="$BASE_CFG" \
