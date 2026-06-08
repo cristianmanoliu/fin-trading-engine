@@ -90,7 +90,14 @@ def main(argv=None):
     base_total = sum(b for _, _, b in oos_seq)
     gate_years = [g for _, g, _ in oos_seq]
 
-    crit1 = gate_total > base_total
+    # Crit 1 requires a MEANINGFUL margin, not floating-point dust. Degenerate
+    # cohorts (gate==baseline to the cent — the FLAT carve-outs never separate
+    # from always-short) produce identical sums that differ only by FP summation-
+    # order noise (~1e-11); a raw `>` flips True/False on that noise, yielding
+    # inconsistent POSITIVE/NEGATIVE verdicts for economically-identical results
+    # (alt10-30-504 false-POSITIVE bug, 2026-06-08). Require >= $1 of OOS edge.
+    CRIT1_MIN_EDGE_USD = 1.0
+    crit1 = (gate_total - base_total) >= CRIT1_MIN_EDGE_USD
     crit2 = no_consecutive_losing(gate_years)
     distinct = set(picks)
     crit3 = len(distinct) <= 2 and len({p[0] for p in picks}) == 1
