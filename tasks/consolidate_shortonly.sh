@@ -111,14 +111,20 @@ while IFS='|' read -r cohort gate base delta verdict picks degen; do
 done <<< "$SORTED"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-# Write the verdict doc
+# Write the verdict doc.
+# NOTE: pass $SORTED via a temp FILE (argv[3]), not a here-string. A heredoc
+# (`<<'PYEOF'`) AND a here-string (`<<<`) on the same command both claim stdin;
+# bash keeps the LAST redirect, so the script body never reached python and the
+# data was executed as source → `NameError: name 'alt5' is not defined`
+# (cohort name parsed as code). Caught 2026-06-08.
 mkdir -p results
-python3 - "$OUTFILE" "$TODAY" <<'PYEOF' <<< "$SORTED"
+SORTED_FILE="$(mktemp)"; printf '%s\n' "$SORTED" > "$SORTED_FILE"
+python3 - "$OUTFILE" "$TODAY" "$SORTED_FILE" <<'PYEOF'
 import sys, datetime
 
 outfile = sys.argv[1]
 today   = sys.argv[2]
-rows_raw = sys.stdin.read().strip().split('\n')
+rows_raw = open(sys.argv[3]).read().strip().split('\n')
 
 rows = []
 for r in rows_raw:
@@ -205,3 +211,4 @@ with open(outfile, 'w') as fh:
     fh.write(doc)
 print(f"→ Wrote {outfile}")
 PYEOF
+rm -f "$SORTED_FILE"
