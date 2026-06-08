@@ -11,7 +11,7 @@
 # Research-only. No engine changes. No live/shadow/VPS interaction.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"; cd "$ROOT"
-RESDIR="$ROOT/tasks/regime_gate_results"; mkdir -p "$RESDIR"
+RESDIR="${RESDIR:-$ROOT/tasks/regime_gate_results}"; mkdir -p "$RESDIR"
 DRIVER="$ROOT/tasks/regime_gate_backtest.sh"
 
 export JOBS="${JOBS:-12}"
