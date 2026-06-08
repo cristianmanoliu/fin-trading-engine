@@ -28,8 +28,10 @@ if [[ "${1:-}" == "--worker" ]]; then
   jdir="$(mktemp -d "$RG_WORKDIR/bj.${sym}.XXXXXXXX")"
   "$RG_BINARY" --config "$cfg" $RG_BASE_FLAGS --side-filter short \
     --funding-csv-dir "$RG_FUNDING_DIR" --journal-dir "$jdir" >/dev/null 2>&1 || true
-  # Bucket close-event pnl_usd by close-year.
-  python3 - "$sym" "$jdir" <<'PY'
+  # Bucket close-event pnl_usd by close-year. Capture output so we can warn on
+  # an empty result (a backtest crash → empty journal → silent $0 baseline for
+  # this symbol, which would bias switch-vs-baseline; mirror the switch driver guard).
+  rows="$(python3 - "$sym" "$jdir" <<'PY'
 import sys, os, json, glob
 sym = sys.argv[1]; jdir = sys.argv[2]
 buckets = {}
@@ -46,7 +48,13 @@ for f in glob.glob(os.path.join(jdir, "*.jsonl")):
 for yr, pnl in sorted(buckets.items()):
     print(f"{sym},{yr},short,{pnl:.2f},0,0")
 PY
+)"
   rm -rf "$merged" "$cfg" "$jdir"
+  if [[ -z "$rows" ]]; then
+    echo "WARN: baseline: no close events for $sym (backtest crash or zero trades?) — symbol absent from baseline" >&2
+  else
+    printf '%s\n' "$rows"
+  fi
   exit 0
 fi
 
@@ -69,4 +77,12 @@ export RG_WORKDIR="$WORKDIR" RG_DATA_DIR="$DATA_DIR" RG_BASE_CFG="$BASE_CFG" \
 BASELINE_BODY="$RESDIR/_baseline_body.csv"
 printf '%s\n' "${SYMS[@]}" | xargs -P "$JOBS" -L 1 bash "$ROOT/tasks/regime_switch_baseline.sh" --worker \
   > "$BASELINE_BODY" || true
-echo "→ baseline rows: $(wc -l < "$BASELINE_BODY")" >&2
+BL_ROWS="$(wc -l < "$BASELINE_BODY")"
+echo "→ baseline rows: $BL_ROWS" >&2
+# Guard: an empty baseline (total backtest failure) must NOT be cached as valid.
+# Remove the empty file + fail loud so the panel runner re-runs it next time.
+if [[ "${BL_ROWS//[[:space:]]/}" -eq 0 ]]; then
+  rm -f "$BASELINE_BODY"
+  echo "ERROR: baseline produced 0 rows — removed empty $BASELINE_BODY (would poison the cache). Check binary/data/flags." >&2
+  exit 2
+fi
