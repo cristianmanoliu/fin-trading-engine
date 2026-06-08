@@ -101,13 +101,15 @@ def to_ms(d):
 rows = list(csv.reader(sys.stdin)); rows = rows[1:]  # drop header
 runs = []
 cur_label=None; cur_start=None; prev_date=None
+import os
+short_only = os.environ.get("SHORT_ONLY","") == "1"
 for d,label in rows:
     if label != cur_label:
-        if cur_label is not None and cur_label != "FLAT":
+        if cur_label is not None and cur_label != "FLAT" and not (short_only and cur_label == "LONG"):
             runs.append((cur_start, d, cur_label))
         cur_label=label; cur_start=d
     prev_date=d
-if cur_label is not None and cur_label != "FLAT":
+if cur_label is not None and cur_label != "FLAT" and not (short_only and cur_label == "LONG"):
     end = (datetime.datetime.strptime(prev_date,"%Y-%m-%d")+datetime.timedelta(days=1)).strftime("%Y-%m-%d")
     runs.append((cur_start, end, cur_label))
 w=csv.writer(sys.stdout)

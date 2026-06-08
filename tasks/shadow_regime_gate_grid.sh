@@ -20,7 +20,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"; cd "$ROOT"
 
 SHADOW="${1:?Usage: $0 <shadow_name>}"
-ANCHOR="${ANCHOR:-$ROOT/data/anchor/BREADTH-1d.csv}"
+ANCHOR="${ANCHOR:-$ROOT/data/anchor/BTCUSDT-1d.csv}"
 
 if [[ ! -f "$ANCHOR" ]]; then
   echo "ERROR: $ANCHOR missing — run tasks/breadth_anchor_build.sh first" >&2
@@ -51,6 +51,7 @@ RESDIR="$ROOT/tasks/shadow_regime_gate_results/$SHADOW"; mkdir -p "$RESDIR"
 DRIVER="$ROOT/tasks/regime_gate_backtest.sh"
 
 export JOBS="${JOBS:-12}"
+export SHORT_ONLY="${SHORT_ONLY:-1}"
 export ANCHOR RESDIR
 
 # Inject shadow-specific extra flags into the backtest invocations.
