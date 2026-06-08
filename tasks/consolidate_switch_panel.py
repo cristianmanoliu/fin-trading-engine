@@ -10,13 +10,23 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PANEL_DIR = os.path.join(ROOT, "tasks", "regime_switch_results")
+EXPECTED_COHORTS = 9
 
 
 def parse_summary(cohort, path):
-    txt = open(path).read()
+    with open(path) as f:
+        txt = f.read()
     m = re.search(
         r"IN_F:\s*(\w+)\s+FLIPPED:\s*(\w+)\s+REGRESSED:\s*(\w+)\s+CRIT3:\s*(\w+)",
         txt)
+    if m is None:
+        # summary.txt has no verdict line — likely an error dump from a failed
+        # walk_forward_xy run (the panel runner redirects stderr into summary.txt
+        # on failure). Skip this cohort with a warning rather than crashing the
+        # entire consolidation on m.group() AttributeError.
+        print(f"WARN: {cohort}: summary.txt has no IN_F verdict line (failed run?) — skipping",
+              file=sys.stderr)
+        return None
     return {
         "cohort": cohort,
         "in_F": m.group(1) == "True",
@@ -52,10 +62,15 @@ def main(argv=None):
     for d in sorted(glob.glob(os.path.join(PANEL_DIR, "*"))):
         st = os.path.join(d, "summary.txt")
         if os.path.isfile(st):
-            rows.append(parse_summary(os.path.basename(d), st))
+            parsed = parse_summary(os.path.basename(d), st)
+            if parsed is not None:
+                rows.append(parsed)
     if not rows:
         print("no cohort summaries found", file=sys.stderr)
         return 1
+    if len(rows) < EXPECTED_COHORTS:
+        print(f"WARN: only {len(rows)}/{EXPECTED_COHORTS} cohort verdicts parsed — "
+              f"partial panel; verdict below is over available cohorts only", file=sys.stderr)
     v = panel_verdict(rows)
     print(f"F (baseline-fail): {v['F_size']}  flipped(of F, crit3-ok): {v['flipped']}")
     print(f"flipped cohorts: {v['flipped_cohorts']}")
