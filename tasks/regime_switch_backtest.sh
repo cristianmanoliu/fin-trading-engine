@@ -55,7 +55,15 @@ fi
 
 X="${1:?need X}"; Y="${2:?need Y}"
 DWELL="${DWELL:-3}"
-MODE="${MODE:-switch}"   # switch | baseline
+MODE="${MODE:-switch}"   # switch only — see guard below
+# MODE=baseline is DEGENERATE in this driver: it would reuse the SAME dwell-aware
+# SHORT episodes + side=short as MODE=switch → byte-identical output → a
+# switch==baseline comparison (the exact degenerate trap this test avoids). The
+# correct always-short baseline is a SEPARATE continuous run: regime_switch_baseline.sh.
+if [[ "$MODE" == "baseline" ]]; then
+  echo "ERROR: MODE=baseline is not valid in regime_switch_backtest.sh (would be degenerate — identical episodes + side=short as switch). Use tasks/regime_switch_baseline.sh for the continuous always-short baseline." >&2
+  exit 2
+fi
 ANCHOR="${ANCHOR:-$ROOT/data/anchor/BTCUSDT-1d.csv}"
 BINARY="$ROOT/bin/backtest"
 DATA_DIR="$ROOT/data"
@@ -64,7 +72,7 @@ BASE_CFG="$ROOT/configs/default.yaml"
 RESDIR="${RESDIR:-$ROOT/tasks/regime_switch_results}"
 mkdir -p "$RESDIR"
 
-tag="X${X}_Y${Y}"; [[ "$MODE" == "baseline" ]] && tag="${tag}_baseline"
+tag="X${X}_Y${Y}"   # MODE is always switch here (baseline refused above)
 OUT="$RESDIR/episodes_${tag}.csv"
 
 echo "→ Building binary..." >&2
@@ -81,8 +89,11 @@ TIMELINE="$(mktemp)"
 # Z is irrelevant to SHORT labeling but regime_label.py requires it; pass --z 9999
 # so LONG never fires (we collapse LONG→OFF anyway, but this keeps the timeline
 # purely SHORT/FLAT and avoids wasted LONG runs).
+# --z 9999 makes LONG effectively impossible for a <9999-day anchor; the awk
+# filter is belt-and-suspenders so LONG can NEVER leak even if the anchor grows
+# (regime_switch_episodes.py treats LONG as OFF anyway, but keep the timeline clean).
 python3 "$ROOT/tasks/regime_label.py" --anchor "$ANCHOR" --x "$X" --y "$Y" --z 9999 \
-  > "$TIMELINE"
+  | awk -F, 'NR==1 || $2!="LONG"' > "$TIMELINE"
 python3 "$ROOT/tasks/regime_switch_episodes.py" --timeline "$TIMELINE" --dwell "$DWELL" \
   | python3 -c '
 import sys, csv, datetime
