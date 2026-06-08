@@ -34,8 +34,11 @@ for c in "${COHORTS[@]}"; do
   export RESDIR EXTRA_BASE_FLAGS="${FLAGS[$c]}"
   log "=== Cohort $c ==="
 
-  # 1) continuous baseline (once) → _baseline_body.csv
-  if ! rows_ok "$RESDIR/_baseline_body.csv"; then
+  # 1) continuous baseline (once) → _baseline_body.csv. The body is HEADERLESS
+  # (raw sym,year,short,pnl rows) and regime_switch_baseline.sh self-removes it +
+  # exits 2 on zero rows — so plain `-s` (non-empty) is the right guard here, NOT
+  # rows_ok (a headerless body's first line is real data, not a header to skip).
+  if [[ ! -s "$RESDIR/_baseline_body.csv" ]]; then
     bash tasks/regime_switch_baseline.sh
   fi
 
