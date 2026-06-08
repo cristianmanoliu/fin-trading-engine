@@ -39,3 +39,14 @@ def test_trailing_short_run_closed_at_series_end():
 def test_no_short_days():
     rows = L("FLAT", "LONG", "FLAT")
     assert short_episodes(rows, dwell=3) == []
+
+def test_dwell_one_single_off_splits():
+    # dwell=1: every single OFF day ends the episode (boundary of off_len >= dwell).
+    rows = L("SHORT", "FLAT", "SHORT")
+    assert short_episodes(rows, dwell=1) == [("2020-01-01", "2020-01-02"), ("2020-01-03", "2020-01-04")]
+
+def test_trailing_absorbed_gap_then_series_end():
+    # Episode ends via series-end (else: branch) but the final days were an
+    # absorbed sub-dwell OFF gap — exercises last_short_idx tracking, not j-1.
+    rows = L("SHORT", "FLAT", "SHORT", "FLAT", "FLAT")  # trailing gap [3,4] len 2 < dwell 3 → absorbed
+    assert short_episodes(rows, dwell=3) == [("2020-01-01", "2020-01-04")]

@@ -4,7 +4,9 @@
 # SHORT trading episodes. LONG and FLAT both = OFF (no long side). An OFF gap
 # shorter than `dwell` days is absorbed into the surrounding SHORT episode
 # (whipsaw guard); a SHORT episode ends only on a confirmed >=dwell-day OFF run,
-# at the FIRST day of that run (force-close fires there). Pure + causal:
+# at the FIRST day of that run. end-exclusive = that first OFF day's date, so the
+# backtest slice covers the last SHORT day in full and the force-close triggers at
+# its final tick (a 1-min difference from "first OFF day", immaterial). Pure + causal:
 # the dwell look-ahead is bounded and only used to decide whether an already-
 # observed OFF gap closes the episode — backtests still run forward inside the
 # slice, so no future price leaks into a trade decision.
@@ -70,9 +72,11 @@ def short_episodes(rows, dwell):
 
 def _load(path):
     with open(path, newline="") as f:
-        r = csv.reader(f)
-        rows = list(r)
-    return rows[1:] if rows and rows[0][0] == "date" else rows
+        rows = list(csv.reader(f))
+    if rows and rows[0][0] == "date":
+        rows = rows[1:]
+    # Be explicit about the two columns we consume (date,label); ignore any extras.
+    return [(r[0], r[1]) for r in rows if len(r) >= 2]
 
 
 def main(argv=None):
