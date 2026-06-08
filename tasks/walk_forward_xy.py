@@ -58,6 +58,12 @@ def crit3_stable(picks):
 
 def evaluate(resdir):
     annual_fn = lambda x, y: annual_pnls(resdir, x, y, baseline=False)
+    # Guard: an empty/misconfigured resdir yields all-zero sums → fit picks (5,7),
+    # gate_years=[0,0,0,0], and no_consecutive_losing([0,0,0,0]) is True → a SPURIOUS
+    # crit2 PASS with no data. If NO episodes_* CSV exists at all, fail loud.
+    if not any(os.path.exists(_path(resdir, x, y, b))
+               for (x, y) in GRID for b in (False, True)):
+        raise SystemExit(f"walk_forward_xy: no episodes_* CSVs in {resdir} — nothing to evaluate")
     picks, oos = [], []
     for fit_years, test_year in FOLDS:
         x, y = fit_best(annual_fn, fit_years, GRID)
@@ -89,6 +95,8 @@ def main(argv=None):
     args = ap.parse_args(argv)
     r = evaluate(args.resdir)
     st = os.path.join(args.resdir, "summary.txt")
+    # summary.txt only (no walk_forward.csv) — the panel consolidator parses the
+    # terminal IN_F/FLIPPED/REGRESSED/CRIT3 line from summary.txt.
     with open(st, "w") as f:
         f.write("BTC regime-SWITCH (full-stop) — walk-forward verdict\n")
         f.write("=" * 64 + "\n")
