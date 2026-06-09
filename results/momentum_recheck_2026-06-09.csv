@@ -1,0 +1,3 @@
+cell,role,signal_mode,W1_net,W2_net,W3_net,mean_net,wins,verdict,trades_total
+0,BASELINE,ema-9-21,+175021,+645812,+65044,295292,3,POSITIVE,5572
+1,MOMENTUM,momentum-5m,+82509,+592159,+882251,518973,3,POSITIVE,12639

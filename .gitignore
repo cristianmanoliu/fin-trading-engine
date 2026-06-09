@@ -3,6 +3,8 @@ data/*.csv
 
 # Build artifacts
 bin/
+/backtest
+/engine
 *.exe
 *.exe~
 *.dll

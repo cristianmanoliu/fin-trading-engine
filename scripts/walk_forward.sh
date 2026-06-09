@@ -38,6 +38,7 @@ FUNDING_FILTER_BPS="${FUNDING_FILTER_BPS:-0}"
 EMA_FAST="${EMA_FAST:-0}"  # 0 → backtest defaults to 9
 EMA_SLOW="${EMA_SLOW:-0}"  # 0 → backtest defaults to 21
 VWAP_DEV_PCT="${VWAP_DEV_PCT:-0}"  # 0 → VWAP fade disabled; e.g. 0.02 = 2% deviation
+MOMENTUM_MODE="${MOMENTUM_MODE:-0}" # 1 → enable 5m-momentum-candle strategy
 RSI_MODE="${RSI_MODE:-0}"          # 1 → enable RSI cross-50 strategy
 RSI_PERIOD="${RSI_PERIOD:-0}"      # 0 → defaults to 14
 PDH_PDL_MODE="${PDH_PDL_MODE:-0}"  # 1 → enable PDH/PDL break strategy
@@ -146,7 +147,7 @@ for win in "${WINDOWS[@]}"; do
     SLIP_BPS="$SLIP_BPS" FEE_BPS="$FEE_BPS" MAX_HOLD_HOURS="$MAX_HOLD_HOURS" \
     FUNDING_FILTER_BPS="$FUNDING_FILTER_BPS" \
     EMA_FAST="$EMA_FAST" EMA_SLOW="$EMA_SLOW" \
-    VWAP_DEV_PCT="$VWAP_DEV_PCT" \
+    VWAP_DEV_PCT="$VWAP_DEV_PCT" MOMENTUM_MODE="$MOMENTUM_MODE" \
     RSI_MODE="$RSI_MODE" RSI_PERIOD="$RSI_PERIOD" PDH_PDL_MODE="$PDH_PDL_MODE" \
     MACD_MODE="$MACD_MODE" MACD_FAST="$MACD_FAST" MACD_SLOW="$MACD_SLOW" MACD_SIGNAL="$MACD_SIGNAL" \
     BB_MODE="$BB_MODE" BB_PERIOD="$BB_PERIOD" BB_STD="$BB_STD" \

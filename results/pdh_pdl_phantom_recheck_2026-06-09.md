@@ -73,12 +73,21 @@ production cost model. PDH/PDL is not a candidate.
 
 ### Contamination detail (side-count, pre vs post binary, full 57-sym)
 
-A 3-symbol probe showed 0 LONG opens both pre- and post-fix, suggesting PDH/PDL's
-bias-gate (`checkPDHPDLBreakFixedRR` requires `bias.Allows(side)`) may have suppressed most
-phantom longs structurally — i.e. PDH/PDL may have been *less* contaminated than the other 7
-modes. A full 57-sym pre/post side-count (`tasks/pdh_sidecount.sh`) is the definitive check.
-**Either way the economic verdict is unchanged: REFUTED at −$127k.** (Whether the bug fired
-or not, the corrected number is decisively negative, so PDH/PDL is not a candidate.)
+Full 57-sym side-count (`tasks/pdh_sidecount.sh`, pre-binary `d1d0fae^` vs post):
+
+| Binary | LONG opens | SHORT opens |
+|---|---:|---:|
+| **PRE-FIX** | **16,624** | 15,889 |
+| **POST-FIX** | **0** | 18,405 |
+
+PDH/PDL was **heavily contaminated** — 16,624 phantom LONG opens under `--side-filter short`
+(more than RSI or MACD), ~51% of pre-fix trades. (An earlier 3-symbol probe coincidentally
+hit symbols with no bias=Long PDH break and showed 0/0 — the full universe is definitive.)
+The fix zeroes them. **And PDH/PDL is STILL REFUTED at −$127k after removing all 16k phantom
+longs** — the strongest possible refutation: even stripping a massive phantom-long inflation
+can't lift it above baseline, because the underlying short signal over-fires (18,405 shorts,
+3.3× baseline) with no edge. Contrast MACD/RSI, where stripping the phantom longs *revealed*
+a real short edge that beat baseline.
 
 ### Decision rule applied
 
