@@ -1,0 +1,75 @@
+========================================================================
+CANDIDATE CORRELATION ANALYSIS
+matrix: 64 months × 37 configs
+========================================================================
+
+Top 12 configs by 5y total NET:
+  vol_1.50           total=$     1,326,754   corr_vs_LIVE=+0.980
+  vol_2.00           total=$     1,281,508   corr_vs_LIVE=+0.993
+  LIVE               total=$     1,269,677   corr_vs_LIVE=+1.000
+  ema_4H_5_21        total=$     1,184,923   corr_vs_LIVE=+0.947
+  purgatory_4H       total=$     1,155,686   corr_vs_LIVE=+0.819
+  confl_13_34        total=$     1,153,763   corr_vs_LIVE=+0.799
+  side_both          total=$     1,080,599   corr_vs_LIVE=+0.479
+  confl_21_50        total=$     1,077,127   corr_vs_LIVE=+0.799
+  trail_3.0R         total=$     1,066,670   corr_vs_LIVE=+0.993
+  rsi_14             total=$     1,019,295   corr_vs_LIVE=+0.882
+  ema_4H_7_14        total=$     1,006,347   corr_vs_LIVE=+0.932
+  mltp_4R_half       total=$       986,058   corr_vs_LIVE=+0.992
+
+Correlation vs LIVE (all configs, sorted):
+  trail_3.0R         +0.993  <-- HIGH (same bet)
+  vol_2.00           +0.993  <-- HIGH (same bet)
+  mltp_4R_half       +0.992  <-- HIGH (same bet)
+  mltp_3R_third      +0.991  <-- HIGH (same bet)
+  mltp_3R_half       +0.986  <-- HIGH (same bet)
+  vol_1.50           +0.980  <-- HIGH (same bet)
+  mltp_3R_twothirds  +0.977  <-- HIGH (same bet)
+  mltp_2R_half       +0.975  <-- HIGH (same bet)
+  trail_2.0R         +0.973  <-- HIGH (same bet)
+  ema_4H_10_30       +0.961  <-- HIGH (same bet)
+  ema_4H_8_34        +0.956  <-- HIGH (same bet)
+  vol_1.20           +0.950  <-- HIGH (same bet)
+  ema_4H_5_21        +0.947  <-- HIGH (same bet)
+  ema_4H_12_26       +0.946  <-- HIGH (same bet)
+  trail_1.5R         +0.937  <-- HIGH (same bet)
+  ema_4H_7_14        +0.932  <-- HIGH (same bet)
+  vol_1.00           +0.885  <-- HIGH (same bet)
+  rsi_14             +0.882  <-- HIGH (same bet)
+  trail_1.0R         +0.876  <-- HIGH (same bet)
+  macd_12_26_9       +0.847  <-- HIGH (same bet)
+  ema_4H_21_50       +0.827  <-- HIGH (same bet)
+  purgatory_4H       +0.819  <-- HIGH (same bet)
+  confl_13_34        +0.799  <-- HIGH (same bet)
+  confl_21_50        +0.799  <-- HIGH (same bet)
+  confl_9_21         +0.767  <-- HIGH (same bet)
+  vol_0.80           +0.755  <-- HIGH (same bet)
+  confl_5_15         +0.717  <-- HIGH (same bet)
+  pdh_pdl            +0.676
+  trail_0.5R         +0.666
+  ema_1D_5_15        +0.580
+  momentum_5m        +0.569
+  side_both          +0.479
+  ema_1D_9_21        +0.464
+  ema_1D_7_28        +0.439
+  ema_1D_10_30       +0.383
+  side_long          -0.524  <-- low (diversifier?)
+
+Cross-correlation among top-6 performers:
+             vol_1.50 vol_2.00     LIVE ema_4H_5 purgator confl_13
+  vol_1.50       1.00     0.99     0.98     0.92     0.80     0.80
+  vol_2.00       0.99     1.00     0.99     0.94     0.81     0.79
+  LIVE           0.98     0.99     1.00     0.95     0.82     0.80
+  ema_4H_5_2     0.92     0.94     0.95     1.00     0.85     0.72
+  purgatory_     0.80     0.81     0.82     0.85     1.00     0.64
+  confl_13_3     0.80     0.79     0.80     0.72     0.64     1.00
+
+  mean pairwise corr (top-6, off-diagonal): +0.854
+  max: +0.993  min: +0.639
+
+Effective independent bets (participation ratio of 37×37 corr matrix):
+  PR ≈ 1.9  out of 37 configs
+  → 37 configs collapse to ~2 independent return streams.
+  VERDICT: low effective diversity — broad search yields correlated copies,
+           NOT independent bets. Deflated-Sharpe haircut dominates.
+========================================================================

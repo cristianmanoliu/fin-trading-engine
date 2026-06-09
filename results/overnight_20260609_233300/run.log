@@ -1,0 +1,56 @@
+[20:33:00] Overnight batch start. Output: results/overnight_20260609_233300
+
+================ JOB 1: expanded-37 overfit gate + correlation ================
+[20:33:06] JOB1 done. DSR=0.0010 PBO                         = 0.5302 PR ≈ 1.9 
+
+================ JOB 2: EMA fine-grid (fast × slow) 4H short ================
+[20:41:57] JOB2 done. best cell: 3,15,+40211,+818684,+684775,514557,3,9526
+
+================ JOB 3: multi-TF × side grid (EMA 9/21) ================
+tf=5m side=short: mean=-19657233 wins=0/3 trades=145331
+tf=5m side=both: mean=-40270948 wins=0/3 trades=262890
+tf=15m side=short: mean=0 wins=0/3 trades=0
+tf=15m side=both: mean=0 wins=0/3 trades=0
+tf=30m side=short: mean=-1646416 wins=0/3 trades=28263
+tf=30m side=both: mean=-4079559 wins=0/3 trades=48376
+tf=1H side=short: mean=-860930 wins=0/3 trades=18813
+tf=1H side=both: mean=-2077788 wins=0/3 trades=32410
+tf=2H side=short: mean=108080 wins=1/3 trades=10409
+tf=2H side=both: mean=-514023 wins=0/3 trades=18186
+tf=4H side=short: mean=295292 wins=3/3 trades=5572
+tf=4H side=both: mean=193809 wins=2/3 trades=9371
+tf=1D side=short: mean=42461 wins=2/3 trades=679
+tf=1D side=both: mean=86212 wins=3/3 trades=1361
+[20:47:41] JOB3 done. best cell: 4H,short,+175021,+645812,+65044,295292,3,5572
+
+================ JOB 4: target_rr × max_hold grid ================
+rr=2 mh=168: mean=104274 wins=2/3
+rr=2 mh=336: mean=100575 wins=2/3
+rr=2 mh=504: mean=102250 wins=2/3
+rr=2 mh=720: mean=98225 wins=2/3
+rr=3 mh=168: mean=135078 wins=2/3
+rr=3 mh=336: mean=138567 wins=2/3
+rr=3 mh=504: mean=145594 wins=2/3
+rr=3 mh=720: mean=135373 wins=2/3
+rr=4 mh=168: mean=167625 wins=2/3
+rr=4 mh=336: mean=182883 wins=2/3
+rr=4 mh=504: mean=200391 wins=2/3
+rr=4 mh=720: mean=174313 wins=2/3
+rr=6 mh=168: mean=250912 wins=2/3
+rr=6 mh=336: mean=273205 wins=3/3
+rr=6 mh=504: mean=295292 wins=3/3
+rr=6 mh=720: mean=254023 wins=3/3
+rr=8 mh=168: mean=304515 wins=2/3
+rr=8 mh=336: mean=328705 wins=2/3
+rr=8 mh=504: mean=371227 wins=2/3
+rr=8 mh=720: mean=299619 wins=2/3
+rr=10 mh=168: mean=311490 wins=2/3
+rr=10 mh=336: mean=324386 wins=2/3
+rr=10 mh=504: mean=356815 wins=2/3
+rr=10 mh=720: mean=292916 wins=2/3
+[20:58:46] JOB4 done. best cell: 8,504,+261533,+862077,-9929,371227,2,5404
+
+================ JOB 5: cross-sectional long-short (dollar-neutral) ================
+[20:59:54] JOB5 done.  lookback  hold  rebals    mean%  ann.Sharpe      cum% BEST: lookback=14d hold=1d  ann.Sharpe=1.49  cum=10825.0%  (2267 rebalances) 
+
+================ WRAP: commit + push ================

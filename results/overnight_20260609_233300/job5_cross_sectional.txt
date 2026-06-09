@@ -1,0 +1,25 @@
+========================================================================
+CROSS-SECTIONAL LONG-SHORT (dollar-neutral momentum) — offline screen
+========================================================================
+loading daily closes from raw 1m CSVs...
+panel: 57 symbols × 2312 days (18262 .. 20573 epoch-days)
+cost: 10.0bp/side turnover; quantile top/bottom 20%
+
+ lookback  hold  rebals    mean%  ann.Sharpe      cum%
+        7     1    2274    0.209        1.07    2059.8
+        7     3     758    0.691        1.22    3703.5
+        7     7     324    0.894        0.63     247.6
+       14     1    2267    0.262        1.49   10825.0
+       14     3     755    0.749        1.41    7794.0
+       14     7     323    1.113        0.87     838.0
+       30     1    2251    0.217        1.23    3658.2
+       30     3     750    0.554        1.03    1628.1
+       30     7     320    1.277        0.89    1202.9
+
+BEST: lookback=14d hold=1d  ann.Sharpe=1.49  cum=10825.0%  (2267 rebalances)
+
+VERDICT: cross-sectional L/S shows a POSITIVE, non-trivial-Sharpe stream.
+  This is structurally different from the directional short class —
+  WORTH a fresh pre-reg (build engine mode + walk-forward + overfit gate +
+  correlation-to-LIVE). The first session result that could justify search.
+========================================================================
