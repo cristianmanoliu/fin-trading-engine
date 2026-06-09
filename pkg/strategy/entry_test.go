@@ -334,6 +334,90 @@ func TestEMASideFilter_BlocksMatchingCross(t *testing.T) {
 	}
 }
 
+func TestBollingerSideFilter_BlocksLongBreakout(t *testing.T) {
+	// REGRESSION (2026-06-09): non-EMA entry modes did NOT apply cfg.SideFilter —
+	// only checkEMACrossover + checkFundingCross had the inline check. So a
+	// `--side-filter short` Bollinger run still emitted LONG signals on a bullish
+	// breakout (close > upper band). With a long target ABOVE entry, a rising price
+	// hit that target and booked a PHANTOM "short win" (bb20 bull-year artifact:
+	// ~$2.25M phantom profit 2020-2021). The fix enforces SideFilter centrally in
+	// Evaluate for ALL modes. This test locks it for the Bollinger path: a bullish
+	// breakout under SideFilter=Short must be blocked (no Long signal leaks).
+	d := NewEntryDetector(EntryConfig{
+		BollingerMode:    true,
+		BollingerPeriod:  20,
+		BollingerStdMult: 2.0,
+		TargetRR:         6.0,
+		StopBufferPct:    0.001,
+		SideFilter:       models.Short,
+	})
+
+	base := time.Date(2026, 5, 6, 0, 0, 0, 0, time.UTC)
+	// Prime the 20-period Bollinger with flat candles so the bands are tight.
+	for i := 0; i < 22; i++ {
+		d.AddCandle(models.Candle{
+			Symbol: "BTCUSDT", Open: 100, High: 100.2, Low: 99.8, Close: 100,
+			CloseTime: base.Add(time.Duration(i) * 5 * time.Minute),
+		})
+	}
+	bias := &BiasTracker{}
+	bias.Update(models.Candle{Open: 100, Close: 130}) // Long bias (allows long)
+
+	// A candle closing far ABOVE the upper band = bullish breakout → would emit
+	// LONG. SideFilter=Short must drop it.
+	d.AddCandle(models.Candle{
+		Symbol: "BTCUSDT", Open: 100, High: 121, Low: 99.8, Close: 120,
+		CloseTime: base.Add(23 * 5 * time.Minute),
+	})
+	sig := d.Evaluate(nil, 0, bias)
+
+	if sig != nil {
+		t.Errorf("expected SideFilter=Short to block Long Bollinger breakout, got %+v", sig)
+	}
+}
+
+func TestBollingerSideFilter_AllowsShortBreakdown(t *testing.T) {
+	// Companion to the block test: a BEARISH breakdown (close < lower band) under
+	// SideFilter=Short MUST still emit a valid Short (the filter blocks longs, not
+	// shorts). Guards against an over-broad fix that drops everything.
+	d := NewEntryDetector(EntryConfig{
+		BollingerMode:    true,
+		BollingerPeriod:  20,
+		BollingerStdMult: 2.0,
+		TargetRR:         6.0,
+		StopBufferPct:    0.001,
+		SideFilter:       models.Short,
+	})
+
+	base := time.Date(2026, 5, 6, 0, 0, 0, 0, time.UTC)
+	for i := 0; i < 22; i++ {
+		d.AddCandle(models.Candle{
+			Symbol: "BTCUSDT", Open: 100, High: 100.2, Low: 99.8, Close: 100,
+			CloseTime: base.Add(time.Duration(i) * 5 * time.Minute),
+		})
+	}
+	bias := &BiasTracker{}
+	bias.Update(models.Candle{Open: 100, Close: 70}) // Short bias (allows short)
+
+	// A candle closing far BELOW the lower band = bearish breakdown → Short.
+	d.AddCandle(models.Candle{
+		Symbol: "BTCUSDT", Open: 100, High: 100.2, Low: 79, Close: 80,
+		CloseTime: base.Add(23 * 5 * time.Minute),
+	})
+	sig := d.Evaluate(nil, 0, bias)
+
+	if sig == nil {
+		t.Fatal("expected a Short signal on bearish breakdown under SideFilter=Short, got nil")
+	}
+	if sig.Side != models.Short {
+		t.Errorf("expected Short, got %v", sig.Side)
+	}
+	if sig.TakeProfit >= sig.EntryPrice {
+		t.Errorf("short target must be BELOW entry, got target=%.2f entry=%.2f (the phantom-win bug)",
+			sig.TakeProfit, sig.EntryPrice)
+	}
+}
+
 func TestEMACrossoverWithFixedRR_TargetMatchesMultiplier(t *testing.T) {
 	// Verify that TargetRR=6.0 (production setting) produces 6× stop_dist target.
 	d := NewEntryDetector(EntryConfig{

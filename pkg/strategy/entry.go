@@ -324,7 +324,36 @@ func (e *EntryDetector) AddCandle(c models.Candle) {
 // Evaluate checks the current window and returns a Signal if a pattern is confirmed, nil otherwise.
 // In MomentumMode it ignores levels and VWAP, entering only on 5m momentum candles in 4H bias direction.
 // In VWAPDeviationMode it fades price stretched from VWAP; target is always VWAP.
+//
+// SideFilter is enforced CENTRALLY here for EVERY entry mode (see applySideFilter).
+// Historically only checkEMACrossover + checkFundingCross applied cfg.SideFilter
+// inline; the other 8 modes (Bollinger, RSI, MACD, Momentum, VWAP, PDH/PDL,
+// Absorption, Breakout) did NOT — so a `--side-filter short` run of those modes
+// still emitted LONG signals. With a long target ABOVE entry, a rising price hit
+// that target and booked a PHANTOM "short win" (bb20 bull-year artifact: ~$2.25M
+// of phantom profit over 2020-2021, flipping a −$1.69M loss into a fake +$559k —
+// see docs/findings/2026-06-09.md). The live EMA config was unaffected (it had the
+// inline filter). Centralizing the gate fixes all modes at the dispatch seam.
 func (e *EntryDetector) Evaluate(levels []float64, vwap float64, bias *BiasTracker) *models.Signal {
+	return e.applySideFilter(e.evaluateRaw(levels, vwap, bias))
+}
+
+// applySideFilter drops a signal whose side does not match cfg.SideFilter.
+// Neutral (zero value) = no filter. This is the single chokepoint for side
+// filtering across ALL entry modes — do not re-add per-method SideFilter checks.
+func (e *EntryDetector) applySideFilter(sig *models.Signal) *models.Signal {
+	if sig == nil {
+		return nil
+	}
+	if e.cfg.SideFilter != models.Neutral && sig.Side != e.cfg.SideFilter {
+		return nil
+	}
+	return sig
+}
+
+// evaluateRaw dispatches to the per-mode entry detector WITHOUT side filtering.
+// The caller (Evaluate) applies cfg.SideFilter centrally to the returned signal.
+func (e *EntryDetector) evaluateRaw(levels []float64, vwap float64, bias *BiasTracker) *models.Signal {
 	if len(e.window) < 1 {
 		return nil
 	}
