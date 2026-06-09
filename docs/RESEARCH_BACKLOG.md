@@ -4,13 +4,18 @@
 backtest that we never managed to test live?"* — i.e., is there a research backlog of
 promising-but-undeployed strategies waiting for an engine?
 
-**Answer (as of 2026-06-03): No. The strategy-class search is formally closed.** Every
-backtest finding that scored well is already on a live or shadow engine. Everything not
-on an engine was tested and rejected (or judged a trade-off, not added edge). This is the
-intended end-state, not a gap — `results/research_synthesis_2026-05-19.md` closes the
-strategy-class search. Forward-paper now carries the burden of proof; adding more
-candidates would only widen the multiple-testing haircut that already flagged the live
-edge FRAGILE (`results/backtest_overfit_pbo_dsr_verdict_2026-05-29.md`).
+**Answer (updated 2026-06-09): Effectively yes, but with a correction.** Every backtest
+finding that scored well is already on a live or shadow engine; everything else was tested
+and rejected or judged a trade-off. **Correction (2026-06-09):** the MACD/RSI "REJECT"
+verdicts were contaminated by the phantom-long bug (`d1d0fae`) and, re-run on the fixed
+binary, **flip to CANDIDATE** (MACD +18%, RSI +79% 3/3). So the search was not *validly*
+closed — two cells were mis-filed. **However, the closure conclusion still holds for a
+deeper reason:** on the clean overfit matrix the family still fails the multiple-testing
+haircut (DSR(34)=0.658 ≪ 0.95, PBO 0.52), and the strongest new candidate (RSI) shares the
+live config's crash-dependent / bull-year-bleeding regime profile rather than diversifying
+it. Adding candidates *widens* the haircut the live edge already fails. Forward-paper
+carries the burden of proof. See `results/alt_signals_phantom_corrected_verdict_2026-06-09.md`
+and `results/backtest_overfit_pbo_dsr_verdict_2026-05-29.md`.
 
 This ledger is a **navigation aid**, not a decision document. The data of record is the
 per-sweep verdict files in `results/`. It does not authorize any deployment, alter any
@@ -42,18 +47,28 @@ Everything below was a plausible "put it live" candidate at some point. Each was
 the **production cost model** (slip=5bp / fee=10bp / mh504 / funding=CSV) and resolved.
 None is an open candidate.
 
-### Alternative entry signals — REJECTED at production cost
-| Signal | Mean NET vs baseline | Walk-forward | Verdict | Doc |
+### Alternative entry signals — CANDIDATE post-phantom-fix (was contaminated REJECT)
+| Signal | Mean NET vs baseline (CORRECTED) | Walk-forward | Status | Doc |
 |---|---|---|---|---|
-| MACD 12/26/9 cross | **−78%** (+$64k) | 2/3 windows | **REJECT** | `results/alt_signals_retest_2026-05-19.md` |
-| RSI-14 cross-50 | **−36%** (+$188k) | 2/3 windows | **REJECT** | `results/alt_signals_retest_2026-05-19.md` |
+| MACD 12/26/9 cross | **+18%** (+$348k) | 2/3 windows | **CANDIDATE (pending fresh pre-reg)** | `results/alt_signals_phantom_corrected_verdict_2026-06-09.md` |
+| RSI-14 cross-50 | **+79%** (+$530k) | 3/3 windows | **CANDIDATE (pending fresh pre-reg)** | same |
 
-Re-tested specifically to check whether the lower cost model would flip their 2026-05-07
-REJECT. The sign flipped negative→positive (lower slip lifts everything) but the relative
-position held: both lose to baseline, neither clears the ≥10%-beat bar, neither is 3/3 so
-neither qualifies as a low-correlation diversifier. **The shadow harness only wires
-EMA-cross and Bollinger — adding MACD/RSI would require harness work to validate an
-inferior signal.** Not worth it.
+> ⚠️ **Corrected 2026-06-09.** The prior −78% / −36% REJECT numbers were produced on the
+> phantom-long-buggy binary (`d1d0fae` fix): MACD/RSI ignored `--side-filter short` and
+> booked LONG fills (~44% of RSI trades). On the fixed binary both **beat baseline** and
+> trip the locked "WALK-FORWARD CANDIDATE" rule (RSI also 3/3 → diversifier branch). They
+> are **no longer settled REJECTs** — they are candidates awaiting fresh pre-registration.
+>
+> **But this does NOT re-open deployment**, for two independent reasons proven the same day:
+> (1) on the clean overfit matrix (`overfit_returns_matrix_2026-06-09_postfix.csv`) the
+> family still fails — DSR(34)=0.658 ≪ 0.95, PBO 0.52; adding RSI/MACD only widens the
+> haircut the live config already fails. (2) RSI's edge, though broad across symbols (max
+> 7.9%), has the **same crash-dependent / bull-year-bleeding** regime profile as the live
+> class (2022 +49%, 2020-21 + 2023 negative) — it is not a diversifier, and the
+> regime-timing thread already proved that flaw is unfixable by overlay. The shadow harness
+> still only wires EMA-cross + Bollinger; promotion would require harness work + a fresh
+> pre-reg + an independent walk-forward/overfit pass on out-of-sample data. Deferred to the
+> next research window (post-2026-08-06 freeze), behind the pre-committed EMA-5/15 shadow.
 
 ### Exit-mechanism changes — TRADE-OFFS, not added edge (structurally untestable by current shadows)
 | Mechanism | Best cell | vs baseline | What it buys | Doc |

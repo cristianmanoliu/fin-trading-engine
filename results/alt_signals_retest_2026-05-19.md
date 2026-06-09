@@ -1,5 +1,17 @@
 # Alternative-signals re-test sweep — research pre-registration (2026-05-19, sweep #7)
 
+> ⚠️ **CONTAMINATED — SUPERSEDED 2026-06-09.** The Results section below (MACD −78%,
+> RSI −36%, the "alt signals fire 2× more often" finding, the W1-hostile claim) was
+> produced on a binary carrying the side-filter **phantom-long class bug** (fixed in
+> `d1d0fae`). Under `--side-filter short`, MACD/RSI modes silently emitted LONG fills
+> (~44% of RSI trades, verified). The REJECT verdict is **invalid**. Re-run on the fixed
+> binary **flips both to CANDIDATE**: MACD +18% (2/3), RSI +79% (3/3). The CSV
+> (`alt_signals_retest_2026-05-19.csv`) has been overwritten with corrected numbers; this
+> markdown body is left intact for the historical record. **Corrected verdict + full
+> verification: `results/alt_signals_phantom_corrected_verdict_2026-06-09.md`.** Note the
+> corrected candidates still fail the overfit gate (clean DSR(34)=0.658) and share the
+> live config's crash-dependence, so the flip does NOT authorize deployment.
+
 **Status:** LOCKED 2026-05-19 BEFORE sweep execution. Pure research. Distinct from today's prior 6 sweeps (which tested PERTURBATIONS of the LIVE strategy) — this sweep tests ALTERNATIVE SIGNAL MECHANISMS.
 
 ## Context

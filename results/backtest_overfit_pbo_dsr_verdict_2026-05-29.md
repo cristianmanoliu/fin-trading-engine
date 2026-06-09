@@ -1,5 +1,15 @@
 # Backtest-Overfitting Quantification — VERDICT
 
+> ℹ️ **Input-contamination note (2026-06-09) — verdict UNCHANGED (reinforced).** The matrix
+> below had 2 of 34 columns (`macd_12_26_9`, `rsi_14`) generated on the phantom-long-buggy
+> binary (fixed `d1d0fae`); the other 32 are EMA-signal variants and were clean (the `LIVE`
+> column is byte-identical, Sharpe 0.2273). Re-running on a clean matrix
+> (`overfit_returns_matrix_2026-06-09_postfix.csv`) moved the metrics the *wrong* way for the
+> strategy: PBO 0.47→**0.52**, DSR(34) 0.642→**0.658** (still ≪0.95), slope −0.87→−0.94, and
+> the contaminated `rsi_14` stopped being the modal IS-best config (phantom inflation
+> removed). **FRAGILE stands and is reinforced on clean data.** See
+> `results/alt_signals_phantom_corrected_verdict_2026-06-09.md` §3.
+
 **Status:** Mechanical application of the LOCKED decision rule
 (`results/backtest_overfit_pbo_dsr_decision_rule_2026-05-29.md`, commit `cd7e4e8` + pre-data
 amendments). No thresholds altered after seeing data.
