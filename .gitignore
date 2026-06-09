@@ -65,10 +65,12 @@ docs/superpowers/
 results/signal_context_cache/
 results/journal_cache/
 
-# regime-gate harness outputs (regenerable data artifacts)
+# regime-gate / regime-switch harness outputs (regenerable data artifacts)
 tasks/regime_gate_results/
+tasks/regime_gate_results_shortonly/
 tasks/breadth_regime_gate_results/
 tasks/shadow_regime_gate_results/
+tasks/regime_switch_results/
 data/anchor/
 
 # per-session diagnostic script outputs (regenerable)
