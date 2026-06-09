@@ -109,6 +109,19 @@ The only nominal EMA winner is on an engine. Its +34% could be real edge or a
 multi-comparison artifact (it carries 28% more trades = more cost surface) — forward-paper
 as a shadow is exactly how that gets resolved.
 
+### Externally-sourced strategies (Reddit / social) — REJECTED on perps
+| Strategy | Result | Doc |
+|---|---|---|
+| "Purgatory Method" (5/9 EMA cross gated by VWAP+EMA30; Reddit 0DTE, 4min) | **REJECT — fee-death** | `results/purgatory_recheck_2026-06-09.md` |
+
+The faithful version (5m, TF analog of the 4min source) loses **−$40M both-sides / −$22M
+short-only** (0/3 windows, 343k/213k trades) — Option-C fee-death at maximum. The only positive
+cell (4H short, +57%) is the confluence gate moved off the source TF and is the same
+crash-window short bet as RSI/Momentum/MACD (W3 +$556k vs live +$65k), non-diversifying, fails
+the overfit gate. The actual 0DTE-options version is unmodelable here (no Greeks engine).
+**Lesson: any fast-TF (≤5m) strategy on perps is presumptively fee-dead — screen it against the
+Option-C cost geometry before building anything.**
+
 ### Composite / funding / cross-exchange
 | Item | Verdict | Note | Doc |
 |---|---|---|---|

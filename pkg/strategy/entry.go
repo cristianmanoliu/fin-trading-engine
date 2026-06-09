@@ -48,6 +48,12 @@ type EntryDetector struct {
 	confluenceEMAFast *indicators.EMA
 	confluenceEMASlow *indicators.EMA
 
+	// Purgatory state (used only when PurgatoryMode=true). Reuses ema9/ema21 as
+	// the fast/slow cross pair (set to 5/9 via EMAFastPeriod/EMASlowPeriod); adds
+	// a same-TF EMA30 trend filter. Entry requires the EMA cross AND price on the
+	// same side of BOTH VWAP and EMA30. "Purgatory Method" recheck 2026-06-09.
+	purgatoryEMA30 *indicators.EMA
+
 	// E1 vol-regime state (used only when VolFilterMode=true). Rolling window of
 	// 4H log returns; realized vol annualized via sqrt(6×365). Updated every AddCandle.
 	// Used as a gating filter inside checkEMACrossover. Cat E1: 2026-05-07.
@@ -123,6 +129,16 @@ type EntryConfig struct {
 	ConfluenceFastPeriod int // 0 → defaults to 9 (1D EMA fast)
 	ConfluenceSlowPeriod int // 0 → defaults to 21 (1D EMA slow)
 
+	// PurgatoryMode: 5/9 EMA cross gated by price on the same side of BOTH the
+	// session VWAP and a same-TF EMA30 trend filter. Long when fast crosses above
+	// slow AND close > VWAP AND close > EMA30; mirror for short. Reuses ema9/ema21
+	// as the cross pair (set periods via EMAFastPeriod/EMASlowPeriod). Overrides
+	// EMA mode. "Purgatory Method" (Reddit 0DTE) entry-signal recheck on perps,
+	// 2026-06-09 — exit framework is the engine's fixed-RR/wick stop (the original
+	// 2-candle scalp exit is NOT modeled). Research-only.
+	PurgatoryMode        bool
+	PurgatoryEMA30Period int // 0 → defaults to 30
+
 	// VolFilterMode (E1): when true and EMAMode is active, gate signals by realized
 	// volatility regime. Skip entries when 30-day annualized realized vol exceeds
 	// MaxVolAnnualized. Computed on rolling 180 4H log returns × sqrt(6×365).
@@ -171,6 +187,24 @@ func NewEntryDetector(cfg EntryConfig) *EntryDetector {
 		}
 		d.ema9 = indicators.NewEMA(fast)
 		d.ema21 = indicators.NewEMA(slow)
+	}
+	if cfg.PurgatoryMode {
+		// Reuse ema9/ema21 as the fast/slow cross pair (defaults 5/9 for Purgatory).
+		fast := cfg.EMAFastPeriod
+		if fast <= 0 {
+			fast = 5
+		}
+		slow := cfg.EMASlowPeriod
+		if slow <= 0 {
+			slow = 9
+		}
+		d.ema9 = indicators.NewEMA(fast)
+		d.ema21 = indicators.NewEMA(slow)
+		ema30 := cfg.PurgatoryEMA30Period
+		if ema30 <= 0 {
+			ema30 = 30
+		}
+		d.purgatoryEMA30 = indicators.NewEMA(ema30)
 	}
 	// ATR is always constructed for signal-context observability even when the
 	// wick-based stop is in use (ATRStopMult==0). The ATR value is included in
@@ -258,6 +292,13 @@ func (e *EntryDetector) AddCandle(c models.Candle) {
 		e.prevEma21 = e.ema21.Value()
 		e.ema9.Update(c.Close)
 		e.ema21.Update(c.Close)
+	}
+	if e.cfg.PurgatoryMode {
+		e.prevEma9 = e.ema9.Value()
+		e.prevEma21 = e.ema21.Value()
+		e.ema9.Update(c.Close)
+		e.ema21.Update(c.Close)
+		e.purgatoryEMA30.Update(c.Close)
 	}
 	if e.atr != nil {
 		e.atr.Update(c)
@@ -359,6 +400,10 @@ func (e *EntryDetector) evaluateRaw(levels []float64, vwap float64, bias *BiasTr
 	}
 
 	last := e.window[len(e.window)-1]
+
+	if e.cfg.PurgatoryMode {
+		return e.checkPurgatory(last, vwap)
+	}
 
 	if e.cfg.MomentumMode {
 		return e.checkMomentum(last, bias)
@@ -556,6 +601,88 @@ func (e *EntryDetector) checkRSIBreakdown(last models.Candle, bias *BiasTracker)
 		Timestamp:  last.CloseTime,
 		Reason: fmt.Sprintf("rsi_cross_50 %s | prev=%.1f cur=%.1f | rr=%.1f",
 			side, e.prevRSI, cur, rr),
+	}
+}
+
+// checkPurgatory implements the "Purgatory Method" entry gate: a fast/slow EMA
+// cross (default 5/9, reusing ema9/ema21) confirmed by price being on the SAME
+// side of BOTH the session VWAP and a same-TF EMA30 trend filter.
+//
+//	long  : fast crosses ABOVE slow  AND close > VWAP AND close > EMA30
+//	short : fast crosses BELOW slow  AND close < VWAP AND close < EMA30
+//
+// Exit uses the engine's fixed-RR / wick-stop framework (the original Reddit
+// strategy's 2-candle scalp / "let puts close" exit is NOT modeled — this tests
+// the ENTRY signal's directional edge only). vwap == 0 means VWAP not wired and
+// the gate cannot pass (no signal). Research-only recheck 2026-06-09.
+func (e *EntryDetector) checkPurgatory(last models.Candle, vwap float64) *models.Signal {
+	if e.ema9 == nil || e.ema21 == nil || e.purgatoryEMA30 == nil {
+		return nil
+	}
+	if !e.ema9.Primed() || !e.ema21.Primed() || !e.purgatoryEMA30.Primed() {
+		return nil
+	}
+	if e.prevEma9 == 0 || e.prevEma21 == 0 {
+		return nil // need a previous state to detect a cross
+	}
+	if vwap == 0 {
+		return nil // VWAP not wired — gate cannot be evaluated
+	}
+
+	cur9 := e.ema9.Value()
+	cur21 := e.ema21.Value()
+	bullishCross := e.prevEma9 <= e.prevEma21 && cur9 > cur21
+	bearishCross := e.prevEma9 >= e.prevEma21 && cur9 < cur21
+	if !bullishCross && !bearishCross {
+		return nil
+	}
+
+	ema30 := e.purgatoryEMA30.Value()
+	var side models.Direction
+	if bullishCross {
+		// price must be ABOVE both VWAP and EMA30 to confirm the long
+		if !(last.Close > vwap && last.Close > ema30) {
+			return nil
+		}
+		side = models.Long
+	} else {
+		// price must be BELOW both VWAP and EMA30 to confirm the short
+		if !(last.Close < vwap && last.Close < ema30) {
+			return nil
+		}
+		side = models.Short
+	}
+
+	var stopLoss float64
+	if side == models.Long {
+		stopLoss = last.Low * (1 - e.cfg.StopBufferPct)
+	} else {
+		stopLoss = last.High * (1 + e.cfg.StopBufferPct)
+	}
+	risk := math.Abs(last.Close - stopLoss)
+	if risk == 0 {
+		return nil
+	}
+	rr := e.cfg.TargetRR
+	if rr <= 0 {
+		rr = 6.0
+	}
+	var takeProfit float64
+	if side == models.Long {
+		takeProfit = last.Close + risk*rr
+	} else {
+		takeProfit = last.Close - risk*rr
+	}
+
+	return &models.Signal{
+		Symbol:     last.Symbol,
+		Side:       side,
+		EntryPrice: last.Close,
+		StopLoss:   stopLoss,
+		TakeProfit: takeProfit,
+		Timestamp:  last.CloseTime,
+		Reason: fmt.Sprintf("purgatory %s | ema5=%.4f ema9=%.4f ema30=%.4f vwap=%.4f | rr=%.1f",
+			side, cur9, cur21, ema30, vwap, rr),
 	}
 }
 

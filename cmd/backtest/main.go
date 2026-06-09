@@ -40,6 +40,7 @@ func main() {
 	emaFastPeriod := flag.Int("ema-fast-period", 0, "fast EMA period for EMA-cross signal (default 9 when EMAMode is true)")
 	emaSlowPeriod := flag.Int("ema-slow-period", 0, "slow EMA period for EMA-cross signal (default 21 when EMAMode is true)")
 	momentumMode := flag.Bool("momentum-mode", false, "enable 5m-momentum-candle strategy (enter on momentum candles aligned with 4H bias). Overrides EMA mode when true.")
+	purgatoryMode := flag.Bool("purgatory-mode", false, "enable 'Purgatory Method': 5/9 EMA cross gated by price on same side of BOTH VWAP and EMA30. Overrides EMA mode. Research-only. Use --ema-fast-period 5 --ema-slow-period 9.")
 	vwapDevMode := flag.Bool("vwap-deviation-mode", false, "enable VWAP deviation fade strategy (mean-reversion). Overrides --ema-mode in YAML when true.")
 	vwapDevPct := flag.Float64("vwap-deviation-pct", 0, "fractional distance from VWAP to trigger fade entry (e.g. 0.02 = 2%). Required when --vwap-deviation-mode.")
 	rsiMode := flag.Bool("rsi-mode", false, "enable RSI-cross-50 strategy (momentum). Overrides EMA mode when true.")
@@ -164,9 +165,10 @@ func main() {
 		MinRR:             cfg.Strategy.MinRR,
 		TargetRR:          cfg.Strategy.TargetRR,
 		MomentumMode:      cfg.Strategy.MomentumMode || *momentumMode,
+		PurgatoryMode:     *purgatoryMode,
 		VWAPDeviationMode: cfg.Strategy.VWAPDeviationMode || *vwapDevMode,
 		VWAPDeviationPct:  func() float64 { if *vwapDevPct > 0 { return *vwapDevPct }; return cfg.Strategy.VWAPDeviationPct }(),
-		EMAMode:           cfg.Strategy.EMAMode && !(*momentumMode) && !(*vwapDevMode) && !(*rsiMode) && !(*pdhPdlMode) && !(*macdMode) && !(*bollingerMode),
+		EMAMode:           cfg.Strategy.EMAMode && !(*momentumMode) && !(*purgatoryMode) && !(*vwapDevMode) && !(*rsiMode) && !(*pdhPdlMode) && !(*macdMode) && !(*bollingerMode),
 		EMAFastPeriod:     *emaFastPeriod,
 		EMASlowPeriod:     *emaSlowPeriod,
 		RSIMode:           *rsiMode,

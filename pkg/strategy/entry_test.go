@@ -722,3 +722,71 @@ func TestSnapshot_ObservabilityFieldsPopulatedWithoutModeFlags(t *testing.T) {
 		t.Error("BBLower is 0 in Snapshot")
 	}
 }
+
+// --- Purgatory Method gate tests (5/9 cross + price above/below BOTH VWAP & EMA30) ---
+
+// purgatorySetup primes a Purgatory detector at a flat price `base`, leaving
+// ema9≈ema21≈ema30≈base and prevEma9<=prevEma21 so the next up-move makes a
+// clean bullish cross. Returns the detector ready for one Evaluate.
+func purgatorySetup(t *testing.T, base float64) *EntryDetector {
+	t.Helper()
+	d := NewEntryDetector(EntryConfig{
+		PurgatoryMode: true,
+		EMAFastPeriod: 5, EMASlowPeriod: 9, PurgatoryEMA30Period: 30,
+		TargetRR: 6.0, StopBufferPct: 0.001,
+	})
+	// Prime all three EMAs at a flat price (40 candles >> slowest period 30).
+	for i := 0; i < 40; i++ {
+		d.AddCandle(models.Candle{
+			Symbol: "BTCUSDT", Open: base, High: base + 0.5, Low: base - 0.5, Close: base,
+			CloseTime: time.Date(2026, 5, 6, 0, i, 0, 0, time.UTC),
+		})
+	}
+	return d
+}
+
+func TestPurgatory_BullishCross_AboveBoth_EmitsLong(t *testing.T) {
+	d := purgatorySetup(t, 100)
+	bias := &BiasTracker{}
+	// Up candle → fast EMA rises above slow → bullish cross. Close 110 is above
+	// EMA30 (~100) and we pass VWAP=105 (also below close).
+	d.AddCandle(models.Candle{
+		Symbol: "BTCUSDT", Open: 100, High: 111, Low: 99.5, Close: 110,
+		CloseTime: time.Date(2026, 5, 6, 1, 0, 0, 0, time.UTC),
+	})
+	sig := d.Evaluate(nil, 105.0, bias) // vwap=105 < close=110
+	if sig == nil {
+		t.Fatal("expected Long signal: bullish cross with close above both VWAP and EMA30")
+	}
+	if sig.Side != models.Long {
+		t.Errorf("Side: got %v want Long", sig.Side)
+	}
+}
+
+func TestPurgatory_BullishCross_BelowVWAP_Blocked(t *testing.T) {
+	d := purgatorySetup(t, 100)
+	bias := &BiasTracker{}
+	d.AddCandle(models.Candle{
+		Symbol: "BTCUSDT", Open: 100, High: 111, Low: 99.5, Close: 110,
+		CloseTime: time.Date(2026, 5, 6, 1, 0, 0, 0, time.UTC),
+	})
+	// VWAP=115 is ABOVE close=110 → long gate fails (price not above both).
+	sig := d.Evaluate(nil, 115.0, bias)
+	if sig != nil {
+		t.Errorf("expected no signal: close below VWAP must block the long, got %+v", sig)
+	}
+}
+
+func TestPurgatory_VWAPZero_Blocked(t *testing.T) {
+	d := purgatorySetup(t, 100)
+	bias := &BiasTracker{}
+	d.AddCandle(models.Candle{
+		Symbol: "BTCUSDT", Open: 100, High: 111, Low: 99.5, Close: 110,
+		CloseTime: time.Date(2026, 5, 6, 1, 0, 0, 0, time.UTC),
+	})
+	// vwap==0 means VWAP not wired → gate cannot evaluate → no signal.
+	sig := d.Evaluate(nil, 0, bias)
+	if sig != nil {
+		t.Errorf("expected no signal when vwap==0 (gate unevaluable), got %+v", sig)
+	}
+}
