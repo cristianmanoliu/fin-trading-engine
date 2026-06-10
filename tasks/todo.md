@@ -58,10 +58,10 @@
 
 ## Phase 5 — family-level honesty checks (after all individual runs)
 
-- [ ] Intra-family correlation: carry family (#3, #8, #13), flow family (#16, #17, #18), OI family (#1, #6, #9) — `candidate_correlation.py`. Correlated pairs count as ONE bet.
-- [ ] Full 20-candidate overfit matrix → `backtest_overfit_analysis.py`: report family DSR + participation ratio with real (correlation-deflated) trial count.
-- [ ] Verdict doc per candidate in `results/` (incl. no-gos) + synthesis doc.
-- [ ] Any survivor → propose shadow (promotion-LOCKED, research-only — same as existing 8 shadows).
+- [x] Intra-family correlation — DONE 2026-06-10. Carry family (#3/#8/#13): #8 marginal + #13 dead + #3 no-build → family closed, no surviving pair. Flow family (#16/#17/#18): #17 dead, #18 blocked, only #16 marginal → no pair. OI family (#1/#6/#9): all NO-GO/precluded. The only two positives (#15, #16) are CROSS-family and INDEPENDENT (corr −0.12) — 2 distinct bets, not 1.
+- [x] Full overfit matrix — N/A: zero candidates cleared their individual screen, so none entered the overfit matrix (the matrix is for surviving positive strategies; there are none). Documented in synthesis.
+- [x] Verdict doc per candidate + synthesis — DONE. 11 verdict docs + `results/orthogonal_search_synthesis_2026-06-10.md`.
+- [x] Survivor → shadow — N/A: zero deployable survivors. #15+#16 flagged for a future BTC/ETH-only sub-book, NOT shadowed (gate-only, wrong universe).
 
 ## Standing rules
 
@@ -72,4 +72,12 @@
 
 ## Review
 
-(fill as phases complete)
+**SEARCH CLOSED 2026-06-10.** All 20 candidates resolved (18 tested, 2 data-blocked: #18 ETF Cloudflare, #19 unlocks paywalled; #7 untestable — Binance liq archive removed).
+
+**Result: 0 deployable survivors.** 15 NO-GO/NO-BUILD/PRECLUDED, 2 MARGINAL (#15 DVOL-VRP, #16 Coinbase-premium), 3 data-blocked/untestable.
+
+**Cross-cutting finding:** every testable orthogonal axis marks WHEN volatility/stress happens but carries NO fee-clearing directional edge — the non-price analogue of the PR≈1.9 price-only collapse. Same verdict, different data sources.
+
+**The one real lead:** #15 (fear-high) + #16 (US-not-bidding) are two INDEPENDENT (corr −0.12), exogenous, multi-year-robust SHORT-timing gates — but both BTC/ETH-only (data coverage) while the live book is alt-heavy, and both gate-only (standalone forms dead). Not deployable. Flagged for a future BTC/ETH-only sub-book.
+
+**Synthesis:** `results/orthogonal_search_synthesis_2026-06-10.md`. **Recommendation:** strategy-class search now closed across price + all accessible orthogonal axes; operate the deployed strategy, let forward-paper resolve, stop mining for a new signal class. Live EMA-9/21 untouched throughout; sizing confirmed optimal (#10).
