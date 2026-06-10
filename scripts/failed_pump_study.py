@@ -24,8 +24,13 @@ import numpy as np
 import pandas as pd
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-KDIR = os.path.join(ROOT, "data", "listing", "klines")
-FDIR = os.path.join(ROOT, "data", "listing", "funding")
+# F6 overrides: PUMP_KDIR / PUMP_FDIR point at the full-history fetch;
+# PUMP_SKIP_FIRST_DAYS=90 runs the ex-listing-window slice; PUMP_OUT_TAG
+# suffixes the output CSVs so the original locked artifacts stay untouched.
+KDIR = os.environ.get("PUMP_KDIR", os.path.join(ROOT, "data", "listing", "klines"))
+FDIR = os.environ.get("PUMP_FDIR", os.path.join(ROOT, "data", "listing", "funding"))
+SKIP_FIRST_DAYS = int(os.environ.get("PUMP_SKIP_FIRST_DAYS", "0"))
+OUT_TAG = os.environ.get("PUMP_OUT_TAG", "")
 COST = 0.0070
 MAXHOLD = 7
 TRIGWIN = 10
@@ -36,10 +41,15 @@ def load_funding(sym):
     if not os.path.exists(fp):
         return None
     try:
-        df = pd.read_csv(fp, header=None,
-                         names=["calc_time", "funding_interval_hours",
-                                "last_funding_rate"],
-                         dtype=str, on_bad_lines="skip")
+        with open(fp) as fh:
+            ncols = fh.readline().count(",") + 1
+        # listing schema: calc_time,funding_interval_hours,last_funding_rate
+        # fullhist schema: calc_time,funding_rate — sniff by column count so a
+        # mismatch can't silently zero the funding join (audit-lens class bug)
+        names = (["calc_time", "funding_interval_hours", "last_funding_rate"]
+                 if ncols == 3 else ["calc_time", "last_funding_rate"])
+        df = pd.read_csv(fp, header=None, names=names, dtype=str,
+                         on_bad_lines="skip")
         ct = pd.to_numeric(df["calc_time"], errors="coerce")
         rate = pd.to_numeric(df["last_funding_rate"], errors="coerce")
         ok = ct.notna() & rate.notna()
@@ -76,7 +86,7 @@ def main():
         fund = load_funding(sym)
         n = len(df)
         for P in (0.25, 0.50):
-            i = 2
+            i = max(2, SKIP_FIRST_DAYS)
             while i < n:
                 if c[i - 2] <= 0 or c[i] / c[i - 2] - 1.0 < P:
                     i += 1
@@ -121,6 +131,12 @@ def main():
                     "sym": sym, "year": pd.Timestamp(ts[e]).year,
                     "net": net, "gross": gross, "fund": f_pnl,
                     "outcome": outcome,
+                    "P_cell": P,
+                    "entry_ts": int(ts[e].astype("datetime64[ms]").astype(np.int64)),
+                    "exit_ts": int(ts[exit_d].astype("datetime64[ms]").astype(np.int64)),
+                    "entry": float(entry), "stop": float(stop),
+                    "target": float(target),
+                    "first_kline_ts": int(ts[0].astype("datetime64[ms]").astype(np.int64)),
                 })
                 i = exit_d + 1  # no overlapping trades per symbol
             # reset loop var for next P handled by fresh while
@@ -147,8 +163,13 @@ def main():
         print(rows[-1], flush=True)
         print(t.groupby("year")["net"].agg(["count", "mean", "median"]).round(4))
     out = pd.DataFrame(rows)
-    out.to_csv(os.path.join(ROOT, "results", "failed_pump_cells_2026-06-10.csv"),
+    out.to_csv(os.path.join(ROOT, "results",
+                            f"failed_pump_cells{OUT_TAG}_2026-06-10.csv"),
                index=False)
+    all_trades = pd.DataFrame(trades[0.25] + trades[0.50])
+    all_trades.to_csv(os.path.join(ROOT, "results",
+                                   f"failed_pump_trades{OUT_TAG}_2026-06-10.csv"),
+                      index=False)
     print("\n=== #25 failed-pump cascade short — locked cells ===")
     print(out.to_string(index=False))
 
