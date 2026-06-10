@@ -47,11 +47,16 @@ Everything below was a plausible "put it live" candidate at some point. Each was
 the **production cost model** (slip=5bp / fee=10bp / mh504 / funding=CSV) and resolved.
 None is an open candidate.
 
-### Alternative entry signals — CANDIDATE post-phantom-fix (was contaminated REJECT)
+### Alternative entry signals — SETTLED NO-GO 2026-06-10 (batch-3 #21 fresh pre-reg)
 | Signal | Mean NET vs baseline (CORRECTED) | Walk-forward | Status | Doc |
 |---|---|---|---|---|
-| MACD 12/26/9 cross | **+18%** (+$348k) | 2/3 windows | **CANDIDATE (pending fresh pre-reg)** | `results/alt_signals_phantom_corrected_verdict_2026-06-09.md` |
-| RSI-14 cross-50 | **+79%** (+$530k) | 3/3 windows | **CANDIDATE (pending fresh pre-reg)** | same |
+| MACD 12/26/9 cross | **+18%** (+$348k) | 2/3 windows | **NO-GO (settled 2026-06-10)** | `results/batch3_21_rsi_macd_verdict_2026-06-10.md` |
+| RSI-14 cross-50 | **+79%** (+$530k) | 3/3 windows | **NO-GO (settled 2026-06-10)** | same |
+
+> ✅ **SETTLED 2026-06-10** by the batch-3 #21 fresh pre-registration (per-trade journals,
+> deployed-20, full honesty block): RSI is the live edge wearing a different hat — monthly
+> corr 0.844, 3/7 positive years (−$232k in 2023), total only +10.5% vs baseline on the
+> deployed book; MACD below baseline on every axis. Ledger item permanently closed.
 
 > ⚠️ **Corrected 2026-06-09.** The prior −78% / −36% REJECT numbers were produced on the
 > phantom-long-buggy binary (`d1d0fae` fix): MACD/RSI ignored `--side-filter short` and

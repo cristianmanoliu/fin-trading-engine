@@ -12,22 +12,29 @@ correction across locked grid).
 
 ## Candidates (execution order locked in pre-reg)
 
-- [ ] **#21 RSI/MACD deep validation** — per-trade journals 3 cells (baseline / MACD-12/26/9
-      / RSI-14), deployed-20 universe, 2020→2026-06 continuous, live cost model (fee=10,
-      slip=5, mh504, 4H, short, funding CSV) → honesty block + 6 yearly windows + monthly
-      corr-to-baseline. Settles the `RESEARCH_BACKLOG.md` open CANDIDATE item.
-- [ ] **#23 BTC→alt lead-lag** — event study only; screen: |cond. fwd return| > 15bp with
-      |t|>3 at ≥1 horizon. Grid 2 z-thresholds × 3 horizons. Fail screen → NO-GO, no build.
-- [ ] **#22 ETH/BTC RV pair** — trend k∈{7,14,30} + MR z∈{1.5,2.0,2.5}; 30bp pair RT +
-      per-leg funding. Bar: grid-mean ann.Sharpe > 0.8 AND best cell passes honesty block.
-- [ ] **#25 Failed-pump cascade short** — de-survivorship 732-perp daily klines; pump
-      P∈{25%,50%}, fail = close < prior low, short next open, stop above pump high, 7d max;
-      70bp RT + funding bleed. Primary cell P=25%.
-- [ ] **#24 Vol-event two-sided breakout** — gates: macro events / OI-z spike / settlement
-      EXTREME_LOW; brackets ±0.75×ATR(4H,14), stop = opposite bracket, +2R or 24h; 15bp on
-      filled leg. Need ≥2/3 gate families positive.
-- [ ] **Batch synthesis** — `results/batch3_synthesis_2026-06-10.md` + Telegram summary to
-      operator.
+- [x] **#21 RSI/MACD deep validation** — DONE 2026-06-10. **BOTH NO-GO, ledger item
+      CLOSED.** Verdict `results/batch3_21_rsi_macd_verdict_2026-06-10.md` (commit
+      55fb7ca). RSI total +10.5% vs baseline but 3/7 years, corr 0.844 — same regime
+      bet, no diversifier. MACD below baseline on every axis.
+- [x] **#23 BTC→alt lead-lag** — DONE 2026-06-10. **NO-GO, 0/12 cells.** Verdict
+      `results/btc_leadlag_verdict_2026-06-10.md` (8282a4b). First run t=37 was a
+      resample left-edge-label look-ahead (documented trap); corrected: 2-6bp gross
+      vs 15bp cost, t≈0. Fully arbed.
+- [x] **#22 ETH/BTC RV pair** — DONE 2026-06-10. **NO-GO.** Verdict
+      `results/ethbtc_rv_verdict_2026-06-10.md` (commit in history). Grid-mean Sharpe
+      −0.157 vs 0.8 bar; ratio trends but too slow for 30bp pair costs; MR side loses.
+- [x] **#25 Failed-pump cascade short** — DONE 2026-06-10. **PASS locked bar →
+      MARGINAL LEAD (milestone-2, not deployable).** Verdict
+      `results/failed_pump_verdict_2026-06-10.md` (fdbd619). Primary cell n=515:
+      mean +2.38%, median +6.74%, t=2.36, drop5 +0.75%, 5/7 yrs, holds ex-2025.
+      Funding-join bug (Series-reindex trap) found + fixed mid-run.
+- [x] **#24 Vol-event two-sided breakout** — DONE 2026-06-10. **NO-GO, 0/3 gate
+      families.** Verdict `results/vol_event_breakout_verdict_2026-06-10.md`. Means
+      positive (settlement +45bp, 6/7 yrs) but median −31…−62bp, drop5 negative
+      everywhere, whipsaw 29-36% — lottery-ticket profile. Vol-timing expression
+      space (directional AND direction-free) now closed.
+- [x] **Batch synthesis** — DONE. `results/batch3_synthesis_2026-06-10.md` + Telegram
+      sent.
 
 ## Rules
 
@@ -38,4 +45,14 @@ correction across locked grid).
 
 ## Review
 
-(to be filled at batch close)
+**BATCH CLOSED 2026-06-10, same-day.** 4 NO-GO (#21 RSI/MACD ledger settled, #22 RV,
+#23 lead-lag, #24 two-sided breakout) · 1 PASS-on-locked-bar (#25 failed-pump cascade
+short → MARGINAL LEAD, milestone-2 only, NOT deployable: thin drop5 cushion, 2026
+negative, tiny capacity, daily-bar sim).
+
+Durable outputs: two new audit traps documented (resample left-edge look-ahead;
+pd.Series-reindex silent empty join), #24 closes the vol-timing expression space from
+the direction-free side, #25 joins #15/#16 as the third milestone-2 lead.
+
+Standing recommendation unchanged: **operate-and-wait** on forward-paper (inside
+60d/150-trade power floor).
