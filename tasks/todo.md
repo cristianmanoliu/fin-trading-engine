@@ -42,7 +42,7 @@
 ## Phase 3 — second wave
 
 - [ ] **#5 Basis spot-perp dislocation** — `BasisMode`, parallel spot CSV.
-- [ ] **#6 OI-confirmed breakout** — OI gate on `checkEMACrossover` (could improve LIVE config; beware confluence-filter history −23/−59%).
+- [x] **#6 OI-confirmed breakout** — DONE 2026-06-10. NO-GO. `scripts/oi_gate_study.py`; verdict `results/live_overlay_verdict_2026-06-10.md`. OI-rising gate on live shorts (2830 trades): Sharpe 1.361→1.448 (+0.087, below +0.2 bar), halves net$. Gates disappoint (confluence history holds). No engine change.
 - [ ] **#16 Coinbase premium** — z-score tilt; check corr vs #18 (flow family).
 - [ ] **#18 ETF flow momentum** — 2024+ only; pre-register the short-history evidence downgrade.
 - [ ] **#19 Token-unlock front-run** — DefiLlama mapping → short into unlock ≥1% supply; alt-short carry bleed in harness.
@@ -54,7 +54,7 @@
 - [ ] **#17 Stablecoin supply impulse** — gate-context only (~3 independent flips, never standalone).
 - [ ] **#20 MVRV-z / SOPR** — gate-context only (power flag SEVERE, ~1 cycle).
 - [~] **#9 Positioning-stress composite** — PRECLUDED 2026-06-10. Pre-reg required ≥1 of #1/#2/#3 to survive standalone; #1 NO-GO, #2 NO-GO, #3 NO-BUILD. None survived → #9 precluded by its own gate. See `results/oi_lsratio_verdict_2026-06-10.md`.
-- [ ] **#10 Vol-targeted sizing overlay** — on live config; targets DSR/Sharpe directly. Cheap, price-only-exempt (same bet, better sized).
+- [x] **#10 Vol-targeted sizing overlay** — DONE 2026-06-10. NO-GO. `scripts/vol_sizing_overlay_study.py` + `scripts/gen_live_journals.sh`; verdict `results/live_overlay_verdict_2026-06-10.md`. VOLTGT Sharpe 0.725 < baseline 0.809 (WORSE). Live $-risk sizing already normalizes by stop-distance (= vol read); re-weighting double-counts and hurts. Deployed sizing is already vol-aware — nothing to capture.
 
 ## Phase 5 — family-level honesty checks (after all individual runs)
 

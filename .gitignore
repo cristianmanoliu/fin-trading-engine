@@ -82,3 +82,4 @@ tasks/*.log
 data/xvenue/
 data/metrics/
 data/dvol/
+results/live_journals/
