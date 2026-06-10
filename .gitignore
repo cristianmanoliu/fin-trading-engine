@@ -84,3 +84,5 @@ data/metrics/
 data/dvol/
 results/live_journals/
 data/flow/
+data/spot/
+data/onchain/
