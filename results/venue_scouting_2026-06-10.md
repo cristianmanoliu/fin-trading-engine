@@ -20,6 +20,24 @@ marketing pages); fees from official schedules.
 
 Binance baseline for reference: 5bp taker (4.5bp w/ BNB) — blocked for operator (EEA).
 
+## Full-universe coverage (operator follow-up, checked 2026-06-10 same APIs)
+
+The deployed-16 was a Binance DATA rate-limit artifact, not a strategy choice — the
+validated claim is class-wide over the 57-symbol cost-survivor universe. Coverage there:
+
+| venue | 57-universe | missing |
+|---|---|---|
+| Kraken | **55/57** | FTM, MKR — both delisted market-wide (kept in universe only for backtest reproducibility) → effectively **55/55 full coverage** |
+| Bybit | 55/57 | same two |
+| Hyperliquid | 46/57 | 9 real gaps (1INCH, CHZ, ENJ, GRT, KAVA, MANA, ROSE, VET, ZIL) + the 2 dead |
+
+**Port-time implication:** book size becomes re-decidable (more symbols = faster
+statistical resolution + diversification), BUT the binding constraint is the DATA feed,
+not the venue: signals still read Binance public market data (5y validation is
+Binance-price-denominated). >16 engines requires a data-side redesign (shared kline
+polling / longer intervals / venue-native data + revalidation). Port pre-reg must decide
+book size + data architecture together. During forward-paper the 16 stay locked.
+
 ## Findings
 
 1. **No venue materially beats our modeled costs; one matches them with full coverage.**
