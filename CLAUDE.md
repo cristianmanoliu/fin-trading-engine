@@ -330,10 +330,11 @@ When forward-paper resolves: read the pre-reg file. The promotion or kill decisi
 
 ## Known unmodeled risks
 
-2 still-open (from original 13):
+3 still-open (original 13 + 1 added 2026-06-10):
 
 - **REST polling lag (10s)** — adverse on entry + stop. Instrumented per-tick (`Tick.LocalReceiptTS` → `Heartbeat` rolling ring → `lag_summary.sh` / `post_deploy_check.sh §4`). Tiers: ≤1s OK / ≤15s TYPICAL / ≤30s DEGRADED / >30s HIGH. Real fill-vs-model still requires Layer 2.
 - **No real-money execution test** — sizing, limits, margin reuse, concurrent trades unmodeled. Projection $69–184k/yr depending on slip.
+- **Real-money venue access BLOCKED (discovered 2026-06-10)** — operator's Binance account (ADGM/EEA entity, Romania) shows futures "temporarily not available in your region". The entire real-money path (BinanceLive executor, kill_switch, STAGE_1) assumes Binance USDT-M futures access. Paper run + Layer 3 testnet (separate global site) unaffected. Operator to ask Binance support re: Romania derivatives eligibility/timeline. If unresolved by forward-paper resolution (~2026-08-19), decision becomes an executor port to an EU-accessible venue (Kraken perps / OKX-EU / Hyperliquid) = new executor + fresh Layer 2/3 validation + fee/funding re-check — a full pre-registered milestone. Do NOT start the port before the promote/kill verdict; it may never be needed.
 
 Closed: **Funding-CSV staleness** — mitigated by `scripts/funding_refresh_cron.sh` (VPS cron, Sunday 03:00 UTC). `post_deploy_check.sh §9` still surfaces staleness if cron fails.
 
