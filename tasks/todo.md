@@ -1,83 +1,41 @@
-# Executing plan: 20 orthogonal strategy candidates — backtest for a real edge
+# Executing plan: batch-3 candidates #21–#25 (2026-06-10 PM)
 
-**Specs:** `results/strategy_candidates_2026-06-10.md` (#1–#10) + `results/strategy_candidates_batch2_2026-06-10.md` (#11–#20).
-**Goal:** find ≥1 candidate that clears ALL 5 acceptance gates. 1–2 survivors out of 20 = success.
-**Created:** 2026-06-10. Live EMA 9/21 config untouched throughout — research only.
+**Pre-reg (LOCKED, committed before first run):** `results/strategy_candidates_batch3_2026-06-10.md`
+**Prior batch:** 20-candidate orthogonal search CLOSED (`results/orthogonal_search_synthesis_2026-06-10.md`); its plan + review archived in git history of this file (commit `6bfba2c` era).
 
-## The 5 gates (every candidate, no exceptions)
+This batch = 1 open ledger item (#21, the corrected MACD/RSI CANDIDATE from
+`alt_signals_phantom_corrected_verdict_2026-06-09.md`) + 4 untested strategy STRUCTURES
+(two-sided payoff, cross-asset conditioning, 2-asset RV, event-cascade short).
+Research-only; live config / VPS / forward-paper untouched. Default outcome NO-GO;
+honesty block mandatory (median + drop-top-5% + by-year + correct-sign + selection
+correction across locked grid).
 
-1. 3-window walk-forward positive (`scripts/walk_forward.sh` discipline)
-2. Raises family DSR in the overfit matrix (`scripts/backtest_overfit_analysis.py`)
-3. Correlation-to-LIVE < 0.5 (`scripts/candidate_correlation.py`)
-4. Per-year decomposition not regime-concentrated (macro/event nuance: post-2022 structural break OK if 2022-26 spans sub-regimes — document the call)
-5. Realistic costs: fee=10bp + slip=5bp min; alt shorts add carry bleed; hold <4h → Option-C fee-death screen FIRST
+## Candidates (execution order locked in pre-reg)
 
-**Store every result, including no-gos.** Negative results are results.
+- [ ] **#21 RSI/MACD deep validation** — per-trade journals 3 cells (baseline / MACD-12/26/9
+      / RSI-14), deployed-20 universe, 2020→2026-06 continuous, live cost model (fee=10,
+      slip=5, mh504, 4H, short, funding CSV) → honesty block + 6 yearly windows + monthly
+      corr-to-baseline. Settles the `RESEARCH_BACKLOG.md` open CANDIDATE item.
+- [ ] **#23 BTC→alt lead-lag** — event study only; screen: |cond. fwd return| > 15bp with
+      |t|>3 at ≥1 horizon. Grid 2 z-thresholds × 3 horizons. Fail screen → NO-GO, no build.
+- [ ] **#22 ETH/BTC RV pair** — trend k∈{7,14,30} + MR z∈{1.5,2.0,2.5}; 30bp pair RT +
+      per-leg funding. Bar: grid-mean ann.Sharpe > 0.8 AND best cell passes honesty block.
+- [ ] **#25 Failed-pump cascade short** — de-survivorship 732-perp daily klines; pump
+      P∈{25%,50%}, fail = close < prior low, short next open, stop above pump high, 7d max;
+      70bp RT + funding bleed. Primary cell P=25%.
+- [ ] **#24 Vol-event two-sided breakout** — gates: macro events / OI-z spike / settlement
+      EXTREME_LOW; brackets ±0.75×ATR(4H,14), stop = opposite bracket, +2R or 24h; 15bp on
+      filled leg. Need ≥2/3 gate families positive.
+- [ ] **Batch synthesis** — `results/batch3_synthesis_2026-06-10.md` + Telegram summary to
+      operator.
 
-## Phase 0 — zero-fetch candidates (data already local)
+## Rules
 
-- [x] **#11 Funding-settlement window drift** — DONE 2026-06-10. NO-GO (TAIL-MIRAGE). `scripts/settlement_drift_event_study.py`; verdict `results/settlement_drift_verdict_2026-06-10.md`. Screen passed (EXTREME_LOW/pre 39.81bp) + positive all 7 years, but median net −1.03bp, top-1% of trades = 80.9% of PnL, edge inverts dropping top 5%. Coin-flip + lottery ticket; un-tradeable. No engine mode.
-- [x] **#8 Cross-sectional carry** — DONE 2026-06-10. MARGINAL → NO-GO standalone. `scripts/cross_sectional_carry.py`; verdict `results/cross_sectional_carry_verdict_2026-06-10.md`. Best cell Sharpe 0.79 (5/7 yrs positive, NOT pre-2022 mirage — better than momentum), but selection-corrected across 9 cells the factor is only ~0.4 Sharpe (mean 0.39, 2/9 cells >0.5) at 35bp before unmodeled alt borrow. Carry-harness build deferred to post-#13 (true-arb, cheaper). Gates 1-3 not run.
-- [x] **#12 New-listing drift** — DONE 2026-06-10. TAIL-MIRAGE / NO-GO. `scripts/fetch_listing_data.sh` (de-survivorship: 732 perps ever listed) + `scripts/listing_drift_study.py`; verdict `results/listing_drift_verdict_2026-06-10.md`. Survivor-only probe looked great (N1/M7 +7.7%, t=2.78) but de-survivorship + funding bleed collapsed it 10× (mean +0.73%, t=0.52, drop-top-5% INVERTS to -1.95%). Real downward median (+7%, win 63%) but un-tradeable short: fat squeeze loss-tail, mean-net insignificant. De-survivorship was decisive — exactly why the fetch was mandatory.
-- [x] **#4 Taker-flow imbalance (first pass)** — DONE 2026-06-10. FEE-DEAD / NO-GO. `scripts/taker_flow_study.py`; verdict `results/taker_flow_verdict_2026-06-10.md`. Full universe n=501,826: gross move on extreme taker-flow z = 1-7bp vs 15bp cost (t=-94 on the no-edge), negative every year. Zero forward predictive power — aggressor side is contemporaneous, not leading. Cleanest no-go of Phase 0. v2 (metrics-archive ratio) stays in Phase 2, evidence-downgraded.
-
-## Phase 1 — infra builds (unlock the rest)
-
-- [ ] **`scripts/download_metrics.sh`** — data.binance.vision `futures/um/daily/metrics/<SYM>/` → `data/metrics/<SYM>.csv` (OI, L/S ratios, taker ratio). Unlocks #1, #2, #4-v2, #6, #9. ~1 day. HIGHEST-LEVERAGE BUILD.
-- [ ] **Cross-venue funding fetch** — Bybit + OKX public REST full funding history → CSVs. Unlocks #13.
-- [ ] **Deribit DVOL fetch** — public API, BTC+ETH from 2021-03. Unlocks #15.
-- [ ] **Macro event calendar** — static file: CPI + FOMC + NFP timestamps 2020–2026 (published schedules). Unlocks #14.
-- [ ] **Coinbase spot candles fetch** — public API, majors. Unlocks #16 (+ #5 spot leg).
-- [ ] **DefiLlama fetches** — stablecoin supply daily (#17) + unlocks/emissions mapping (#19).
-- [ ] **Coin Metrics Community CSVs** — realized cap BTC/ETH (#20 context gate).
-
-## Phase 2 — Tier-A backtests (after fetchers)
-
-- [x] **#1 OI divergence** — DONE 2026-06-10. NO-GO. `scripts/oi_divergence_study.py`; verdict `results/oi_lsratio_verdict_2026-06-10.md`. All 4 Δprice×ΔOI combos clear the gross screen (130-334bp) but direction is noise: mean/median net negative, win 42-50%, drop5 deeply negative. Sorts volatility not direction. No engine mode (no `OIMode` built — screen killed it pre-engine).
-- [x] **#2 L/S extreme fade** — DONE 2026-06-10. NO-GO (both crowd-fade A + divergence B). Same verdict doc. n=2.5-2.6M: gross 62-320bp but mean/median net negative, win 38-48%, t=-218 against the edge. Extremes don't fade tradeably. No `LSRatioMode` built.
-- [x] **#13 Cross-venue funding spread** — DONE 2026-06-10. NO-GO (dead-arbed). `scripts/fetch_crossvenue_funding.py` + `scripts/crossvenue_spread_study.py`; verdict `results/crossvenue_spread_verdict_2026-06-10.md`. Binance↔Bybit |spread| mean 0.96bp (heavily arbed), sign flips 24.6% → 30bp 4-leg flip cost swamps ~1bp/settle collection. Negative Sharpe every threshold/venue. **CARRY FAMILY CLOSED**: #8 marginal (~0.4 Sh) + #13 dead → #3 delta-neutral harness NO-BUILD.
-- [x] **#14 Macro-event windows** — DONE 2026-06-10. NO-GO. `scripts/macro_event_study.py` (NFP computed + CPI/FOMC published dates); verdict `results/macro_event_verdict_2026-06-10.md`. 206 events BTC+ETH. Fade uniformly wrong (spikes continue, t≈-2). Momentum/FOMC only flicker (med +41bp win 56%) but t=0.29 insignificant, tail-dependent. Events mark vol not direction. Post-2022 also fails.
-- [x] **#15 DVOL VRP** — DONE 2026-06-10. MARGINAL (standalone NO-GO; regime-gate suggestive not deployable). `scripts/fetch_dvol.py` + `scripts/dvol_vrp_study.py`; verdict `results/dvol_vrp_verdict_2026-06-10.md`. Variant A (standalone) dead (Sharpe ~0, median neg, tail-inverts). Variant B (regime gate): ETH short-ret split by VRP regime t=2.04, robust 5/6 years, correct sign — but BTC only t=0.79, and DVOL covers only BTC+ETH so can't gate the multi-symbol book. Strongest non-price evidence yet, but 1-of-2-symbol gate ≠ deployable. Flagged for revisit if per-symbol IV data appears.
-
-## Phase 3 — second wave
-
-- [x] **#5 Basis spot-perp dislocation** — DONE 2026-06-10. NO-GO. `scripts/basis_study.py`; verdict `results/final_four_verdict_2026-06-10.md`. SAME-VENUE Binance perp-vs-spot: standalone dead, gate t=1.18/0.89 (weak). (Coinbase-spot version reproduced #16 — cross-venue premium leaks; same-venue is the real basis = nothing.) Basis too small/arbed.
-- [x] **#6 OI-confirmed breakout** — DONE 2026-06-10. NO-GO. `scripts/oi_gate_study.py`; verdict `results/live_overlay_verdict_2026-06-10.md`. OI-rising gate on live shorts (2830 trades): Sharpe 1.361→1.448 (+0.087, below +0.2 bar), halves net$. Gates disappoint (confluence history holds). No engine change.
-- [x] **#16 Coinbase premium** — DONE 2026-06-10. MARGINAL (strongest gate of search; not deployable book-wide). `scripts/fetch_flow_data.py` + `scripts/coinbase_premium_study.py`; verdict `results/coinbase_premium_verdict_2026-06-10.md`. Standalone dead. Gate (short-timing by premium-z): clean on BOTH BTC (t=2.39) + ETH (t=2.29), 6/7 years each — when US not bidding, shorts work. INDEPENDENT of #15 (corr -0.12) = 2 distinct exogenous signals. But Coinbase covers only BTC/ETH, can't gate the alt-heavy live book. Flagged for a future BTC/ETH-only sub-book (combine #15+#16 gate).
-- [~] **#18 ETF flow momentum** — DEFERRED 2026-06-10 (data-access blocked). Farside Cloudflare-403, SoSoValue endpoint moved/auth. Spec already flagged #18 as weakest (2.4y, one regime). Given #16 (the stronger flow signal, full history) is MARGINAL-not-deployable, #18 would at best replicate that conclusion on shorter data. Revisit only if a free ETF-flow source is found. Not a gap in the conclusion.
-- [x] **#19 Token-unlock front-run** — DONE 2026-06-10. UNTESTABLE (data paywalled). DefiLlama emissions/unlocks API now HTTP 402 (paid plan). Verdict `results/final_four_verdict_2026-06-10.md`. No free unlock-calendar source; spec flagged decaying effect + alt-short carry bleed (same bleed that sank #12) → low prior. Revisit if a free source opens.
-- [~] **#3 Funding carry harvest (delta-neutral)** — NO-BUILD 2026-06-10 (carry family closed: #8 ~0.4 Sharpe marginal + #13 dead-arbed). Two-leg harness not justified — nothing for it to harvest. Revisit only if a future data axis revives the carry premium. See `results/crossvenue_spread_verdict_2026-06-10.md`.
-- [x] **#7 Liquidation-cascade reversal** — DONE 2026-06-10. UNTESTABLE (archive removed). `data.binance.vision/.../liquidationSnapshot/` returns 0 keys (Binance discontinued the feed). Verdict `results/final_four_verdict_2026-06-10.md`. Wick+volume proxy not built — would reproduce #1/#2/#11 (stress markers carry no tradeable direction). Conclusion already established.
-
-## Phase 4 — gates-only / conditional
-
-- [x] **#17 Stablecoin supply impulse** — DONE 2026-06-10. NO-GO. `scripts/stablecoin_supply_study.py`; verdict appended to `results/coinbase_premium_verdict_2026-06-10.md` + own section. Standalone Sharpe 0.34 (dead). Gate split t=0.20, 3/7yr — no liquidity-regime signal. Underpowered exactly as the ~3-regime power flag predicted.
-- [x] **#20 MVRV-z / SOPR** — DONE 2026-06-10. NO-GO. `scripts/mvrv_regime_study.py`; verdict `results/final_four_verdict_2026-06-10.md`. Coin Metrics full history (BTC 2010+, 3-4 cycles — better powered than spec feared). Standalone Sharpe -1.9. Gate significant but WRONG SIGN (t=-3.36 BTC: shorts LOSE in overvalued band — momentum dominates the cost-basis fade). Not usable. (Loose |t| check initially mislabeled; sign requirement corrects it.)
-- [~] **#9 Positioning-stress composite** — PRECLUDED 2026-06-10. Pre-reg required ≥1 of #1/#2/#3 to survive standalone; #1 NO-GO, #2 NO-GO, #3 NO-BUILD. None survived → #9 precluded by its own gate. See `results/oi_lsratio_verdict_2026-06-10.md`.
-- [x] **#10 Vol-targeted sizing overlay** — DONE 2026-06-10. NO-GO. `scripts/vol_sizing_overlay_study.py` + `scripts/gen_live_journals.sh`; verdict `results/live_overlay_verdict_2026-06-10.md`. VOLTGT Sharpe 0.725 < baseline 0.809 (WORSE). Live $-risk sizing already normalizes by stop-distance (= vol read); re-weighting double-counts and hurts. Deployed sizing is already vol-aware — nothing to capture.
-
-## Phase 5 — family-level honesty checks (after all individual runs)
-
-- [x] Intra-family correlation — DONE 2026-06-10. Carry family (#3/#8/#13): #8 marginal + #13 dead + #3 no-build → family closed, no surviving pair. Flow family (#16/#17/#18): #17 dead, #18 blocked, only #16 marginal → no pair. OI family (#1/#6/#9): all NO-GO/precluded. The only two positives (#15, #16) are CROSS-family and INDEPENDENT (corr −0.12) — 2 distinct bets, not 1.
-- [x] Full overfit matrix — N/A: zero candidates cleared their individual screen, so none entered the overfit matrix (the matrix is for surviving positive strategies; there are none). Documented in synthesis.
-- [x] Verdict doc per candidate + synthesis — DONE. 11 verdict docs + `results/orthogonal_search_synthesis_2026-06-10.md`.
-- [x] Survivor → shadow — N/A: zero deployable survivors. #15+#16 flagged for a future BTC/ETH-only sub-book, NOT shadowed (gate-only, wrong universe).
-
-## Standing rules
-
-- Pre-register thresholds before running (project discipline; results/INDEX.md catalog).
-- Big raw numbers → audit confounds (min-universe, fantasy-compounding, optimistic cost) before believing.
-- Every "beats baseline" → per-year decomposition + corr-to-LIVE BEFORE celebrating.
-- Don't touch live config / VPS. Forward-paper continues independently.
+- Verdict doc + atomic commit per candidate, including NO-GOs.
+- No new cells, no post-hoc thresholds; deviations documented in verdict docs.
+- Big raw numbers → audit confounds (min-universe, fantasy compounding, optimistic costs)
+  before believing.
 
 ## Review
 
-**SEARCH CLOSED 2026-06-10.** All 20 candidates resolved (18 tested, 2 data-blocked: #18 ETF Cloudflare, #19 unlocks paywalled; #7 untestable — Binance liq archive removed).
-
-**Result: 0 deployable survivors.** 15 NO-GO/NO-BUILD/PRECLUDED, 2 MARGINAL (#15 DVOL-VRP, #16 Coinbase-premium), 3 data-blocked/untestable.
-
-**Cross-cutting finding:** every testable orthogonal axis marks WHEN volatility/stress happens but carries NO fee-clearing directional edge — the non-price analogue of the PR≈1.9 price-only collapse. Same verdict, different data sources.
-
-**The one real lead:** #15 (fear-high) + #16 (US-not-bidding) are two INDEPENDENT (corr −0.12), exogenous, multi-year-robust SHORT-timing gates — but both BTC/ETH-only (data coverage) while the live book is alt-heavy, and both gate-only (standalone forms dead). Not deployable. Flagged for a future BTC/ETH-only sub-book.
-
-**Synthesis:** `results/orthogonal_search_synthesis_2026-06-10.md`. **Recommendation:** strategy-class search now closed across price + all accessible orthogonal axes; operate the deployed strategy, let forward-paper resolve, stop mining for a new signal class. Live EMA-9/21 untouched throughout; sizing confirmed optimal (#10).
+(to be filled at batch close)
