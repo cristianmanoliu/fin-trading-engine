@@ -16,7 +16,7 @@
 
 ## Phase 0 — zero-fetch candidates (data already local)
 
-- [ ] **#11 Funding-settlement window drift** — event-study script: align 1m returns around 00/08/16 UTC settlements, bucket by funding percentile. Fee-death screen before any engine build. Same-day answer.
+- [x] **#11 Funding-settlement window drift** — DONE 2026-06-10. NO-GO (TAIL-MIRAGE). `scripts/settlement_drift_event_study.py`; verdict `results/settlement_drift_verdict_2026-06-10.md`. Screen passed (EXTREME_LOW/pre 39.81bp) + positive all 7 years, but median net −1.03bp, top-1% of trades = 80.9% of PnL, edge inverts dropping top 5%. Coin-flip + lottery ticket; un-tradeable. No engine mode.
 - [ ] **#8 Cross-sectional carry** — extend `scripts/cross_sectional_ls.py`: rank by trailing funding instead of trailing return, dollar-neutral L/S. Apply hardened-audit lens (min-universe, realistic cost, per-period Sharpe, by-year).
 - [ ] **#12 New-listing drift** — first: de-survivorship fetch (full perp symbol list incl. delisted from data.binance.vision + first-N-days klines). Then: short day-N close, hold M days, funding accrual + slip ≥25bp. Pre-register small N×M grid.
 - [ ] **#4 Taker-flow imbalance (first pass)** — klines field 9 (taker-buy volume) already in local CSVs; rolling buy/sell ratio signal. No metrics fetcher needed for v1.
