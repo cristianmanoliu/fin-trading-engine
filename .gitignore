@@ -79,3 +79,5 @@ data/listing/
 # per-session diagnostic script outputs (regenerable)
 tasks/*.csv
 tasks/*.log
+data/xvenue/
+data/metrics/

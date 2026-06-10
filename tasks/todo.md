@@ -35,7 +35,7 @@
 
 - [ ] **#1 OI divergence** — `OIMode` in `pkg/strategy/entry.go`, mirror `checkFundingCross` accessor pattern. TDD: mirror `TestPurgatory_*` / side-filter test pattern. Δprice×ΔOI sign combos at 4H close.
 - [ ] **#2 L/S extreme fade** — `LSRatioMode`, percentile-threshold entry; top-trader vs global divergence variant.
-- [ ] **#13 Cross-venue funding spread** — pure CSV math script, 4-leg cost model. No engine.
+- [x] **#13 Cross-venue funding spread** — DONE 2026-06-10. NO-GO (dead-arbed). `scripts/fetch_crossvenue_funding.py` + `scripts/crossvenue_spread_study.py`; verdict `results/crossvenue_spread_verdict_2026-06-10.md`. Binance↔Bybit |spread| mean 0.96bp (heavily arbed), sign flips 24.6% → 30bp 4-leg flip cost swamps ~1bp/settle collection. Negative Sharpe every threshold/venue. **CARRY FAMILY CLOSED**: #8 marginal (~0.4 Sh) + #13 dead → #3 delta-neutral harness NO-BUILD.
 - [ ] **#14 Macro-event windows** — event study on local 1m data; two pre-registered variants ONLY (follow 30m post-event direction 24h / fade first 15m spike). No grid.
 - [ ] **#15 DVOL VRP** — both standalone signal AND gate-on-live-config variants.
 
@@ -46,7 +46,7 @@
 - [ ] **#16 Coinbase premium** — z-score tilt; check corr vs #18 (flow family).
 - [ ] **#18 ETF flow momentum** — 2024+ only; pre-register the short-history evidence downgrade.
 - [ ] **#19 Token-unlock front-run** — DefiLlama mapping → short into unlock ≥1% supply; alt-short carry bleed in harness.
-- [ ] **#3 Funding carry harvest (delta-neutral)** — needs two-leg harness (perp short + spot long). Biggest build, highest ceiling. Decide build after #8/#13 results (they test carry cheaply first).
+- [~] **#3 Funding carry harvest (delta-neutral)** — NO-BUILD 2026-06-10 (carry family closed: #8 ~0.4 Sharpe marginal + #13 dead-arbed). Two-leg harness not justified — nothing for it to harvest. Revisit only if a future data axis revives the carry premium. See `results/crossvenue_spread_verdict_2026-06-10.md`.
 - [ ] **#7 Liquidation-cascade reversal** — liquidationSnapshot archive; if too sparse, proxy from 1m wick+volume spikes; else document as untestable.
 
 ## Phase 4 — gates-only / conditional
