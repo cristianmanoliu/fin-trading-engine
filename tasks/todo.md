@@ -1,0 +1,75 @@
+# Executing plan: 20 orthogonal strategy candidates — backtest for a real edge
+
+**Specs:** `results/strategy_candidates_2026-06-10.md` (#1–#10) + `results/strategy_candidates_batch2_2026-06-10.md` (#11–#20).
+**Goal:** find ≥1 candidate that clears ALL 5 acceptance gates. 1–2 survivors out of 20 = success.
+**Created:** 2026-06-10. Live EMA 9/21 config untouched throughout — research only.
+
+## The 5 gates (every candidate, no exceptions)
+
+1. 3-window walk-forward positive (`scripts/walk_forward.sh` discipline)
+2. Raises family DSR in the overfit matrix (`scripts/backtest_overfit_analysis.py`)
+3. Correlation-to-LIVE < 0.5 (`scripts/candidate_correlation.py`)
+4. Per-year decomposition not regime-concentrated (macro/event nuance: post-2022 structural break OK if 2022-26 spans sub-regimes — document the call)
+5. Realistic costs: fee=10bp + slip=5bp min; alt shorts add carry bleed; hold <4h → Option-C fee-death screen FIRST
+
+**Store every result, including no-gos.** Negative results are results.
+
+## Phase 0 — zero-fetch candidates (data already local)
+
+- [ ] **#11 Funding-settlement window drift** — event-study script: align 1m returns around 00/08/16 UTC settlements, bucket by funding percentile. Fee-death screen before any engine build. Same-day answer.
+- [ ] **#8 Cross-sectional carry** — extend `scripts/cross_sectional_ls.py`: rank by trailing funding instead of trailing return, dollar-neutral L/S. Apply hardened-audit lens (min-universe, realistic cost, per-period Sharpe, by-year).
+- [ ] **#12 New-listing drift** — first: de-survivorship fetch (full perp symbol list incl. delisted from data.binance.vision + first-N-days klines). Then: short day-N close, hold M days, funding accrual + slip ≥25bp. Pre-register small N×M grid.
+- [ ] **#4 Taker-flow imbalance (first pass)** — klines field 9 (taker-buy volume) already in local CSVs; rolling buy/sell ratio signal. No metrics fetcher needed for v1.
+
+## Phase 1 — infra builds (unlock the rest)
+
+- [ ] **`scripts/download_metrics.sh`** — data.binance.vision `futures/um/daily/metrics/<SYM>/` → `data/metrics/<SYM>.csv` (OI, L/S ratios, taker ratio). Unlocks #1, #2, #4-v2, #6, #9. ~1 day. HIGHEST-LEVERAGE BUILD.
+- [ ] **Cross-venue funding fetch** — Bybit + OKX public REST full funding history → CSVs. Unlocks #13.
+- [ ] **Deribit DVOL fetch** — public API, BTC+ETH from 2021-03. Unlocks #15.
+- [ ] **Macro event calendar** — static file: CPI + FOMC + NFP timestamps 2020–2026 (published schedules). Unlocks #14.
+- [ ] **Coinbase spot candles fetch** — public API, majors. Unlocks #16 (+ #5 spot leg).
+- [ ] **DefiLlama fetches** — stablecoin supply daily (#17) + unlocks/emissions mapping (#19).
+- [ ] **Coin Metrics Community CSVs** — realized cap BTC/ETH (#20 context gate).
+
+## Phase 2 — Tier-A backtests (after fetchers)
+
+- [ ] **#1 OI divergence** — `OIMode` in `pkg/strategy/entry.go`, mirror `checkFundingCross` accessor pattern. TDD: mirror `TestPurgatory_*` / side-filter test pattern. Δprice×ΔOI sign combos at 4H close.
+- [ ] **#2 L/S extreme fade** — `LSRatioMode`, percentile-threshold entry; top-trader vs global divergence variant.
+- [ ] **#13 Cross-venue funding spread** — pure CSV math script, 4-leg cost model. No engine.
+- [ ] **#14 Macro-event windows** — event study on local 1m data; two pre-registered variants ONLY (follow 30m post-event direction 24h / fade first 15m spike). No grid.
+- [ ] **#15 DVOL VRP** — both standalone signal AND gate-on-live-config variants.
+
+## Phase 3 — second wave
+
+- [ ] **#5 Basis spot-perp dislocation** — `BasisMode`, parallel spot CSV.
+- [ ] **#6 OI-confirmed breakout** — OI gate on `checkEMACrossover` (could improve LIVE config; beware confluence-filter history −23/−59%).
+- [ ] **#16 Coinbase premium** — z-score tilt; check corr vs #18 (flow family).
+- [ ] **#18 ETF flow momentum** — 2024+ only; pre-register the short-history evidence downgrade.
+- [ ] **#19 Token-unlock front-run** — DefiLlama mapping → short into unlock ≥1% supply; alt-short carry bleed in harness.
+- [ ] **#3 Funding carry harvest (delta-neutral)** — needs two-leg harness (perp short + spot long). Biggest build, highest ceiling. Decide build after #8/#13 results (they test carry cheaply first).
+- [ ] **#7 Liquidation-cascade reversal** — liquidationSnapshot archive; if too sparse, proxy from 1m wick+volume spikes; else document as untestable.
+
+## Phase 4 — gates-only / conditional
+
+- [ ] **#17 Stablecoin supply impulse** — gate-context only (~3 independent flips, never standalone).
+- [ ] **#20 MVRV-z / SOPR** — gate-context only (power flag SEVERE, ~1 cycle).
+- [ ] **#9 Positioning-stress composite** — ONLY if ≥1 of #1/#2/#3 survives alone.
+- [ ] **#10 Vol-targeted sizing overlay** — on live config; targets DSR/Sharpe directly. Cheap, price-only-exempt (same bet, better sized).
+
+## Phase 5 — family-level honesty checks (after all individual runs)
+
+- [ ] Intra-family correlation: carry family (#3, #8, #13), flow family (#16, #17, #18), OI family (#1, #6, #9) — `candidate_correlation.py`. Correlated pairs count as ONE bet.
+- [ ] Full 20-candidate overfit matrix → `backtest_overfit_analysis.py`: report family DSR + participation ratio with real (correlation-deflated) trial count.
+- [ ] Verdict doc per candidate in `results/` (incl. no-gos) + synthesis doc.
+- [ ] Any survivor → propose shadow (promotion-LOCKED, research-only — same as existing 8 shadows).
+
+## Standing rules
+
+- Pre-register thresholds before running (project discipline; results/INDEX.md catalog).
+- Big raw numbers → audit confounds (min-universe, fantasy-compounding, optimistic cost) before believing.
+- Every "beats baseline" → per-year decomposition + corr-to-LIVE BEFORE celebrating.
+- Don't touch live config / VPS. Forward-paper continues independently.
+
+## Review
+
+(fill as phases complete)
