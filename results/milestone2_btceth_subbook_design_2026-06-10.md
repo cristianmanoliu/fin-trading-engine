@@ -53,10 +53,13 @@ more engine of headroom; documented as a constraint on any future symbol additio
   lineage; Coinbase + Binance spot closes via `fetch_flow_data.py` lineage; realized
   vol from engine's own kline history.
 - Output: one JSON state file per symbol (`/etc/paper-live/gate/{SYM}.json`):
-  `{date, vrp_z, premium_z, gate_green, computed_at}`. z-scores on a rolling window
-  whose length is FIXED at milestone-2 pre-reg time (the studies used full-sample z;
-  live must use rolling — this train/live mismatch must be resolved in the pre-reg, not
-  discovered after).
+  `{date, vrp_z, premium_z, gate_green, computed_at}`. z-scores: **90d rolling**, the
+  exact form both studies validated (`coinbase_premium_study.py` line 14,
+  `dvol_vrp_study.py` line 15) — no train/live mismatch, no new window DoF.
+- **Measured gate behavior** (computed 2026-06-10 from the study data, 1,806 common
+  days): P(premium-z<0) ≈ 0.50, P(vrp-z<0) ≈ 0.46-0.47, **P(dual green) ≈ 0.24-0.25**,
+  ~48 state flips/yr, median green run 1-2 days. The dual gate is CHOPPY at daily
+  granularity — both variants must be designed for that, not for slow regimes.
 - Per-symbol gate forms (both are pre-reg cells, choice made by backtest):
   - **dual** (primary): green iff vrp_z < 0 AND premium_z < 0 — both symbols.
   - **asymmetric** (secondary): ETH dual; BTC premium-only (since #15 is n.s. on BTC).
@@ -73,10 +76,15 @@ one entry-filter hook in the Runner (config: `--regime-gate-dir`), reading the s
 file at signal time; absent/disabled file = ungated behavior, so backtest byte-parity
 is preserved when off.
 
-**Power problem, stated honestly:** BTC live-config journals show ~326 trades/5.5y
-(~0.16/day); two symbols ≈ 0.33/day → a 150-trade floor ≈ 15 months of calendar time.
-A sequential gated-only shadow is therefore nearly unresolvable. This forces the paired
-design in §3.
+**Power problem, stated honestly (corrected on review):** BTC live-config journals
+show **184 trades/6.4y (0.078/day)**; ETH has never been journaled (assumed similar) →
+two symbols ≈ 0.16/day of signals. With the dual gate green only ~25% of days, the
+gated arm trades **~14/yr** — a sequential 150-trade floor would take ~a decade. The
+paired design in §3 is therefore not an optimization but the only feasible evaluation;
+even its blocked-set n=60 takes ~17 months. Variant B, with ~365 daily observations/yr
+per symbol (the same granularity the t=2.0-2.4 splits were measured on), resolves far
+sooner — so **B is the primary evaluable variant; A is the deployment-form rider**
+whose case rests on B's result plus A's backtest.
 
 ### Variant B — gate-as-strategy
 
@@ -85,8 +93,11 @@ gate timestamp; exits/entries at next 4H candle close after state change. No sto
 geometry; costs per flip (10bp fee + 5bp slip per side) and funding accrued while short.
 This is closer to what the t=2.3 splits actually measured (unconditional daily short
 returns) but has NEVER been cost-validated — that is precisely what its backtest cell
-exists to decide. Flip-rate estimate from the studies' regime persistence: O(weekly),
-i.e. cost drag is material and may kill it; that's an acceptable, informative death.
+exists to decide. **Measured flip rate: ~48/yr with median green run 1-2 days** — B is
+a 1-2-day holding-period strategy. Cost drag ≈ 24 round-trips/yr × 30bp ≈ 0.7%/yr per
+symbol (modest); the real question its backtest answers is whether the split survives
+the chop (the studies measured per-DAY conditional returns, which a 1-2d holder
+captures almost directly). B is also the fast-resolving variant (§2A).
 
 ## 3. Experimental design — the paired-arms shadow (the key idea)
 
@@ -99,9 +110,10 @@ problem). Instead each engine runs BOTH arms on the same tick stream, same signa
   The gate's entire value claim lives there: `sum(PnL of blocked trades)` should be
   **negative** (the gate skipped losers) if #15/#16 are real.
 - Statistical test at evaluation: sign/median test + bootstrap on the blocked set
-  directly, NOT a two-sample comparison of full arms. Power scales with blocked-set
-  size (~30–50% of signals per the studies' regime occupancy), not with total trades —
-  the same evaluation reaches significance several times faster than independent arms.
+  directly, NOT a two-sample comparison of full arms. With the dual gate red ~75% of
+  days (measured), the blocked set captures ~75% of signals (~43/yr across both
+  symbols) — n=60 in ~17 months, vs ~decade for a gated-arm-only trade count. Power
+  scales with the blocked set, and the blocked set is the larger fraction.
 
 Variant B runs as a third journal label on the same engines (its own arm, daily-driven).
 All journals via the existing shadow mechanism (`--shadow`-style labels, lazy-write,
@@ -132,9 +144,13 @@ All journals via the existing shadow mechanism (`--shadow`-style labels, lazy-wr
 
 ## 5. Risks / open questions for the milestone-2 pre-reg
 
-- **Rolling-z window choice** creates a tuning DoF that didn't exist in the studies
-  (full-sample z). Must be fixed a priori (candidate: 365d) and sensitivity-checked as
-  a robustness column, not a searchable grid.
+- **z-window**: 90d rolling is inherited from the studies as-validated — it is NOT a
+  free parameter at milestone-2. A single optional sensitivity column (180d) may be
+  reported but cannot drive selection.
+- **Gate chop**: median green run 1-2 days means variant A's entry filter samples the
+  gate at 4H-signal times against a state that flips ~weekly-to-daily; the studies'
+  evidence is daily-granularity, so A's application is a mild extrapolation —
+  documented, and resolved empirically by the paired arms.
 - **#15 is ETH-only significant** — if the asymmetric form wins the backtest, the
   sub-book is really "ETH dual-gated + BTC premium-gated", and the doc's headline
   should say so plainly.
