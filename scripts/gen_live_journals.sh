@@ -7,7 +7,7 @@
 # Output: results/live_journals/<SYM>-*.jsonl  (one dir, all symbols)
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-OUT="$ROOT/results/live_journals"
+OUT="${OUT:-$ROOT/results/live_journals}"
 BIN="$ROOT/bin/backtest"
 SYMS="${SYMS:-ROSEUSDT BCHUSDT GRTUSDT 1INCHUSDT ADAUSDT KAVAUSDT 1000SHIBUSDT ENSUSDT XLMUSDT IMXUSDT ETCUSDT RUNEUSDT AVAXUSDT APTUSDT DOTUSDT FILUSDT BTCUSDT CHZUSDT SANDUSDT TRXUSDT}"
 START_YEAR=2020; END_YEAR=2026; END_MONTH=06

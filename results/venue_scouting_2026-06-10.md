@@ -75,3 +75,15 @@ book size + data architecture together. During forward-paper the 16 stay locked.
 No code, no accounts, no executor work until the forward-paper verdict. If PROMOTE fires,
 the port milestone opens with this note as input and pre-registers: venue, fee/funding
 re-basing, margin-concurrency model, Layer 2/3-equivalent gates on the chosen venue.
+
+## Addendum: exact live-config backtest on the FULL 57 universe (2026-06-10, operator question)
+
+First-ever run of the EXACT live config (EMA9/21 4H short 6:1 mh504 fundingCSV fee10/slip5)
+over all 57 symbols, continuous 2020→2026-06 (`OUT=/tmp/full57_journals
+SYMS=<universe> scripts/gen_live_journals.sh`, regenerable):
+
+- **NET +$1,054,366 / 9,418 trades ($164k/yr modeled, in-sample, 5bp slip)** · WR 19.5% · 41/57 symbols positive · top symbol only 8% of NET.
+- **Deployed-16 subtotal: +$703,752 (2,761 trades = $255/trade). Marginal-41: +$350,614 (6,657 trades = $53/trade — 5× thinner per trade.)**
+- Per-year (full 57): 2020 −10k · 2021 −134k · 2022 +566k · 2023 −110k · 2024 +403k · 2025 +356k · 2026 −15k → **only 3/7 years positive** (deployed-universe run was 5/7): widening the book CONCENTRATES regime dependence, doesn't smooth it — the marginal alts pay only in crash years.
+- **BTC is the single WORST symbol (−$110k); TRX second worst.** The edge is a mid-cap-alt crowding harvest, not a universal per-coin effect.
+- Port-milestone implication: book expansion beyond 16 is a real pre-registerable question, but the marginal-41's $53/trade sits ~one slippage misestimate from zero (cross-sectional autopsy: illiquid alts realistically 35bp/side vs 5bp modeled). Any expansion needs a per-symbol realistic-slippage screen — i.e., re-run the cost-survivor battery at the new venue's cost model.
