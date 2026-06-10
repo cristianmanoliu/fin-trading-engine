@@ -37,7 +37,7 @@
 - [x] **#2 L/S extreme fade** — DONE 2026-06-10. NO-GO (both crowd-fade A + divergence B). Same verdict doc. n=2.5-2.6M: gross 62-320bp but mean/median net negative, win 38-48%, t=-218 against the edge. Extremes don't fade tradeably. No `LSRatioMode` built.
 - [x] **#13 Cross-venue funding spread** — DONE 2026-06-10. NO-GO (dead-arbed). `scripts/fetch_crossvenue_funding.py` + `scripts/crossvenue_spread_study.py`; verdict `results/crossvenue_spread_verdict_2026-06-10.md`. Binance↔Bybit |spread| mean 0.96bp (heavily arbed), sign flips 24.6% → 30bp 4-leg flip cost swamps ~1bp/settle collection. Negative Sharpe every threshold/venue. **CARRY FAMILY CLOSED**: #8 marginal (~0.4 Sh) + #13 dead → #3 delta-neutral harness NO-BUILD.
 - [ ] **#14 Macro-event windows** — event study on local 1m data; two pre-registered variants ONLY (follow 30m post-event direction 24h / fade first 15m spike). No grid.
-- [ ] **#15 DVOL VRP** — both standalone signal AND gate-on-live-config variants.
+- [x] **#15 DVOL VRP** — DONE 2026-06-10. MARGINAL (standalone NO-GO; regime-gate suggestive not deployable). `scripts/fetch_dvol.py` + `scripts/dvol_vrp_study.py`; verdict `results/dvol_vrp_verdict_2026-06-10.md`. Variant A (standalone) dead (Sharpe ~0, median neg, tail-inverts). Variant B (regime gate): ETH short-ret split by VRP regime t=2.04, robust 5/6 years, correct sign — but BTC only t=0.79, and DVOL covers only BTC+ETH so can't gate the multi-symbol book. Strongest non-price evidence yet, but 1-of-2-symbol gate ≠ deployable. Flagged for revisit if per-symbol IV data appears.
 
 ## Phase 3 — second wave
 
