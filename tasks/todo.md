@@ -43,15 +43,15 @@
 
 - [ ] **#5 Basis spot-perp dislocation** — `BasisMode`, parallel spot CSV.
 - [x] **#6 OI-confirmed breakout** — DONE 2026-06-10. NO-GO. `scripts/oi_gate_study.py`; verdict `results/live_overlay_verdict_2026-06-10.md`. OI-rising gate on live shorts (2830 trades): Sharpe 1.361→1.448 (+0.087, below +0.2 bar), halves net$. Gates disappoint (confluence history holds). No engine change.
-- [ ] **#16 Coinbase premium** — z-score tilt; check corr vs #18 (flow family).
-- [ ] **#18 ETF flow momentum** — 2024+ only; pre-register the short-history evidence downgrade.
+- [x] **#16 Coinbase premium** — DONE 2026-06-10. MARGINAL (strongest gate of search; not deployable book-wide). `scripts/fetch_flow_data.py` + `scripts/coinbase_premium_study.py`; verdict `results/coinbase_premium_verdict_2026-06-10.md`. Standalone dead. Gate (short-timing by premium-z): clean on BOTH BTC (t=2.39) + ETH (t=2.29), 6/7 years each — when US not bidding, shorts work. INDEPENDENT of #15 (corr -0.12) = 2 distinct exogenous signals. But Coinbase covers only BTC/ETH, can't gate the alt-heavy live book. Flagged for a future BTC/ETH-only sub-book (combine #15+#16 gate).
+- [~] **#18 ETF flow momentum** — DEFERRED 2026-06-10 (data-access blocked). Farside Cloudflare-403, SoSoValue endpoint moved/auth. Spec already flagged #18 as weakest (2.4y, one regime). Given #16 (the stronger flow signal, full history) is MARGINAL-not-deployable, #18 would at best replicate that conclusion on shorter data. Revisit only if a free ETF-flow source is found. Not a gap in the conclusion.
 - [ ] **#19 Token-unlock front-run** — DefiLlama mapping → short into unlock ≥1% supply; alt-short carry bleed in harness.
 - [~] **#3 Funding carry harvest (delta-neutral)** — NO-BUILD 2026-06-10 (carry family closed: #8 ~0.4 Sharpe marginal + #13 dead-arbed). Two-leg harness not justified — nothing for it to harvest. Revisit only if a future data axis revives the carry premium. See `results/crossvenue_spread_verdict_2026-06-10.md`.
 - [ ] **#7 Liquidation-cascade reversal** — liquidationSnapshot archive; if too sparse, proxy from 1m wick+volume spikes; else document as untestable.
 
 ## Phase 4 — gates-only / conditional
 
-- [ ] **#17 Stablecoin supply impulse** — gate-context only (~3 independent flips, never standalone).
+- [x] **#17 Stablecoin supply impulse** — DONE 2026-06-10. NO-GO. `scripts/stablecoin_supply_study.py`; verdict appended to `results/coinbase_premium_verdict_2026-06-10.md` + own section. Standalone Sharpe 0.34 (dead). Gate split t=0.20, 3/7yr — no liquidity-regime signal. Underpowered exactly as the ~3-regime power flag predicted.
 - [ ] **#20 MVRV-z / SOPR** — gate-context only (power flag SEVERE, ~1 cycle).
 - [~] **#9 Positioning-stress composite** — PRECLUDED 2026-06-10. Pre-reg required ≥1 of #1/#2/#3 to survive standalone; #1 NO-GO, #2 NO-GO, #3 NO-BUILD. None survived → #9 precluded by its own gate. See `results/oi_lsratio_verdict_2026-06-10.md`.
 - [x] **#10 Vol-targeted sizing overlay** — DONE 2026-06-10. NO-GO. `scripts/vol_sizing_overlay_study.py` + `scripts/gen_live_journals.sh`; verdict `results/live_overlay_verdict_2026-06-10.md`. VOLTGT Sharpe 0.725 < baseline 0.809 (WORSE). Live $-risk sizing already normalizes by stop-distance (= vol read); re-weighting double-counts and hurts. Deployed sizing is already vol-aware — nothing to capture.
