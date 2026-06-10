@@ -54,3 +54,7 @@ rr=10 mh=720: mean=292916 wins=2/3
 [20:59:54] JOB5 done.  lookback  hold  rebals    mean%  ann.Sharpe      cum% BEST: lookback=14d hold=1d  ann.Sharpe=1.49  cum=10825.0%  (2267 rebalances) 
 
 ================ WRAP: commit + push ================
+To github.com:cristianmanoliu/fin-trading-engine.git
+   046da59..9326948  main -> main
+[20:59:57] pushed
+[20:59:57] OVERNIGHT BATCH COMPLETE. Summary: results/overnight_20260609_233300/SUMMARY.md

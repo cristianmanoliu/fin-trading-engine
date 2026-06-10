@@ -1,6 +1,16 @@
 #!/usr/bin/env python3
 """cross_sectional_ls.py — dollar-neutral cross-sectional momentum backtest.
 
+⚠️ RAW SCREEN — KNOWN-OPTIMISTIC. The headline numbers (Sharpe 1.49, cum +10,825%)
+are INFLATED by three confounds: (1) ragged history — only 3 symbols exist on the
+earliest day, so early top/bottom-20% is a degenerate 1-vs-1 bet; (2) fantasy
+compounding (cum% assumes unconstrained reinvestment, no borrow/slippage on the alt
+short leg); (3) 10bp/side is far too low for a daily-rebalanced alt book. HARDENED
+(min ≥20 symbols, 35bp/side, per-period Sharpe): Sharpe drops to 0.67 and ALL the edge
+is 2020-2021 — the factor is DEAD since 2022. Verdict + by-year table:
+results/cross_sectional_verdict_2026-06-10.md. NOT a deployable edge.
+
+
 THE one structurally-different bet from the engine's "short the downtrend"
 directional class. Each rebalance: rank all symbols by trailing N-day return,
 go LONG the top quantile and SHORT the bottom quantile, equal dollars per side

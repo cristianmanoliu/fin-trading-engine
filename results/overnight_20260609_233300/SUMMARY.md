@@ -19,3 +19,19 @@ Jobs 2-4 grids are judged by whether any cell's walk-forward beats baseline AND
 is low-correlation (a real diversifier). Job 5 is the one structurally-new axis.
 Per the standing overfit verdict, expect grid winners to be high-correlation copies
 of the live short bet (raw-NET mirages). Stored regardless — negative results are results.
+
+## ⚠️ CORRECTION (2026-06-10) — Job 5 headline was inflated
+
+The Job 5 "ann.Sharpe 1.49 / cum +10,825%" is OPTIMISTIC and NOT a deployable edge.
+Falsification audit (results/cross_sectional_verdict_2026-06-10.md): ragged history
+(only 3 symbols early → degenerate 1-vs-1 book), fantasy compounding, and 10bp/side cost
+inflated it. Hardened (≥20 symbols, 35bp/side, per-period Sharpe): **Sharpe 0.67, and ALL
+edge is 2020-2021 — the factor is DEAD since 2022** (every year flat-to-negative).
+
+## Session-decisive conclusion
+Both axes of the search are now tested honestly:
+- Directional (Jobs 1-4): all configs >0.64 corr to LIVE, PR≈1.9, DSR 0.658→0.0010 when
+  candidates added. Self-defeating.
+- Cross-sectional (Job 5): decayed factor, dead since 2021.
+**No live edge hides in this 5y/57-sym price data on any axis.** Only new DATA (order-book/
+on-chain/cross-asset/options) or the forward-paper clock remain. Backtest search closed.
