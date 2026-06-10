@@ -33,8 +33,8 @@
 
 ## Phase 2 — Tier-A backtests (after fetchers)
 
-- [ ] **#1 OI divergence** — `OIMode` in `pkg/strategy/entry.go`, mirror `checkFundingCross` accessor pattern. TDD: mirror `TestPurgatory_*` / side-filter test pattern. Δprice×ΔOI sign combos at 4H close.
-- [ ] **#2 L/S extreme fade** — `LSRatioMode`, percentile-threshold entry; top-trader vs global divergence variant.
+- [x] **#1 OI divergence** — DONE 2026-06-10. NO-GO. `scripts/oi_divergence_study.py`; verdict `results/oi_lsratio_verdict_2026-06-10.md`. All 4 Δprice×ΔOI combos clear the gross screen (130-334bp) but direction is noise: mean/median net negative, win 42-50%, drop5 deeply negative. Sorts volatility not direction. No engine mode (no `OIMode` built — screen killed it pre-engine).
+- [x] **#2 L/S extreme fade** — DONE 2026-06-10. NO-GO (both crowd-fade A + divergence B). Same verdict doc. n=2.5-2.6M: gross 62-320bp but mean/median net negative, win 38-48%, t=-218 against the edge. Extremes don't fade tradeably. No `LSRatioMode` built.
 - [x] **#13 Cross-venue funding spread** — DONE 2026-06-10. NO-GO (dead-arbed). `scripts/fetch_crossvenue_funding.py` + `scripts/crossvenue_spread_study.py`; verdict `results/crossvenue_spread_verdict_2026-06-10.md`. Binance↔Bybit |spread| mean 0.96bp (heavily arbed), sign flips 24.6% → 30bp 4-leg flip cost swamps ~1bp/settle collection. Negative Sharpe every threshold/venue. **CARRY FAMILY CLOSED**: #8 marginal (~0.4 Sh) + #13 dead → #3 delta-neutral harness NO-BUILD.
 - [ ] **#14 Macro-event windows** — event study on local 1m data; two pre-registered variants ONLY (follow 30m post-event direction 24h / fade first 15m spike). No grid.
 - [ ] **#15 DVOL VRP** — both standalone signal AND gate-on-live-config variants.
@@ -53,7 +53,7 @@
 
 - [ ] **#17 Stablecoin supply impulse** — gate-context only (~3 independent flips, never standalone).
 - [ ] **#20 MVRV-z / SOPR** — gate-context only (power flag SEVERE, ~1 cycle).
-- [ ] **#9 Positioning-stress composite** — ONLY if ≥1 of #1/#2/#3 survives alone.
+- [~] **#9 Positioning-stress composite** — PRECLUDED 2026-06-10. Pre-reg required ≥1 of #1/#2/#3 to survive standalone; #1 NO-GO, #2 NO-GO, #3 NO-BUILD. None survived → #9 precluded by its own gate. See `results/oi_lsratio_verdict_2026-06-10.md`.
 - [ ] **#10 Vol-targeted sizing overlay** — on live config; targets DSR/Sharpe directly. Cheap, price-only-exempt (same bet, better sized).
 
 ## Phase 5 — family-level honesty checks (after all individual runs)
