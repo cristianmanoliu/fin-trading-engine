@@ -17,7 +17,7 @@
 ## Phase 0 — zero-fetch candidates (data already local)
 
 - [x] **#11 Funding-settlement window drift** — DONE 2026-06-10. NO-GO (TAIL-MIRAGE). `scripts/settlement_drift_event_study.py`; verdict `results/settlement_drift_verdict_2026-06-10.md`. Screen passed (EXTREME_LOW/pre 39.81bp) + positive all 7 years, but median net −1.03bp, top-1% of trades = 80.9% of PnL, edge inverts dropping top 5%. Coin-flip + lottery ticket; un-tradeable. No engine mode.
-- [ ] **#8 Cross-sectional carry** — extend `scripts/cross_sectional_ls.py`: rank by trailing funding instead of trailing return, dollar-neutral L/S. Apply hardened-audit lens (min-universe, realistic cost, per-period Sharpe, by-year).
+- [x] **#8 Cross-sectional carry** — DONE 2026-06-10. MARGINAL → NO-GO standalone. `scripts/cross_sectional_carry.py`; verdict `results/cross_sectional_carry_verdict_2026-06-10.md`. Best cell Sharpe 0.79 (5/7 yrs positive, NOT pre-2022 mirage — better than momentum), but selection-corrected across 9 cells the factor is only ~0.4 Sharpe (mean 0.39, 2/9 cells >0.5) at 35bp before unmodeled alt borrow. Carry-harness build deferred to post-#13 (true-arb, cheaper). Gates 1-3 not run.
 - [ ] **#12 New-listing drift** — first: de-survivorship fetch (full perp symbol list incl. delisted from data.binance.vision + first-N-days klines). Then: short day-N close, hold M days, funding accrual + slip ≥25bp. Pre-register small N×M grid.
 - [ ] **#4 Taker-flow imbalance (first pass)** — klines field 9 (taker-buy volume) already in local CSVs; rolling buy/sell ratio signal. No metrics fetcher needed for v1.
 
