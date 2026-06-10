@@ -45,14 +45,19 @@ correction across locked grid).
 
 ## Review
 
-**BATCH CLOSED 2026-06-10, same-day.** 4 NO-GO (#21 RSI/MACD ledger settled, #22 RV,
-#23 lead-lag, #24 two-sided breakout) · 1 PASS-on-locked-bar (#25 failed-pump cascade
-short → MARGINAL LEAD, milestone-2 only, NOT deployable: thin drop5 cushion, 2026
-negative, tiny capacity, daily-bar sim).
+**BATCH CLOSED 2026-06-10, same-day. FINAL: 5/5 NO-GO.**
 
-Durable outputs: two new audit traps documented (resample left-edge look-ahead;
-pd.Series-reindex silent empty join), #24 closes the vol-timing expression space from
-the direction-free side, #25 joins #15/#16 as the third milestone-2 lead.
+#25's initial PASS was overturned the same day by the locked F6 follow-up: the
+`data/listing/klines` universe was silently truncated to 30-60d post-listing windows
+(#12's fetch, reused without span verification). Full-history re-fetch (726/732 perps)
++ re-run: general strategy mean −0.99%, t=−3.05, 0/7 years; ex-90d slice −1.33%,
+t=−3.79. The +2.38% "edge" lived only inside the first 90 days post-listing — the dead
+#12 family in disguise. Locked F6 disposition applied: KILLED.
 
-Standing recommendation unchanged: **operate-and-wait** on forward-paper (inside
-60d/150-trade power floor).
+Durable outputs: THREE audit trap classes documented (resample left-edge look-ahead;
+pd.Series-reindex silent empty join; **inherited-dataset span not verified**), #24
+closes the vol-timing expression space from the direction-free side, #21 settles the
+RSI/MACD ledger permanently.
+
+Milestone-2 leads remain #15 + #16 only. Standing recommendation unchanged:
+**operate-and-wait** on forward-paper (inside 60d/150-trade power floor).
