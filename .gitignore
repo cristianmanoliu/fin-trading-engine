@@ -74,6 +74,7 @@ tasks/breadth_regime_gate_results/
 tasks/shadow_regime_gate_results/
 tasks/regime_switch_results/
 data/anchor/
+data/listing/
 
 # per-session diagnostic script outputs (regenerable)
 tasks/*.csv
