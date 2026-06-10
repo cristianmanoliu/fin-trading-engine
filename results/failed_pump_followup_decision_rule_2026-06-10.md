@@ -46,6 +46,27 @@ Trades split by symbol age at entry (<90d, 90d–1y, >1y since first kline). No 
 whether the edge is secretly the dead #12 new-listing family. Material concentration in
 <90d → noted in verdict for milestone-2 design.
 
+## F6 — Full-history re-run (ADDED after F5 exposed a data-coverage truncation; locked
+## BEFORE the full-history fetch or any full-history number is observed)
+
+F5 revealed `data/listing/klines` holds only ~30-60 days post-listing per symbol (it was
+fetched for #12's listing-window study). #25 as run is therefore a NEW-LISTING pump-fail
+strategy, not a general one. F6 decides which it is:
+
+- **Fetch:** full daily klines + funding history, all 732 ever-listed perps, via
+  `fapi.binance.com` public REST (paced ≤8 req/s, 60s backoff on 418/429 per the
+  reconciler lesson — never tighter than the poll interval). Data gitignored.
+- **Run:** identical locked #25 mechanics (P=25% primary, same trigger/stop/target/hold,
+  70bp RT + funding) on (a) the FULL history, and (b) the full history EXCLUDING each
+  symbol's first 90 days (the pure post-listing-window complement).
+- **Bars (locked):**
+  - (a) full-history primary cell passes the original #25 bar (mean>0 t>2, median>0,
+    drop5>0, ≥5/7 yrs) → lead is GENERAL; framing upgraded.
+  - (b) if (a) passes but the ex-90d slice fails (mean ≤0 or t<1), the edge is
+    listing-window-only → lead reframed as "#12-family conditioned variant",
+    milestone-2 priority DOWNGRADED below #15/#16 (inherits listing-crowding risks).
+  - (a) fails → original PASS was a truncation artifact; lead KILLED, verdict amended.
+
 ## Aggregate disposition (locked)
 
 - All bars pass → **LEAD CONFIRMED**: #25 becomes the named priority for milestone-2
