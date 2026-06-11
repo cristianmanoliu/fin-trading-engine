@@ -13,7 +13,7 @@ Unlocks #1 (OI divergence), #2 (L/S fade), #4-v2 (taker ratio), #6 (OI breakout)
 Stdlib only. Usage: download_metrics.py [SYM ...]   (default: deployed-20)
 Env: WORKERS (default 6) for parallel symbols.
 """
-import os, sys, io, csv, time, zipfile, urllib.request, urllib.error, urllib.parse
+import os, sys, io, time, zipfile, urllib.request, urllib.error, urllib.parse
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -34,7 +34,7 @@ def http(url, timeout=40, retries=4):
             req = urllib.request.Request(url, headers={"User-Agent": "research/1.0"})
             with urllib.request.urlopen(req, timeout=timeout) as r:
                 return r.read()
-        except (urllib.error.URLError, TimeoutError) as e:
+        except (urllib.error.URLError, TimeoutError):
             if a == retries - 1:
                 raise
             time.sleep(1.5 * (a + 1))

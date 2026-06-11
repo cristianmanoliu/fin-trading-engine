@@ -25,7 +25,7 @@ local 1m klines for the price → realized vol. BTC+ETH only (DVOL coverage).
                   years; OR variant B shows a clean, significant regime split.
 ===============================================================================
 """
-import os, glob, csv, math, sys, datetime
+import os, glob, csv, math, datetime
 from collections import defaultdict
 import numpy as np
 

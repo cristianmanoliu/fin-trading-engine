@@ -13,7 +13,7 @@ Outputs: full correlation of the LIVE col vs each config, the top-performing
 configs' cross-correlation, and the effective number of independent bets
 (1 / sum(w_i^2) on normalized eigenvalues of the correlation matrix).
 """
-import sys, csv, argparse, math
+import csv, argparse, math
 
 def load(path):
     rows = list(csv.reader(open(path)))
@@ -64,7 +64,7 @@ def main():
     print(f"matrix: {len(next(iter(cols.values())))} months × {len(names)} configs")
     print("=" * 72)
 
-    print(f"\nTop 12 configs by 5y total NET:")
+    print("\nTop 12 configs by 5y total NET:")
     for n in ranked[:12]:
         c = pearson(cols[n], cols[live]) if n != live else 1.0
         print(f"  {n:18s} total=${totals[n]:>14,.0f}   corr_vs_{live}={c:+.3f}")
@@ -78,7 +78,7 @@ def main():
 
     # Cross-correlation among the TOP 6 performers (are the "winners" the same bet?)
     top = ranked[:6]
-    print(f"\nCross-correlation among top-6 performers:")
+    print("\nCross-correlation among top-6 performers:")
     print("            " + "".join(f"{n[:8]:>9s}" for n in top))
     pair_corrs = []
     for a in top:
@@ -109,10 +109,10 @@ def main():
     print(f"  PR ≈ {pr:.1f}  out of {N} configs")
     print(f"  → {N} configs collapse to ~{pr:.0f} independent return streams.")
     if pr < N * 0.4:
-        print(f"  VERDICT: low effective diversity — broad search yields correlated copies,")
-        print(f"           NOT independent bets. Deflated-Sharpe haircut dominates.")
+        print("  VERDICT: low effective diversity — broad search yields correlated copies,")
+        print("           NOT independent bets. Deflated-Sharpe haircut dominates.")
     else:
-        print(f"  VERDICT: meaningful diversity — broad search may find independent edge.")
+        print("  VERDICT: meaningful diversity — broad search may find independent edge.")
     print("=" * 72)
 
 if __name__ == "__main__":

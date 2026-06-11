@@ -45,12 +45,12 @@ Frozen before the run (results/INDEX.md discipline).
                              MARGINAL). Mirrors the momentum bar that the factor failed.
 ===============================================================================
 """
-import os, glob, csv, math, sys, datetime
+import os, glob, csv, sys, datetime
 from collections import defaultdict
 
 # reuse the momentum script's machinery (same dir)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from cross_sectional_ls import daily_closes, build_panel, sharpe, DATA  # noqa: E402
+from cross_sectional_ls import daily_closes, build_panel, sharpe  # noqa: E402
 
 FUNDING_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "funding")
 FEE_BPS = 35.0            # hardened: 35bp/side (not 10)

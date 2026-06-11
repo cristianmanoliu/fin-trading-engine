@@ -26,7 +26,7 @@ low-correlation with a "short-BTC" proxy AND positive net of costs, it is the
 first thing all session that could justify broad search. If not, the directional
 class is confirmed as the only thing in this data and broad search is closed.
 """
-import os, glob, csv, math, sys
+import os, glob, math, sys
 from collections import defaultdict
 
 DATA = os.path.join(os.path.dirname(__file__), "..", "data")

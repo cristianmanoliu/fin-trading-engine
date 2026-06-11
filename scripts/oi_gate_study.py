@@ -67,7 +67,7 @@ def load_trades_with_oi():
             if e.get("event") != "close":
                 continue
             sym = e["symbol"]
-            o = opens.get(e["ts"])  # close ts != open ts; match by entry price instead
+            # close ts != open ts; match by entry price instead
             entry = e.get("entry", 0); notional = e.get("notional_usd", 0)
             pnl = e.get("pnl_usd", 0)
             if entry <= 0 or notional <= 0:

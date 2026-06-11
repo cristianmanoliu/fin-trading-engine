@@ -76,8 +76,8 @@ def main():
             z[gdays[i]] = (growth[gdays[i]] - mu) / sd
 
     print("=" * 74)
-    print(f"STABLECOIN SUPPLY IMPULSE (#17) — liquidity tide; vs BTC")
-    print(f"POWER-FLAGGED: ~3 independent regimes in 5y. Gate-context only.")
+    print("STABLECOIN SUPPLY IMPULSE (#17) — liquidity tide; vs BTC")
+    print("POWER-FLAGGED: ~3 independent regimes in 5y. Gate-context only.")
     print("=" * 74)
     print(f"  supply {sc[days[0]]/1e9:.1f}B ({days[0]}) -> {sc[days[-1]]/1e9:.1f}B ({days[-1]})")
 

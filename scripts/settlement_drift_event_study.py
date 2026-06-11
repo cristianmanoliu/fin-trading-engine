@@ -95,7 +95,7 @@ def load_closes(sym):
     for fp in files:
         with open(fp) as f:
             r = csv.reader(f)
-            header = next(r, None)
+            next(r, None)  # consume header row
             for row in r:
                 if not row:
                     continue

@@ -181,7 +181,6 @@ def main():
     print("VERDICT (candidate #2)")
     for nm, best in (("A crowd-fade", bestA), ("B divergence", bestB)):
         if not best or best[0] < -1e8:
-            who = best[1] if best else "?"
             g = best[2]["gross"] if best else 0
             print(f"  {nm}: NO-GO (best gross {g:.1f}bp < {PASS_BP}bp screen or tail-fails).")
             continue

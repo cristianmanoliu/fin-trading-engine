@@ -20,7 +20,7 @@ DATA: data/onchain/cm_{btc,eth}.csv (CapMVRVCur + PriceUSD, daily).
   ACCEPT:   B clean significant split robust across cycles. Standalone A reported.
 ===============================================================================
 """
-import os, csv, math, datetime
+import os, csv, math
 from collections import defaultdict
 import numpy as np
 
@@ -106,8 +106,8 @@ def main():
             if tw > 2 and yp >= (yt + 1)//2:
                 any_sig = True
             elif tw < -2:
-                print(f"    (significant but WRONG SIGN: shorts LOSE in the overvalued "
-                      f"band — momentum dominates the fade. Not usable.)")
+                print("    (significant but WRONG SIGN: shorts LOSE in the overvalued "
+                      "band — momentum dominates the fade. Not usable.)")
     print("\n" + "=" * 76)
     print("VERDICT (candidate #20)")
     print(f"  {'WEAK-GATE SIGNAL (significant + year-robust) — but cycle-limited; context only' if any_sig else 'NO-GO: MVRV bands give no significant, year-robust short-timing split. Cost-basis regime adds no usable signal at tradeable horizons (cycle-frequency too low).'}")

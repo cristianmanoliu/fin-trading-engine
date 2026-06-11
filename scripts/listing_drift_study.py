@@ -38,7 +38,7 @@ this harness adds funding + de-survivorship + the honesty checks).
                                        AND positive in a majority of readable years.
 ===============================================================================
 """
-import os, glob, csv, math, sys, argparse, datetime
+import os, glob, math, sys, argparse, datetime
 from collections import defaultdict
 import numpy as np
 
