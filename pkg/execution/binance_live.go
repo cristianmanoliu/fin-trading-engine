@@ -44,7 +44,7 @@ var ErrRecoveryDrift = errors.New("recovery drift: exchange disagrees with journ
 //   - BinanceLive itself: implements pkg/strategy.Executor
 //   - OrderRouter:        sends orders, reports results, stateless
 //   - PositionReconciler: periodically syncs local vs exchange state
-//   - SafetyGates:        pre-order checks (max-position, daily-loss, entry-price)
+//   - SafetyGates:        pre-order checks (max-risk, daily-loss, entry-price)
 //   - KillSwitch:         immediate market-close-all entry point
 //
 // Concurrency model (locked): OnSignal MUST return quickly so the strategy
@@ -137,9 +137,15 @@ func NewBinanceLive(symbol string, stakeUSD float64, apiKey, apiSecret string) *
 			EntryPriceBpsLimit: 10,   // locked: drift fires at |Δentry|/entry ≥ 10 bps
 		},
 		SafetyGates: &SafetyGates{
-			// Defaults sized for STAGE_1; real activation overrides per stage.
-			MaxPositionMultiple: 1, // one position per symbol — matches paper
-			DailyLossUSDCap:     1000,
+			// Gate A multiple is stage-invariant (1 at STAGE_1-4 per pre-reg).
+			// Gate B scales with stake: 10× preserves the pre-reg geometry
+			// ($1,000 cap at the $100 STAGE_1 stake) at any stake this executor
+			// is constructed with — Layer 3 shadows run the $1,000 paper stake,
+			// where a flat $1,000 cap trips on a single typical stop loss.
+			// Stage activation still overrides these explicitly per the
+			// pre-reg table (real_money_protocol_decision_rule_2026-05-08.md).
+			MaxPositionMultiple: 1,
+			DailyLossUSDCap:     10 * stakeUSD,
 			MaxEntrySpreadBps:   50,
 		},
 		KillSwitch: &KillSwitch{},
@@ -243,13 +249,13 @@ func (b *BinanceLive) handleSignalSync(sig *models.Signal) {
 		Type:     "MARKET",
 	}
 	gateCtx := GateContext{
-		Intent:                  intent,
-		SignalEntryPrice:        sig.EntryPrice,
-		CurrentBid:              bid,
-		CurrentAsk:              ask,
-		OpenPositionNotionalUSD: 0, // guarded by position-already-open above
-		StakeUSD:                b.StakeUSD,
-		Recent24hLossUSD:        b.recent24hLossUSD(),
+		Intent:           intent,
+		SignalEntryPrice: sig.EntryPrice,
+		SignalStopPrice:  sig.StopLoss,
+		CurrentBid:       bid,
+		CurrentAsk:       ask,
+		StakeUSD:         b.StakeUSD,
+		Recent24hLossUSD: b.recent24hLossUSD(),
 	}
 	if b.SafetyGates != nil {
 		if err := b.SafetyGates.CheckOrder(gateCtx); err != nil {
@@ -1623,29 +1629,36 @@ func (r *PositionReconciler) sleepBackoff(ctx context.Context, symbol string) bo
 // SafetyGates enforces pre-order checks per the locked design. Each gate
 // blocks an order before it reaches the exchange.
 //
-// Gate A: total $-notional per symbol must be ≤ MaxPositionMultiple × stake.
+// Gate A: per-trade $-risk (qty × |entry − stop|) must be ≤ MaxPositionMultiple
+//         × stake. Risk — not notional — is the basis: qty is sized as
+//         stake/stop-distance, so notional runs 20-50× stake by construction
+//         and a notional cap at 1× stake blocks every realistic order (the
+//         2026-06-10 KAVAUSDT Layer 3 block). Position CONCURRENCY (one open
+//         position per symbol) is enforced upstream by handleSignalSync's
+//         position-already-open guard; Gate A bounds the dollar risk a single
+//         order can carry, catching sizing-math blowups before the exchange.
 // Gate B: rolling 24h realized losses must be ≤ DailyLossUSDCap.
 // Gate C: signal entry price must be within MaxEntrySpreadBps of current
 //         best-bid/best-ask at order time.
 type SafetyGates struct {
 	MaxPositionMultiple float64 // Gate A: 1 at STAGE_1-4 per pre-reg
-	DailyLossUSDCap     float64 // Gate B: $1000 STAGE_1, $3600 STAGE_2, etc.
+	DailyLossUSDCap     float64 // Gate B: 10× stake (= $1000 at STAGE_1's $100 stake)
 	MaxEntrySpreadBps   float64 // Gate C: 50 bps default
 }
 
 // GateContext bundles every input the three gates need. Pulled into a struct
-// because Gate A needs the open-position notional + per-trade stake (not just
+// because Gate A needs the signal's stop price + per-trade stake (not just
 // the order intent) and Gate C needs the strategy's intended entry price
 // separately from any limit price on the intent (MARKET orders have no price
 // field but still need entry-price-vs-bid/ask sanity).
 type GateContext struct {
-	Intent                  OrderIntent
-	SignalEntryPrice        float64 // strategy's intended entry (signal.EntryPrice)
-	CurrentBid              float64 // best-bid at order time
-	CurrentAsk              float64 // best-ask at order time
-	OpenPositionNotionalUSD float64 // existing open position $-notional on this symbol
-	StakeUSD                float64 // per-trade stake (used for Gate A cap)
-	Recent24hLossUSD        float64 // rolling 24h realized losses (used for Gate B)
+	Intent           OrderIntent
+	SignalEntryPrice float64 // strategy's intended entry (signal.EntryPrice)
+	SignalStopPrice  float64 // strategy's stop (signal.StopLoss; used for Gate A risk)
+	CurrentBid       float64 // best-bid at order time
+	CurrentAsk       float64 // best-ask at order time
+	StakeUSD         float64 // per-trade stake (used for Gate A cap)
+	Recent24hLossUSD float64 // rolling 24h realized losses (used for Gate B)
 }
 
 // CheckOrder runs Gate A → Gate B → Gate C in order, short-circuiting on the
@@ -1653,15 +1666,19 @@ type GateContext struct {
 // and B are cheap pure-arithmetic checks; Gate C requires fresh bid/ask which
 // is the most expensive input.
 func (g *SafetyGates) CheckOrder(c GateContext) error {
-	// Gate A: total $-notional per symbol must be ≤ MaxPositionMultiple × stake.
-	// Adding the new intent's notional to the existing open notional must not
-	// exceed the cap.
-	intentNotional := c.Intent.Quantity * c.SignalEntryPrice
+	// Gate A: per-trade $-risk (qty × |entry − stop|) must be ≤
+	// MaxPositionMultiple × stake. A zero/unset stop would degenerate risk to
+	// notional-scale or zero — guard it fail-closed so a missing stop can
+	// never waive the gate.
+	if c.SignalStopPrice <= 0 {
+		return fmt.Errorf("Gate A failed: missing/invalid stop price (stop=%.8f)", c.SignalStopPrice)
+	}
+	stopDistance := math.Abs(c.SignalEntryPrice - c.SignalStopPrice)
+	intentRisk := c.Intent.Quantity * stopDistance
 	maxAllowed := g.MaxPositionMultiple * c.StakeUSD
-	if c.OpenPositionNotionalUSD+intentNotional > maxAllowed {
-		return fmt.Errorf("Gate A failed: max-position cap $%.2f exceeded (current_open=$%.2f + intent=$%.2f = $%.2f)",
-			maxAllowed, c.OpenPositionNotionalUSD, intentNotional,
-			c.OpenPositionNotionalUSD+intentNotional)
+	if intentRisk > maxAllowed {
+		return fmt.Errorf("Gate A failed: max-risk cap $%.2f exceeded (intent risk=$%.2f = qty %.6f × stop-distance %.8f)",
+			maxAllowed, intentRisk, c.Intent.Quantity, stopDistance)
 	}
 
 	// Gate B: rolling 24h realized losses must be ≤ DailyLossUSDCap.

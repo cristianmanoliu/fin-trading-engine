@@ -1,6 +1,6 @@
 # results/ index — decision rules, verdicts, and operational pre-registrations
 
-63 markdown artifacts (including INDEX) as of 2026-05-24, organized by lifecycle stage and category.
+125 markdown artifacts (including INDEX) as of 2026-06-11, organized by lifecycle stage and category. Docs through 2026-05-24 are organized in the lifecycle/category sections below; later docs are in `## Additions 2026-05-24 → 2026-06-11` at the bottom.
 
 **Three artifact types:**
 - `*_decision_rule_*.md` — pre-registered: rule LOCKED before data is observed
@@ -207,3 +207,52 @@ Pre-registered now; activates when current milestone closes.
 The full `CLAUDE.md ## Forward-paper go/no-go criteria` section is the operational doctrine. The locks here are the mechanical implementations of that doctrine.
 
 When in doubt during a real operational event: **find the locked rule, apply mechanically, document the application.** The discipline IS the process.
+
+---
+
+## Additions 2026-05-24 → 2026-06-11 (catch-up, appended 2026-06-11)
+
+Note: `*_verdict_*` files for 2026-05-07/08 rules are covered by the `+ _verdict_*.md` shorthand in the sections above and are not re-listed.
+
+### 2026-05-19 research arc (6 pre-registered walk-forward sweeps — research-only, non-actionable)
+- `research_synthesis_2026-05-19.md` — INDEX for the arc; cross-cutting findings
+- `ema_tf_exploratory_grid_2026-05-19.md` — EMA periods × timeframe grid (source of the 5 shadows added 2026-05-26)
+- `vol_filter_sweep_2026-05-19.md`, `side_filter_validation_2026-05-19.md`, `mltp_exit_sweep_2026-05-19.md`, `trailing_stop_sweep_2026-05-19.md`, `confl_1d_bias_sweep_2026-05-19.md`, `alt_signals_retest_2026-05-19.md` — the individual sweeps
+- `layer3_enablement_2026-05-19.md` — Layer 3 wrap enablement on KAVA/ENS (operational)
+- `testnet_multi_symbol_extension_2026-05-19.md` — testnet scope extension (operational)
+
+### 2026-05-22 → 2026-05-24 monitoring locks
+- `drift_detector_dryrun_2026-05-22.md` — detector dry-run
+- `binomial_monitor_decision_rule_2026-05-24.md` — binomial WR monitor lock
+- `signal_context_capture_descriptive_2026-05-24.md` + `signal_context_consumer_decision_rule_2026-05-24.md` — C2 sidecar capture + consumer lock
+- `signal_journal_reconcile_decision_rule_2026-05-24.md` + `_descriptive_2026-05-24.md` — signal/journal reconcile lock
+- `w7_2026_backtest_decision_rule_2026-05-24.md` — W7 window lock
+
+### 2026-05-29 → 2026-05-30 drift-censoring thread + ops
+- `backtest_overfit_pbo_dsr_verdict_2026-05-29.md` — PBO/DSR overfit screen verdict
+- `drift_detector_censoring_blindspot_finding_2026-05-30.md` — mid-censoring blind spot (feeds cross-check 9)
+- `telegram_env_systemd_fix_runbook_2026-05-30.md` — ops runbook
+
+### 2026-06-09 phantom-bug recheck batch (post side-filter class bug d1d0fae)
+- `alt_signals_phantom_corrected_verdict_2026-06-09.md`, `momentum_recheck_2026-06-09.md`, `pdh_pdl_phantom_recheck_2026-06-09.md`, `purgatory_recheck_2026-06-09.md`, `overfit_expansion_2026-06-09.md`
+
+### 2026-06-10 orthogonal-20 search (CLOSED — no survivors)
+- `orthogonal_search_synthesis_2026-06-10.md` — synthesis/INDEX for the search
+- Verdicts: `btc_leadlag`, `coinbase_premium`, `cross_sectional`, `cross_sectional_carry`, `crossvenue_spread`, `dvol_vrp`, `ethbtc_rv`, `listing_drift`, `live_overlay`, `macro_event`, `oi_lsratio`, `settlement_drift`, `taker_flow`, `vol_event_breakout` (all `*_verdict_2026-06-10.md`) + `final_four_verdict_2026-06-10.md`
+- `strategy_candidates_2026-06-10.md`, `strategy_candidates_batch2_2026-06-10.md` — candidate pre-regs
+
+### 2026-06-10 batch-3 search (CLOSED — FINAL 5/5 NO-GO)
+- `strategy_candidates_batch3_2026-06-10.md` — pre-reg (#21–#25)
+- `batch3_synthesis_2026-06-10.md` — synthesis; `batch3_21_rsi_macd_verdict_2026-06-10.md` — RSI/MACD ledger settled
+- `failed_pump_verdict_2026-06-10.md` + `failed_pump_followup_decision_rule_2026-06-10.md` — #25 autopsy (killed by F6 full-history re-run)
+
+### 2026-06-10 operational / milestone prep
+- `venue_scouting_2026-06-10.md` — EEA venue port scouting (Kraken presumptive) + full-57 exact-live-config economics addendum
+- `milestone2_btceth_subbook_design_2026-06-10.md` — BTC/ETH sub-book design (gate sign: complacency, VRP-z<0)
+
+### Earlier strays (pre-05-24, previously unindexed)
+- `btc_hodl_notional_amendment_2026-05-12.md` — HODL benchmark notional amendment ($16k)
+- `kill_deploy_fail_taxonomy_2026-05-12.md`, `partial_canon_resolution_2026-05-12.md`, `time_anchor_resolution_2026-05-12.md` — 05-12 resolution docs
+
+### Amendments to existing locks
+- `real_money_executor_architecture_decision_rule_2026-05-08.md` — **Addendum 2026-06-11**: Gate A basis notional → per-trade risk; Gate B cap → 10× stake (migration trigger #1, testnet integration data; see `docs/findings/2026-06-11.md`)

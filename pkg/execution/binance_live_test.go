@@ -42,9 +42,14 @@ func TestBinanceLive_NewBinanceLive_ConstructsAllComponents(t *testing.T) {
 	if bl.KillSwitch.Router != bl.OrderRouter {
 		t.Error("KillSwitch.Router not wired to OrderRouter")
 	}
-	// Default Gate A (max-position multiple) per pre-reg STAGE_1.
+	// Default Gate A (max-risk multiple) per pre-reg STAGE_1.
 	if bl.SafetyGates.MaxPositionMultiple != 1 {
 		t.Errorf("Gate A default = %v, want 1 (STAGE_1)", bl.SafetyGates.MaxPositionMultiple)
+	}
+	// Gate B scales with stake: 10× preserves pre-reg geometry ($1000 cap at
+	// the $100 STAGE_1 stake) for any constructed stake.
+	if bl.SafetyGates.DailyLossUSDCap != 10*bl.StakeUSD {
+		t.Errorf("Gate B default = %v, want 10×stake = %v", bl.SafetyGates.DailyLossUSDCap, 10*bl.StakeUSD)
 	}
 	// Default Gate C entry-spread bps per pre-reg.
 	if bl.SafetyGates.MaxEntrySpreadBps != 50 {
@@ -109,10 +114,11 @@ func newBinanceLiveWithMock(t *testing.T, srv *httptest.Server, journalDir strin
 	bl.JournalPath = journalDir
 	bl.FeeBps = 10
 	bl.StopSlippageBps = 5
-	// Gate A would block default $100 stake at default qty for high-priced
-	// instruments; raise the cap so STAGE_1 happy-path tests aren't fighting
-	// the gate by accident. Specific gate-blocking tests override this.
-	bl.SafetyGates.MaxPositionMultiple = 1e9
+	// Production SafetyGates run UNMODIFIED (MaxPositionMultiple=1). With the
+	// risk-basis Gate A, qty = stake/stop-distance means every signal's risk
+	// equals stake exactly — the gate passes by construction, as it must in
+	// production. (The pre-2026-06-11 notional-basis gate needed a 1e9
+	// workaround here, which hid that it blocked 100% of realistic orders.)
 	return bl
 }
 
@@ -1742,18 +1748,22 @@ func stage1Gates() *SafetyGates {
 }
 
 func goodGateCtx() GateContext {
-	// Healthy STAGE_1 context: $100 stake, signal entry at mid, no open
-	// position, no recent loss.
+	// Healthy STAGE_1 context with REALISTIC risk-sized geometry: $100 stake,
+	// BTC short at 50000 with stop 0.5% above (50250) → qty = 100/250 = 0.4
+	// BTC → notional $20,000 = 200× stake, risk exactly $100 = 1× stake.
+	// The pre-2026-06-11 fixture (qty 0.002 = $100 notional) implied a stop
+	// 100% away from entry — fantasy geometry built to satisfy the broken
+	// notional-basis gate, the writer-equals-fixture trap.
 	return GateContext{
 		Intent: OrderIntent{
-			Symbol: "BTCUSDT", Side: models.Short, Quantity: 0.002, Type: "MARKET",
+			Symbol: "BTCUSDT", Side: models.Short, Quantity: 0.4, Type: "MARKET",
 		},
-		SignalEntryPrice:        50000,
-		CurrentBid:              49998,
-		CurrentAsk:              50002,
-		OpenPositionNotionalUSD: 0,
-		StakeUSD:                100,
-		Recent24hLossUSD:        0,
+		SignalEntryPrice: 50000,
+		SignalStopPrice:  50250,
+		CurrentBid:       49998,
+		CurrentAsk:       50002,
+		StakeUSD:         100,
+		Recent24hLossUSD: 0,
 	}
 }
 
@@ -1764,30 +1774,56 @@ func TestSafetyGates_AllPass_ReturnsNil(t *testing.T) {
 	}
 }
 
-func TestSafetyGates_GateA_MaxPositionCap(t *testing.T) {
+func TestSafetyGates_GateA_MaxRiskCap(t *testing.T) {
 	g := stage1Gates()
 	c := goodGateCtx()
-	// stake=$100, MaxPositionMultiple=1, so cap=$100. Quantity 0.002 × 50000 = $100 — exactly at cap.
-	c.Intent.Quantity = 0.002
+	// stake=$100, MaxPositionMultiple=1 → risk cap $100. qty 0.4 × stop-dist
+	// 250 = $100 risk — exactly at cap, passes.
+	c.Intent.Quantity = 0.4
 	if err := g.CheckOrder(c); err != nil {
 		t.Errorf("Gate A at exact cap should pass: %v", err)
 	}
-	// One penny over: should fail.
-	c.Intent.Quantity = 0.0021 // $105 notional → over $100 cap
+	// 5% over: should fail.
+	c.Intent.Quantity = 0.42 // 0.42 × 250 = $105 risk → over $100 cap
 	err := g.CheckOrder(c)
 	if err == nil || !strings.Contains(err.Error(), "Gate A") {
 		t.Errorf("Gate A over cap: expected Gate A failure, got %v", err)
 	}
 }
 
-func TestSafetyGates_GateA_AccountsForOpenPosition(t *testing.T) {
+// TestSafetyGates_GateA_RealisticNotionalPasses is the regression for the
+// 2026-06-10 KAVAUSDT Layer 3 block: live signal entry 0.0416, stop 0.0435435
+// (4.67% away), $1000 stake → qty = 1000/0.0019435 ≈ 514,548 → notional
+// ≈ $21,405 (21× stake). The old notional-basis Gate A rejected this — and
+// every other realistically-sized order. Risk basis must pass it: risk =
+// qty × stop-distance = $1000 = 1× stake exactly.
+func TestSafetyGates_GateA_RealisticNotionalPasses(t *testing.T) {
+	g := stage1Gates()
+	entry, stop, stake := 0.0416, 0.04354349999999999, 1000.0
+	qty := stake / math.Abs(entry-stop)
+	c := GateContext{
+		Intent:           OrderIntent{Symbol: "KAVAUSDT", Side: models.Short, Quantity: qty, Type: "MARKET"},
+		SignalEntryPrice: entry,
+		SignalStopPrice:  stop,
+		CurrentBid:       entry,
+		CurrentAsk:       entry,
+		StakeUSD:         stake,
+		Recent24hLossUSD: 0,
+	}
+	if err := g.CheckOrder(c); err != nil {
+		t.Errorf("realistic risk-sized KAVA order must pass Gate A, got %v", err)
+	}
+}
+
+func TestSafetyGates_GateA_MissingStopFailsClosed(t *testing.T) {
+	// A zero/unset stop must BLOCK, not waive, the gate — silent-on-corrupt-
+	// input pattern lock.
 	g := stage1Gates()
 	c := goodGateCtx()
-	c.Intent.Quantity = 0.001 // $50 intent
-	c.OpenPositionNotionalUSD = 60 // $60 already open → total $110 > $100 cap
+	c.SignalStopPrice = 0
 	err := g.CheckOrder(c)
 	if err == nil || !strings.Contains(err.Error(), "Gate A") {
-		t.Errorf("expected Gate A failure with existing position, got %v", err)
+		t.Errorf("zero stop: expected Gate A fail-closed, got %v", err)
 	}
 }
 
@@ -1816,13 +1852,17 @@ func TestSafetyGates_GateC_EntryPriceSanity(t *testing.T) {
 		t.Errorf("entry-at-mid should pass: %v", err)
 	}
 	// Signal entry 50 bps below mid (right at cap): mid=50000, 50 bps = $250
-	// → 49750 should be exactly at cap and pass.
+	// → 49750 should be exactly at cap and pass. Stop moves with entry to
+	// hold stop-distance at 250 so Gate A's risk check stays at-cap and the
+	// assertion isolates Gate C.
 	c.SignalEntryPrice = 49750
+	c.SignalStopPrice = c.SignalEntryPrice + 250
 	if err := g.CheckOrder(c); err != nil {
 		t.Errorf("entry at 50bps from mid (exact cap) should pass: %v", err)
 	}
 	// 60 bps below: should fail.
 	c.SignalEntryPrice = 49700 // 60 bps below 50000
+	c.SignalStopPrice = c.SignalEntryPrice + 250
 	err := g.CheckOrder(c)
 	if err == nil || !strings.Contains(err.Error(), "Gate C") {
 		t.Errorf("entry at 60bps from mid: expected Gate C failure, got %v", err)
@@ -1852,9 +1892,9 @@ func TestSafetyGates_Ordering_GateAFailsBeforeGateB(t *testing.T) {
 	// pure arithmetic, so A's order is purely convention).
 	g := stage1Gates()
 	c := goodGateCtx()
-	c.Intent.Quantity = 1.0      // $50000 intent vs $100 cap → Gate A fails
-	c.Recent24hLossUSD = 5000    // $5000 vs $1000 cap → Gate B would also fail
-	c.SignalEntryPrice = 30000   // 4000 bps from mid → Gate C would also fail
+	c.Intent.Quantity = 1.0    // 1.0 × stop-dist 20250 = $20,250 risk vs $100 cap → Gate A fails
+	c.Recent24hLossUSD = 5000  // $5000 vs $1000 cap → Gate B would also fail
+	c.SignalEntryPrice = 30000 // 4000 bps from mid → Gate C would also fail
 	err := g.CheckOrder(c)
 	if err == nil || !strings.Contains(err.Error(), "Gate A") {
 		t.Errorf("ordered failure: expected Gate A first, got %v", err)

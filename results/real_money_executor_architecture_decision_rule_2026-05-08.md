@@ -258,3 +258,38 @@ The rule re-opens for design when:
 - `results/per_symbol_pause_decision_rule_2026-05-08.md` — operational triggers that BinanceLive's Reconciler can fire
 - `results/real_money_protocol_decision_rule_2026-05-08.md` — STAGE thresholds that parameterize Gate A/B
 - `CLAUDE.md ## Strategy status` — the line that flips from "Live: paper" to "Live: real-money STAGE_1" when this lock activates
+
+## Addendum 2026-06-11 — Gate A/B recalibration (migration trigger #1, testnet integration data)
+
+Sanctioned by migration trigger #1 ("recalibrate any threshold (Gate A/B/C
+parameters) based on testnet integration data"). The triggering data: the
+first-ever live signal to reach the Layer 3 testnet shadow (KAVAUSDT
+2026-06-10 04:00 UTC) was blocked by Gate A, and inspection showed the block
+rate is 100% by construction.
+
+**Gate A basis corrected: notional → per-trade risk.** The locked text read
+"total $-notional per symbol must be ≤ N × stake" with intent "one position
+max per symbol; matches paper-trading". The intent conflated notional with
+stake: the strategy risk-sizes entries (qty = stake / stop-distance), so
+notional runs 20–50× stake by construction (KAVAUSDT instance: $1,000 stake →
+$21,405 notional, 4.67% stop). A notional cap at 1× stake therefore blocks
+every realistic order at every stage — including STAGE_1 real money. Gate A
+now checks per-trade risk: qty × |entry − stop| ≤ N × stake (N unchanged, 1
+at STAGE_1–4). Position concurrency (the actual intent) is enforced upstream
+by the position-already-open guard in handleSignalSync. A missing/zero stop
+fails closed. Regression: `TestSafetyGates_GateA_RealisticNotionalPasses`
+(pins the 2026-06-10 KAVAUSDT geometry).
+
+**Gate B cap re-expressed as 10× stake.** The locked $1,000 figure was sized
+for the STAGE_1 $100 stake (10×). Layer 3 shadows run the $1,000 paper stake,
+where a flat $1,000 trips on a single typical stop loss (observed paper
+losses $1,061–$1,247 incl. fees/slip) and would censor 24h of parity window
+per loss. Constructor default is now `10 × stake`; stage activation still
+overrides explicitly per the protocol table (STAGE_2 remains $3,600 as
+locked — the override, not the default, governs at promotion).
+
+**Discovery context + alert-loss bug** (Telegram parse_mode=Markdown 400 on
+underscores, fixed same day): `docs/findings/2026-06-11.md`. Test fixtures
+that had been calibrated around the broken gate (`MaxPositionMultiple = 1e9`
+workaround, $100-notional fantasy geometry) were replaced with
+production-config fixtures — writer-equals-fixture pattern lock.

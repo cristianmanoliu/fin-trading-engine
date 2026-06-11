@@ -274,10 +274,15 @@ func (n *Notifier) sendWithRetry(ctx context.Context, urlFmt string, msg string,
 // error which may embed the bot token in a Go net/http URL string —
 // callers must run the result through redactErr before logging or returning.
 func sendOnce(ctx context.Context, n *Notifier, urlFmt string, msg string) error {
+	// Plain text — NO parse_mode. Alert bodies embed snake_case keys, CLI
+	// flags and env-var names (ws_url, lag_p50_ms, BINANCE_API_KEY); with
+	// parse_mode=Markdown a lone underscore is an unterminated-italic entity
+	// and Telegram rejects the whole message with 400 (the 2026-06-10
+	// KAVAUSDT gate-block alert was lost exactly this way). No caller uses
+	// intentional Markdown. Contract locked by TestSendBody_NoParseMode.
 	body, err := json.Marshal(map[string]string{
-		"chat_id":    n.ChatID,
-		"text":       msg,
-		"parse_mode": "Markdown",
+		"chat_id": n.ChatID,
+		"text":    msg,
 	})
 	if err != nil {
 		return err
@@ -315,8 +320,8 @@ func (e *telegramAPIError) Error() string {
 }
 
 // isPermanent reports whether retry is futile. 4xx responses won't recover
-// without operator intervention (rotate token, fix chat_id, escape Markdown);
-// 5xx and network errors typically resolve within seconds.
+// without operator intervention (rotate token, fix chat_id, malformed
+// message); 5xx and network errors typically resolve within seconds.
 func isPermanent(err error) bool {
 	if err == nil {
 		return false

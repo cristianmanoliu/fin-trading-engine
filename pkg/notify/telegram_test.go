@@ -48,8 +48,41 @@ func TestSend(t *testing.T) {
 	if gotBody["text"] != "hello *world*" {
 		t.Errorf("text: got %q, want %q", gotBody["text"], "hello *world*")
 	}
-	if gotBody["parse_mode"] != "Markdown" {
-		t.Errorf("parse_mode: got %q, want %q", gotBody["parse_mode"], "Markdown")
+	if _, present := gotBody["parse_mode"]; present {
+		t.Errorf("parse_mode must be ABSENT (plain text contract): got %q", gotBody["parse_mode"])
+	}
+}
+
+// TestSendBody_NoParseMode locks the plain-text contract with a payload that
+// Markdown parse_mode would reject outright: a lone underscore inside a
+// snake_case key is an unterminated italic entity → Telegram 400 → alert
+// lost. This is the exact failure that swallowed the 2026-06-10 KAVAUSDT
+// safety-gate alert (`current_open=$0.00` in the Gate A error string).
+func TestSendBody_NoParseMode(t *testing.T) {
+	var gotBody map[string]string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		json.Unmarshal(b, &gotBody)
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+
+	n := &Notifier{
+		BotToken:   "testtoken",
+		ChatID:     "12345",
+		HTTPClient: &http.Client{Timeout: 5 * time.Second},
+	}
+
+	msg := "Safety gate blocked KAVAUSDT entry: Gate A failed: max-risk cap $1000.00 exceeded (current_open=$0.00, ws_url=wss://x, lag_p50_ms=5022)"
+	if err := sendTo(context.Background(), n, srv.URL+"/bot%s/sendMessage", msg); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if gotBody["text"] != msg {
+		t.Errorf("text not passed through verbatim: got %q", gotBody["text"])
+	}
+	if _, present := gotBody["parse_mode"]; present {
+		t.Errorf("parse_mode must be ABSENT: got %q", gotBody["parse_mode"])
 	}
 }
 
