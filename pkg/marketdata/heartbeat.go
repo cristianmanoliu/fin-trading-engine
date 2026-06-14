@@ -226,9 +226,10 @@ func (h *Heartbeat) Run(ctx context.Context, interval time.Duration) {
 			prevCount = count
 			if level == slog.LevelWarn {
 				slog.Warn(msg, args...)
-				if h.Notifier != nil {
-					_ = h.Notifier.SendStructured(ctx, notify.SeverityWarn, formatHeartbeatBody(msg, h.symbol, args))
-				}
+				// Feed-stall WARNs are self-healing (WS→REST fallback engages
+				// automatically) and fire across all 16 symbols. Telegram is
+				// suppressed here — slog.Warn above is still parsed by
+				// post_deploy_check.sh §4 for tick-freshness audits.
 			} else {
 				slog.Info(msg, args...)
 			}

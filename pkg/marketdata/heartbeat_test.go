@@ -309,10 +309,10 @@ func TestHeartbeat_Run_NoNotifier_NoPanicOnWarn(t *testing.T) {
 	}
 }
 
-func TestHeartbeat_Run_WithNotifier_FiresWarnAlert(t *testing.T) {
-	// With Notifier set + Warn-level snapshot (no ticks observed), Run
-	// should fire a SendStructured alert. Verified by intercepting the
-	// HTTP POST to a test server.
+func TestHeartbeat_Run_WithNotifier_NoTelegramOnFeedStall(t *testing.T) {
+	// Feed-stall WARNs are self-healing (WS→REST fallback) and fire across
+	// all 16 symbols — Telegram suppressed to reduce alert spam. Verify that
+	// Run does NOT call the Notifier even when the snapshot is Warn-level.
 	var mu sync.Mutex
 	var bodies []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -327,12 +327,6 @@ func TestHeartbeat_Run_WithNotifier_FiresWarnAlert(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	// Build a Notifier that posts to the test server. Use sendTo via
-	// the public Send wrapper would point at telegram.org; instead we
-	// construct manually with the test URL embedded via the client's
-	// Transport — but the simplest path is to use the existing escape
-	// hatch: a Notifier whose HTTPClient redirects all requests through
-	// a custom RoundTripper that rewrites the URL to the test server.
 	n := &notify.Notifier{
 		BotToken: "tok",
 		ChatID:   "chat",
@@ -351,25 +345,15 @@ func TestHeartbeat_Run_WithNotifier_FiresWarnAlert(t *testing.T) {
 		h.Run(ctx, 20*time.Millisecond)
 	}()
 
-	// Wait for at least one ticker fire.
-	time.Sleep(80 * time.Millisecond)
+	// Wait for several ticker fires (no ticks observed → Warn-level each time).
+	time.Sleep(100 * time.Millisecond)
 	cancel()
 	<-done
 
 	mu.Lock()
 	defer mu.Unlock()
-	if len(bodies) == 0 {
-		t.Fatal("expected ≥1 Telegram alert from Warn-level heartbeat, got 0")
-	}
-	if !strings.Contains(bodies[0], "no ticks received yet") {
-		t.Errorf("first alert missing expected msg: %q", bodies[0])
-	}
-	if !strings.Contains(bodies[0], "BTCUSDT") {
-		t.Errorf("first alert missing symbol: %q", bodies[0])
-	}
-	// Severity prefix from SendStructured.
-	if !strings.HasPrefix(bodies[0], "⚠") {
-		t.Errorf("first alert missing ⚠ severity prefix: %q", bodies[0])
+	if len(bodies) != 0 {
+		t.Fatalf("expected 0 Telegram alerts from feed-stall heartbeat, got %d: %v", len(bodies), bodies)
 	}
 }
 
@@ -530,10 +514,11 @@ func TestHeartbeat_Run_InGrace_NoTelegramAlertOnStaleStartup(t *testing.T) {
 	}
 }
 
-func TestHeartbeat_Run_GraceExpired_TelegramAlertFires(t *testing.T) {
-	// Inverse of the above: once the grace window expires, the next stale
-	// snapshot must escalate to Warn and fire a Telegram alert. This proves
-	// the grace is a window, not a permanent mute.
+func TestHeartbeat_Run_GraceExpired_NoTelegramEvenPostGrace(t *testing.T) {
+	// Feed-stall WARNs are suppressed from Telegram regardless of whether the
+	// startup grace window has expired — the WS→REST fallback self-heals and
+	// 16-symbol spam was the motivation for the change. Verify that no
+	// Telegram alert fires even well after grace expires.
 	var mu sync.Mutex
 	var bodies []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -572,11 +557,8 @@ func TestHeartbeat_Run_GraceExpired_TelegramAlertFires(t *testing.T) {
 
 	mu.Lock()
 	defer mu.Unlock()
-	if len(bodies) == 0 {
-		t.Fatal("expected ≥1 Telegram alert post-grace, got 0 (grace must not permanently suppress)")
-	}
-	if !strings.Contains(bodies[0], "no ticks received yet") {
-		t.Errorf("post-grace alert msg = %q, want contains 'no ticks received yet'", bodies[0])
+	if len(bodies) != 0 {
+		t.Fatalf("expected 0 Telegram alerts from feed-stall heartbeat (even post-grace), got %d: %v", len(bodies), bodies)
 	}
 }
 
