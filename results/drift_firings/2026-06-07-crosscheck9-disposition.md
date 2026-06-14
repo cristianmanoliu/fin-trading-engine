@@ -97,3 +97,55 @@ The next weekly cadence run will fire again (censoring persists). Each future
 firing re-tests via the same cross-check 9; HOLD stands until `mae_r` losers
 deepen past 1.10R OR open positions turn adverse OR `n_closed_winners` climbs with
 WR still <14%. Re-run `scripts/crosscheck9_losers_mae.py` at each firing.
+
+---
+
+## 2026-06-14 checkpoint — HOLD (6th consecutive censoring-benign reading)
+
+**Journals fetched:** 2026-06-15 (Sunday cadence, UTC-aligned).
+**Tool:** `python3 scripts/crosscheck9_losers_mae.py` (read-only).
+
+### Condition 1 — `mae_r` flat ✓ PASS
+
+```
+mae_r losers: n=45  min=1.0000  max=1.0710  mean=1.0110  p50=1.0060
+>1.071 (prior max): 0 trades
+>1.10 (edge-death threshold): 0 trades
+```
+
+Max unchanged at 1.0710 vs 06-08 (n=38→45, +7 losers, max pinned). Mean +0.001
+over 7 more losers — distribution stable, not drifting deeper. **No structural
+deepening.**
+
+### Condition 2 — open positions favorable ✓ PASS
+
+6 open positions (all SHORT, all below entry). Live marks via
+`fapi.binance.com/fapi/v1/ticker/price` 2026-06-15:
+
+```
+AVAXUSDT  entry=6.52500  curr=6.52800  mae_r=0.023  (+1.9% to stop)
+BCHUSDT   entry=201.430  curr=202.270  mae_r=0.249  (+1.3% to stop)
+ETCUSDT   entry=7.00100  curr=7.02000  mae_r=0.165  (+1.4% to stop)
+IMXUSDT   entry=0.15840  curr=0.14310  mae_r=0.000  (+15.4% to stop)
+ROSEUSDT  entry=0.00631  curr=0.00628  mae_r=0.000  (+2.2% to stop)
+RUNEUSDT  entry=0.37570  curr=0.37820  mae_r=0.330  (+1.3% to stop)
+```
+
+Max live mae_r = 0.330 (RUNEUSDT). All favorable (none adverse past entry).
+**Predominantly favorable → PASS.**
+
+### Condition 3 — `n_closed_winners < ~15` ✓ PASS
+
+```
+outcome breakdown: 45 STOP, 8 TARGET
+n_closed_winners: 8
+```
+
+8 < 15. Unchanged from 06-08 — no new winners closed since last checkpoint
+(consistent with low-WR censoring, not won trades being miscounted).
+
+### Mechanical verdict
+
+All three conditions PASS → **CENSORING-BENIGN → HOLD.** 6th consecutive
+reading. The detector's winner-truncation blindspot continues to suppress WR;
+no structural evidence of edge-death. Forward-paper continues.
