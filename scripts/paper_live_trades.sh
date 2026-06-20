@@ -59,7 +59,11 @@ for sym in "${SYMBOLS[@]}"; do
         [.ts, .side, .entry, .exit, .outcome, .pnl_usd, .pnl_pts] | @tsv
     ' "$file" 2>/dev/null || true)
 
-    count=$(printf '%s' "$closed_tsv" | grep -c $'\t' || echo 0)
+    # grep -c already prints 0 on no match; appending `|| echo 0` would emit a
+    # second line ("0\n0") and break the numeric `-gt` test below. Use `|| true`
+    # to swallow grep's non-zero exit on no-match without adding a line.
+    count=$(printf '%s' "$closed_tsv" | grep -c $'\t' || true)
+    count=${count:-0}
 
     # Per-symbol aggregates (awk handles floats)
     if [[ $count -gt 0 ]]; then
