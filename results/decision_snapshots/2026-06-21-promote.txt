@@ -1,0 +1,21 @@
+════════════════════════════════════════════════════════════════════════════════════════════════
+  STAGE_0 → STAGE_1 promotion check
+  Source: CLAUDE.md ## Forward-paper go/no-go criteria
+        + results/real_money_protocol_decision_rule_2026-05-08.md
+════════════════════════════════════════════════════════════════════════════════════════════════
+
+  criterion                                       threshold                         actual                    status
+  --------------------------------------------------------------------------------------------
+  1. ≥150 closed paper trades                     ≥150                              67                        [PENDING]
+  2. ≥60 calendar days elapsed (since first close)  ≥60d                              43d                       [PENDING]
+  3. Net-positive cumulative PnL                  >$0                               $-12,355                  [PENDING]
+  4. PnL ≥60% pro-rated annual (since first close)  ≥$4,874 (=$69k×0.12y×0.6)         $-12,355                  [PENDING]
+  5. PnL beats BTC-HODL ($16k notional)           >$0 vs HODL                       strategy $-12,355 vs HODL $-3,180 (Δ $-9,176)  [PENDING]
+  6. No single symbol >40% PnL                    <40.0%                            9.2% (1000SHIBUSDT)       [PASS]
+  7. Drift detector clean ≥30d                    ≥30d                              0d since last fire (2026-06-21)  [FAIL]
+  8. Realized fee ≤12 bp                          ≤12.0bp                           10.00bp                   [PASS]
+  9. Realized slip ≤20 bp (losers)                ≤20.0bp                           5.00bp (n=58)             [PASS]
+
+════════════════════════════════════════════════════════════════════════════════════════════════
+  >>> VERDICT: BLOCKED — at least one gate fails outright. Do not promote.
+════════════════════════════════════════════════════════════════════════════════════════════════

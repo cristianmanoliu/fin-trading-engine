@@ -149,3 +149,65 @@ n_closed_winners: 8
 All three conditions PASS → **CENSORING-BENIGN → HOLD.** 6th consecutive
 reading. The detector's winner-truncation blindspot continues to suppress WR;
 no structural evidence of edge-death. Forward-paper continues.
+
+---
+
+## 2026-06-21 checkpoint — HOLD (7th consecutive censoring-benign reading)
+
+**Drift cron:** weekly launchd fired 2026-06-21 06:00 UTC (`drift_check_history.jsonl`
+exit 1 DRIFT_FIRED). Auto-generated decision snapshots emitted a mechanical
+`VERDICT: KILL (Rule 1)` driven solely by the *same* 2026-05-27 ↔ 2026-06-07
+firing pair this disposition file already adjudicates — not a new signal. The
+manual cross-check 9 below is the human gate that overrides that mechanical KILL.
+**Disposition done 2026-06-23** (snapshots from 06-21 had been left uncommitted
+without a recorded reading; this checkpoint closes that gap).
+
+**Journals fetched:** 2026-06-23 (`scripts/journal_fetch.sh`).
+**Tool:** `python3 scripts/crosscheck9_losers_mae.py --prior-max 1.071` (read-only, exit 0).
+
+### Condition 1 — `mae_r` flat ✓ PASS
+
+```
+mae_r losers: n=59  min=1.0000  max=1.0710  mean=1.0098  p50=1.0050
+>1.071 (prior max): 0 trades
+>1.10 (edge-death threshold): 0 trades
+```
+
+Max unchanged at 1.0710 vs 06-14 (n=45→59, +14 losers, max pinned). Mean −0.001
+over 14 more losers — distribution stable, not drifting deeper. **No structural
+deepening.**
+
+### Condition 2 — open positions favorable ✓ PASS
+
+7 open positions (all SHORT). Live marks via
+`fapi.binance.com/fapi/v1/ticker/price` 2026-06-23:
+
+```
+1000SHIBUSDT  entry=0.004903  curr=0.004631  mae_r=0.000  (+9.2% to stop)
+1INCHUSDT     entry=0.07210   curr=0.07240   mae_r=0.094  (+4.0% to stop)
+ADAUSDT       entry=0.17110   curr=0.15840   mae_r=0.000  (+9.8% to stop)
+APTUSDT       entry=0.65730   curr=0.65200   mae_r=0.000  (+6.8% to stop)
+DOTUSDT       entry=1.25600   curr=0.93000   mae_r=0.000  (+37.4% to stop)
+KAVAUSDT      entry=0.05880   curr=0.04700   mae_r=0.000  (+27.8% to stop)
+ROSEUSDT      entry=0.01027   curr=0.006515  mae_r=0.000  (+71.6% to stop)
+```
+
+Max live mae_r = 0.094 (1INCHUSDT, the only one fractionally past entry). 6 of 7
+favorable. **Predominantly favorable → PASS.**
+
+### Condition 3 — `n_closed_winners < ~15` ✓ PASS
+
+```
+outcome breakdown: 59 STOP, 11 TARGET
+n_closed_winners: 11
+```
+
+11 < 15. +3 winners since 06-14 (8→11) but WR still ≈16% (11/70) — climbing
+slowly, well inside the censoring regime, no winner-count blowout.
+
+### Mechanical verdict
+
+All three conditions PASS → **CENSORING-BENIGN → HOLD.** 7th consecutive
+reading. The detector's winner-truncation blindspot continues to suppress WR;
+no structural evidence of edge-death. The 06-21 mechanical KILL snapshot is
+**NOT honored** — same firing pair, same benign cause. Forward-paper continues.
