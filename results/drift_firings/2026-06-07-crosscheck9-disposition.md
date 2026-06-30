@@ -211,3 +211,66 @@ All three conditions PASS → **CENSORING-BENIGN → HOLD.** 7th consecutive
 reading. The detector's winner-truncation blindspot continues to suppress WR;
 no structural evidence of edge-death. The 06-21 mechanical KILL snapshot is
 **NOT honored** — same firing pair, same benign cause. Forward-paper continues.
+
+---
+
+## 2026-06-28 checkpoint — HOLD (8th consecutive censoring-benign reading)
+
+**Drift cron:** weekly launchd fired 2026-06-28 06:05:55 UTC (`drift_check_history.jsonl`
+exit 1 DRIFT_FIRED). Auto-generated decision snapshots emitted mechanical
+`VERDICT: KILL (Rule 1)` — same 2026-05-27 ↔ 2026-06-07 firing pair, not a new
+signal. Cross-check 9 below is the human gate.
+
+**Journals fetched:** 2026-06-30 (`scripts/journal_fetch.sh`).
+**Tool:** `python3 scripts/crosscheck9_losers_mae.py --prior-max 1.071` (read-only, exit 0).
+
+### Condition 1 — `mae_r` flat ✓ PASS
+
+```
+mae_r losers: n=64  min=1.0000  max=1.0710  mean=1.0095  p50=1.0050
+>1.071 (prior max): 0 trades
+>1.10 (edge-death threshold): 0 trades
+```
+
+Max unchanged at 1.0710 vs 06-21 (n=59→64, +5 losers, max pinned). Mean −0.0003
+over 5 more losers — distribution stable, not drifting deeper. **No structural
+deepening.**
+
+### Condition 2 — open positions favorable ✓ PASS
+
+4 open positions (all SHORT). Live marks via
+`fapi.binance.com/fapi/v1/ticker/price` 2026-06-30:
+
+```
+1000SHIBUSDT  entry=0.004903  curr=0.004190  R=+4.67  (+17.0% below entry)
+1INCHUSDT     entry=0.07210   curr=0.06620   R=+1.86  (+8.9% below entry)
+APTUSDT       entry=0.65730   curr=0.56600   R=+2.33  (+16.1% below entry)
+RUNEUSDT      entry=0.39690   curr=0.37910   R=+1.28  (+4.7% below entry)
+```
+
+All 4 favorable (current well below entry). **Predominantly favorable → PASS.**
+
+### Condition 3 — `n_closed_winners < ~15` ✓ PASS
+
+```
+outcome breakdown: 64 STOP, 13 TARGET
+n_closed_winners: 13
+```
+
+13 < 15. +2 winners since 06-21 (11→13), WR ≈16.9% (13/77) — climbing slowly,
+still inside the censoring regime, no winner-count blowout.
+
+### Mechanical verdict
+
+All three conditions PASS → **CENSORING-BENIGN → HOLD.** 8th consecutive
+reading. The detector's winner-truncation blindspot continues to suppress WR;
+no structural evidence of edge-death. The 06-28 mechanical KILL snapshot is
+**NOT honored** — same firing pair, same benign cause. Forward-paper continues.
+
+### Notable this week
+
+- Live PnL flipped positive: +$3,745 (was −$12,355 at 06-21). 1000SHIBUSDT at
+  +4.67R approaching the 6.0R target; a hit would add ~$6k.
+- n=75 closed trades, day 50 — approaching the 60d/150-trade power floor.
+  Earliest STAGE_1 estimated ~2026-08-17 per forward paper snapshot.
+- All 16 engines TYPICAL lag tier, fleet healthy.
