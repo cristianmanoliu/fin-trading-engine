@@ -395,17 +395,24 @@ echo "$DATA" | grep "^STRATEGY|" | while IFS='|' read -r _ label first_ts last_t
         wr_pct="0.0"
     fi
 
-    # Per-symbol concentration: max %
+    # Per-symbol concentration: max %. Denominator is the SUM of per-symbol
+    # absolute net PnL (Σ|per-sym net|), matching the robust sum-of-abs basis
+    # kill_protocol_check.py uses for its authoritative check_single_symbol_kill.
+    # The previous version divided by abs(cohort net PnL), which blows up when
+    # winners and losers nearly cancel: e.g. 1000SHIBUSDT @ +$10.6k over a +$1.4k
+    # net read 758.9% here vs ~7-19% on any sane basis. (This panel aggregates at
+    # per-symbol-net granularity so the % won't match kill_protocol_check's
+    # per-trade figure to the decimal, but both are non-degenerate and this
+    # criterion is advisory/gated [INSUFFICIENT] below MIN_TRADES either way.)
     sym_lines=$(echo "$DATA" | awk -F'|' -v lbl="$label" '$1=="SYMBOL" && $2==lbl {print}')
-    abs_pnl=$(awk -v p="$pnl" 'BEGIN{p<0?p=-p:0; print p}')
-    if [[ "$abs_pnl" != "0" ]] && [[ -n "$sym_lines" ]]; then
-        max_sym_pct=$(echo "$sym_lines" | awk -F'|' -v total="$abs_pnl" '
+    if [[ -n "$sym_lines" ]]; then
+        max_sym_pct=$(echo "$sym_lines" | awk -F'|' '
             {
                 p=$4; if (p<0) p=-p
-                pct=p/total*100
-                if (pct > max) { max=pct; sym=$3 }
+                total+=p
+                if (p > max) { max=p; sym=$3 }
             }
-            END { printf "%.1f|%s", max+0, sym }')
+            END { if (total==0) total=1; printf "%.1f|%s", max/total*100, sym }')
         max_sym_pct_val=$(echo "$max_sym_pct" | cut -d'|' -f1)
         max_sym_name=$(echo "$max_sym_pct" | cut -d'|' -f2)
     else
