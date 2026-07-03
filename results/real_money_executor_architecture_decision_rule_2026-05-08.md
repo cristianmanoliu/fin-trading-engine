@@ -293,3 +293,35 @@ underscores, fixed same day): `docs/findings/2026-06-11.md`. Test fixtures
 that had been calibrated around the broken gate (`MaxPositionMultiple = 1e9`
 workaround, $100-notional fantasy geometry) were replaced with
 production-config fixtures — writer-equals-fixture pattern lock.
+
+## Addendum 2026-07-04 — order-quantity quantization (migration trigger #1, Layer 3 testnet data)
+
+Sanctioned by the same migration trigger as the 2026-06-11 addendum: Layer 3
+doing exactly its job — surfacing execution-layer defects on play money that
+would otherwise have surfaced at STAGE_1.
+
+**Defect.** All three live signals that reached the Layer 3 shadow after the
+Gate A fix (ENSUSDT 2026-06-19 08:00, KAVAUSDT 2026-06-20 04:00 and
+2026-06-23 08:00 UTC) were rejected by the testnet with -1111 "Precision is
+over the maximum defined for this asset": `qty = stake / stop_distance` was
+serialized at full float precision (e.g. `828088.2810…`), never aligned to
+the symbol's LOT_SIZE step (KAVA/ENS: 0.1). Every prior gate passed — the
+order died at the exchange filter layer. CRITICAL Telegram alerts fired per
+design on all three rejections. The parity clock is therefore still at zero.
+
+**Fix (fix commit d08ee30).** `BinanceLive` lazily fetches LOT_SIZE +
+MARKET_LOT_SIZE from `/fapi/v1/exchangeInfo` (cached per process; coarser
+step / tighter maxQty of the two governs, entry orders being MARKET), floors
+qty to the step through a fixed-decimal round-trip so it serializes cleanly,
+and rejects loudly (CRITICAL) when the quantized qty falls outside
+[minQty, maxQty]. exchangeInfo failure is fail-CLOSED (WARN, no order) — the
+unquantized order was a guaranteed rejection anyway.
+
+**Known residual.** Testnet KAVAUSDT/ENSUSDT `maxQty = 1,000,000`: the
+$1,000-stake shadow on the tightest stops (the 06-23 KAVA signal sized to
+qty 1.76M) still cannot be placed — now rejected pre-flight by us, loudly,
+instead of by the venue. This is a stake-geometry limit, not a defect:
+STAGE_1's $100 stake sits 10× under the cap. Parity dispositions should note
+any such skipped signal.
+
+**No locked thresholds, stages, gates, or parity tolerances change.**
