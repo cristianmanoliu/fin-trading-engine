@@ -98,6 +98,20 @@ type BinanceLive struct {
 	// wg tracks in-flight order-handling goroutines so Summary + tests can
 	// drain them deterministically.
 	wg sync.WaitGroup
+
+	// Symbol quantity filters, fetched lazily from /fapi/v1/exchangeInfo
+	// before the first order and cached for the process lifetime
+	// (mu-guarded). A quantity sent with more precision than the symbol's
+	// LOT_SIZE stepSize is rejected -1111 "Precision is over the maximum"
+	// — which silently blocked all three Layer 3 testnet entries
+	// 2026-06-19..23 (qty = stake/stop_dist is essentially never
+	// step-aligned). Entry sizing floors qty to qtyStep; fetch failure is
+	// fail-CLOSED (no order) so a filters outage can't reintroduce -1111.
+	filtersOK   bool
+	qtyStep     float64
+	qtyMin      float64
+	qtyMax      float64
+	qtyDecimals int
 }
 
 // MainnetAPIBaseURL is the production Binance USDT-M Futures REST endpoint.
@@ -217,6 +231,34 @@ func (b *BinanceLive) handleSignalSync(sig *models.Signal) {
 		return
 	}
 	qty := b.StakeUSD / stopDist
+
+	// Quantize to the symbol's exchange filters. Fail-CLOSED when filters are
+	// unavailable: sending the raw float is a guaranteed -1111 rejection
+	// anyway, and a loud skip is more honest than a cryptic exchange error.
+	if err := b.ensureSymbolFilters(); err != nil {
+		slog.Error("signal rejected: symbol filters unavailable",
+			"symbol", b.Symbol, "err", err)
+		if b.Notifier != nil {
+			_ = b.Notifier.SendStructured(context.Background(), notify.SeverityWarn,
+				fmt.Sprintf("Entry skipped on %s: exchangeInfo filters unavailable: %v", b.Symbol, err))
+		}
+		return
+	}
+	b.mu.Lock()
+	step, minQty, maxQty, decimals := b.qtyStep, b.qtyMin, b.qtyMax, b.qtyDecimals
+	b.mu.Unlock()
+	qty = quantizeQty(qty, step, decimals)
+	if qty <= 0 || (minQty > 0 && qty < minQty) || (maxQty > 0 && qty > maxQty) {
+		slog.Error("signal rejected: quantized qty outside symbol bounds",
+			"symbol", b.Symbol, "qty", qty, "min_qty", minQty, "max_qty", maxQty,
+			"step", step, "stake_usd", b.StakeUSD, "stop_dist", stopDist)
+		if b.Notifier != nil {
+			_ = b.Notifier.SendStructured(context.Background(), notify.SeverityCritical,
+				fmt.Sprintf("Entry REJECTED on %s: quantized qty %v outside bounds [%v, %v] (step %v)",
+					b.Symbol, qty, minQty, maxQty, step))
+		}
+		return
+	}
 
 	// Phase 1 (under lock): check position-already-open + snapshot last tick
 	// for Gate C bid/ask substitute.
@@ -1848,4 +1890,123 @@ func (k *KillSwitch) KillAll(ctx context.Context, positions []ClosePosition, rea
 			failureCount, len(positions), reason)
 	}
 	return result, nil
+}
+
+// ── Symbol quantity filters (lazy exchangeInfo fetch + quantization) ─────────
+
+// ensureSymbolFilters fetches LOT_SIZE + MARKET_LOT_SIZE for b.Symbol from
+// /fapi/v1/exchangeInfo once and caches the result (mu-guarded). Entry orders
+// are MARKET, so both filters apply: the effective step/minQty is the coarser
+// of the two, the effective maxQty the tighter. Concurrent callers may
+// double-fetch harmlessly; a failed fetch is retried on the next signal.
+func (b *BinanceLive) ensureSymbolFilters() error {
+	b.mu.Lock()
+	if b.filtersOK {
+		b.mu.Unlock()
+		return nil
+	}
+	b.mu.Unlock()
+
+	if b.OrderRouter == nil || b.OrderRouter.HTTPClient == nil {
+		return fmt.Errorf("OrderRouter not configured for exchangeInfo fetch")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		b.OrderRouter.APIBaseURL+"/fapi/v1/exchangeInfo?symbol="+url.QueryEscape(b.Symbol), nil)
+	if err != nil {
+		return err
+	}
+	resp, err := b.OrderRouter.HTTPClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("exchangeInfo: %w", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("exchangeInfo %d: %s", resp.StatusCode, body)
+	}
+
+	var info struct {
+		Symbols []struct {
+			Symbol  string `json:"symbol"`
+			Filters []struct {
+				FilterType string `json:"filterType"`
+				StepSize   string `json:"stepSize"`
+				MinQty     string `json:"minQty"`
+				MaxQty     string `json:"maxQty"`
+			} `json:"filters"`
+		} `json:"symbols"`
+	}
+	if err := json.Unmarshal(body, &info); err != nil {
+		return fmt.Errorf("exchangeInfo parse: %w", err)
+	}
+
+	var step, minQty, maxQty float64
+	decimals := 0
+	found := false
+	for _, s := range info.Symbols {
+		if s.Symbol != b.Symbol {
+			continue
+		}
+		for _, f := range s.Filters {
+			if f.FilterType != "LOT_SIZE" && f.FilterType != "MARKET_LOT_SIZE" {
+				continue
+			}
+			fs, _ := strconv.ParseFloat(f.StepSize, 64)
+			fmin, _ := strconv.ParseFloat(f.MinQty, 64)
+			fmax, _ := strconv.ParseFloat(f.MaxQty, 64)
+			if fs <= 0 {
+				continue
+			}
+			found = true
+			if fs > step {
+				step = fs
+				decimals = stepDecimals(f.StepSize)
+			}
+			if fmin > minQty {
+				minQty = fmin
+			}
+			if fmax > 0 && (maxQty == 0 || fmax < maxQty) {
+				maxQty = fmax
+			}
+		}
+	}
+	if !found {
+		return fmt.Errorf("exchangeInfo: no LOT_SIZE filter for %s in response", b.Symbol)
+	}
+
+	b.mu.Lock()
+	b.qtyStep, b.qtyMin, b.qtyMax, b.qtyDecimals = step, minQty, maxQty, decimals
+	b.filtersOK = true
+	b.mu.Unlock()
+	slog.Info("symbol filters loaded", "symbol", b.Symbol,
+		"qty_step", step, "min_qty", minQty, "max_qty", maxQty)
+	return nil
+}
+
+// stepDecimals returns the number of significant decimal places in a Binance
+// stepSize string ("0.00100000" → 3, "1" → 0).
+func stepDecimals(step string) int {
+	i := strings.IndexByte(step, '.')
+	if i < 0 {
+		return 0
+	}
+	frac := strings.TrimRight(step[i+1:], "0")
+	return len(frac)
+}
+
+// quantizeQty floors qty to an exact multiple of step, re-parsed through a
+// fixed-decimal string so the result serializes cleanly (3333*0.001 is
+// 3.3330000000000002 in float64; the exchange wants "3.333").
+func quantizeQty(qty, step float64, decimals int) float64 {
+	if step <= 0 {
+		return qty
+	}
+	q := math.Floor(qty/step+1e-9) * step
+	f, err := strconv.ParseFloat(strconv.FormatFloat(q, 'f', decimals, 64), 64)
+	if err != nil {
+		return q
+	}
+	return f
 }

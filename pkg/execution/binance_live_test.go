@@ -130,6 +130,14 @@ func orderHandler(t *testing.T, fills []orderFill) http.HandlerFunc {
 	var calls int32
 	return func(w http.ResponseWriter, req *http.Request) {
 		switch {
+		case strings.Contains(req.URL.Path, "/fapi/v1/exchangeInfo"):
+			// Step fine enough that every qty these tests produce is already
+			// step-aligned — quantization is a no-op for pre-existing tests.
+			sym := req.URL.Query().Get("symbol")
+			if sym == "" {
+				sym = "BTCUSDT"
+			}
+			_, _ = w.Write([]byte(exchangeInfoBody(sym, "0.001", "0.001", "100000000")))
 		case strings.Contains(req.URL.Path, "/fapi/v1/order"):
 			n := int(atomic.AddInt32(&calls, 1)) - 1
 			var f orderFill
@@ -448,6 +456,10 @@ func TestBinanceLive_OnTick_DoubleClose_Prevented(t *testing.T) {
 	dir := t.TempDir()
 	var orderCalls int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if strings.Contains(req.URL.Path, "/fapi/v1/exchangeInfo") {
+			w.Write([]byte(exchangeInfoBody("BTCUSDT", "0.001", "0.001", "100000000")))
+			return
+		}
 		if strings.Contains(req.URL.Path, "/fapi/v1/order") {
 			n := atomic.AddInt32(&orderCalls, 1)
 			if n == 1 {
@@ -953,8 +965,17 @@ func TestBinanceLive_Recover_RepopulatesGateBLossesAcrossRestart(t *testing.T) {
 
 	// No exchange call expected — fully-closed journal short-circuits the
 	// recovery before FetchExchangePosition. Use a server that fails loudly
-	// if hit, so a regression that adds a stray HTTP call surfaces.
+	// if hit, so a regression that adds a stray HTTP call surfaces. The one
+	// exception: the post-recovery OnSignal below legitimately fetches
+	// exchangeInfo (qty quantization precedes the gates), gated by allowInfo
+	// so a stray fetch DURING recovery still fails loudly.
+	var allowInfo int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if strings.Contains(req.URL.Path, "/fapi/v1/exchangeInfo") &&
+			atomic.LoadInt32(&allowInfo) == 1 {
+			_, _ = w.Write([]byte(exchangeInfoBody("BTCUSDT", "0.001", "0.001", "100000000")))
+			return
+		}
 		t.Errorf("unexpected HTTP call during fully-closed journal recovery: %s", req.URL.Path)
 		w.WriteHeader(500)
 	}))
@@ -979,6 +1000,7 @@ func TestBinanceLive_Recover_RepopulatesGateBLossesAcrossRestart(t *testing.T) {
 	}
 
 	// End-to-end: Gate B must now block a new entry when DailyLossUSDCap < $500.
+	atomic.StoreInt32(&allowInfo, 1)
 	bl.SafetyGates.DailyLossUSDCap = 100
 	bl.OnSignal(&models.Signal{
 		Symbol: "BTCUSDT", Side: models.Short,
@@ -2572,5 +2594,167 @@ func TestPositionReconciler_Run_CtxCancelDuringBackoff_ReturnsPromptly(t *testin
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatalf("Run did not return within 5s of cancel — backoff (%v) blocked ctx cancellation", r.RateLimitBackoff)
+	}
+}
+
+// ── Quantity quantization (Layer 3 incident 2026-06-19..23: three live
+// signals rejected -1111 "Precision is over the maximum" because
+// qty=stake/stop_dist was sent with full float precision, unrounded to the
+// symbol's LOT_SIZE step) ────────────────────────────────────────────────────
+
+// exchangeInfoBody returns a minimal /fapi/v1/exchangeInfo response with the
+// given LOT_SIZE / MARKET_LOT_SIZE step+min+max.
+func exchangeInfoBody(sym, step, minQty, maxQty string) string {
+	return fmt.Sprintf(`{"symbols":[{"symbol":"%s","filters":[
+		{"filterType":"LOT_SIZE","stepSize":"%s","minQty":"%s","maxQty":"%s"},
+		{"filterType":"MARKET_LOT_SIZE","stepSize":"%s","minQty":"%s","maxQty":"%s"}
+	]}]}`, sym, step, minQty, maxQty, step, minQty, maxQty)
+}
+
+// quantMock serves exchangeInfo + captures the quantity param of each order.
+type quantMock struct {
+	infoBody   string
+	infoStatus int32 // http status for exchangeInfo (0 → 200)
+	infoCalls  int32
+	orderQtys  []string
+	mu         sync.Mutex
+}
+
+func (m *quantMock) handler() http.HandlerFunc {
+	return func(w http.ResponseWriter, req *http.Request) {
+		switch {
+		case strings.Contains(req.URL.Path, "/fapi/v1/exchangeInfo"):
+			atomic.AddInt32(&m.infoCalls, 1)
+			if s := atomic.LoadInt32(&m.infoStatus); s != 0 {
+				w.WriteHeader(int(s))
+				return
+			}
+			_, _ = w.Write([]byte(m.infoBody))
+		case strings.Contains(req.URL.Path, "/fapi/v1/order"):
+			m.mu.Lock()
+			m.orderQtys = append(m.orderQtys, req.URL.Query().Get("quantity"))
+			m.mu.Unlock()
+			_, _ = w.Write([]byte(`{"orderId":1,"status":"FILLED","executedQty":"1","avgPrice":"0.047"}`))
+		case strings.Contains(req.URL.Path, "/fapi/v2/positionRisk"):
+			_, _ = w.Write([]byte(`[{"symbol":"KAVAUSDT","positionAmt":"0","entryPrice":"0","positionSide":"BOTH"}]`))
+		default:
+			_, _ = w.Write([]byte(`{}`))
+		}
+	}
+}
+
+func kavaSignal() *models.Signal {
+	// stake 100 / stop_dist 0.0012 = 83333.333... — the -1111 shape.
+	return &models.Signal{
+		Symbol: "KAVAUSDT", Side: models.Short,
+		EntryPrice: 0.0468, StopLoss: 0.0480, TakeProfit: 0.0396,
+		Timestamp: time.Now().UTC(), Reason: "test",
+	}
+}
+
+func TestBinanceLive_OnSignal_QtyQuantizedToStepSize(t *testing.T) {
+	mock := &quantMock{infoBody: exchangeInfoBody("KAVAUSDT", "1", "1", "10000000")}
+	srv := httptest.NewServer(mock.handler())
+	defer srv.Close()
+	bl := newBinanceLiveWithMock(t, srv, t.TempDir())
+	bl.Symbol = "KAVAUSDT"
+
+	bl.OnSignal(kavaSignal())
+	bl.Wait()
+
+	if len(mock.orderQtys) != 1 {
+		t.Fatalf("orders sent = %d, want 1", len(mock.orderQtys))
+	}
+	if mock.orderQtys[0] != "83333" {
+		t.Errorf("order quantity = %q, want %q (floored to LOT_SIZE step 1)",
+			mock.orderQtys[0], "83333")
+	}
+	// Local position + reconciler must carry the QUANTIZED qty, not the raw
+	// stake/stop_dist — otherwise exits would try to close more than is open.
+	_, qty, _, ok := bl.PositionReconciler.LocalPosition("KAVAUSDT")
+	if !ok || qty != 83333 {
+		t.Errorf("reconciler qty = %v (ok=%v), want 83333", qty, ok)
+	}
+}
+
+func TestBinanceLive_OnSignal_QtyStep_FractionalStepStaysClean(t *testing.T) {
+	// step 0.001 with qty 100/0.0012*... — use BTC-ish numbers: stake 100,
+	// stop_dist 30 → qty 3.3333... → "3.333" exactly (no float dust).
+	mock := &quantMock{infoBody: exchangeInfoBody("BTCUSDT", "0.001", "0.001", "1000")}
+	srv := httptest.NewServer(mock.handler())
+	defer srv.Close()
+	bl := newBinanceLiveWithMock(t, srv, t.TempDir())
+
+	bl.OnSignal(&models.Signal{
+		Symbol: "BTCUSDT", Side: models.Short,
+		EntryPrice: 50000, StopLoss: 50030, TakeProfit: 49820,
+		Timestamp: time.Now().UTC(), Reason: "test",
+	})
+	bl.Wait()
+
+	if len(mock.orderQtys) != 1 {
+		t.Fatalf("orders sent = %d, want 1", len(mock.orderQtys))
+	}
+	if mock.orderQtys[0] != "3.333" {
+		t.Errorf("order quantity = %q, want %q", mock.orderQtys[0], "3.333")
+	}
+}
+
+func TestBinanceLive_OnSignal_ExchangeInfoFetchFails_FailClosed(t *testing.T) {
+	mock := &quantMock{infoStatus: 500}
+	srv := httptest.NewServer(mock.handler())
+	defer srv.Close()
+	bl := newBinanceLiveWithMock(t, srv, t.TempDir())
+	bl.Symbol = "KAVAUSDT"
+
+	bl.OnSignal(kavaSignal())
+	bl.Wait()
+
+	if len(mock.orderQtys) != 0 {
+		t.Fatalf("order sent despite unknown symbol filters (got %v) — must fail closed", mock.orderQtys)
+	}
+	if bl.position != nil {
+		t.Error("position set despite fail-closed entry")
+	}
+}
+
+func TestBinanceLive_OnSignal_QtyBelowMinQty_Rejected(t *testing.T) {
+	// step 1, minQty 100000: qty 83333 floors below minQty → reject, no order.
+	mock := &quantMock{infoBody: exchangeInfoBody("KAVAUSDT", "1", "100000", "10000000")}
+	srv := httptest.NewServer(mock.handler())
+	defer srv.Close()
+	bl := newBinanceLiveWithMock(t, srv, t.TempDir())
+	bl.Symbol = "KAVAUSDT"
+
+	bl.OnSignal(kavaSignal())
+	bl.Wait()
+
+	if len(mock.orderQtys) != 0 {
+		t.Fatalf("order sent despite qty < minQty (got %v)", mock.orderQtys)
+	}
+}
+
+func TestBinanceLive_OnSignal_ExchangeInfoCachedAcrossSignals(t *testing.T) {
+	mock := &quantMock{infoBody: exchangeInfoBody("KAVAUSDT", "1", "1", "10000000")}
+	srv := httptest.NewServer(mock.handler())
+	defer srv.Close()
+	bl := newBinanceLiveWithMock(t, srv, t.TempDir())
+	bl.Symbol = "KAVAUSDT"
+
+	bl.OnSignal(kavaSignal())
+	bl.Wait()
+	// Close the position locally so the second signal isn't blocked.
+	bl.mu.Lock()
+	bl.position = nil
+	bl.mu.Unlock()
+	bl.PositionReconciler.ClearLocalPosition("KAVAUSDT")
+	bl.OnSignal(kavaSignal())
+	bl.Wait()
+
+	if got := atomic.LoadInt32(&mock.infoCalls); got != 1 {
+		t.Errorf("exchangeInfo fetched %d times across 2 signals, want 1 (cached)", got)
+	}
+	if len(mock.orderQtys) != 2 {
+		t.Errorf("orders sent = %d, want 2", len(mock.orderQtys))
 	}
 }
