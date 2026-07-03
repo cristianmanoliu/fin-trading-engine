@@ -1,0 +1,101 @@
+# Venue-port admin checklist — Kraken account prep (2026-07-04)
+
+**Scope:** operator-side ADMINISTRATIVE prep only — accounts, KYC, API keys, funding
+rails. **No executor code, no port work, no real trades** — those stay locked behind
+the forward-paper verdict per `results/venue_scouting_2026-06-10.md` and the port lock
+in CLAUDE.md. The scouting note's "no accounts until verdict" non-action is overridden
+by explicit operator direction (2026-07-04): KYC latency is dead time post-verdict and
+account prep costs nothing under a KILL verdict.
+
+**Why now:** verdict lands ~2026-08-25 (150-trade gate). Kraken KYC + futures
+activation + SEPA rails can take days-to-weeks; doing it in parallel shaves that off
+time-to-STAGE_1 if the verdict is PROMOTE (or OPERATOR_REVIEW resolved as promote).
+
+---
+
+## Verified live 2026-07-04 (public instruments API, no auth)
+
+All 16 deployed symbols tradeable on Kraken Futures (`futures.kraken.com/derivatives/api/v3/instruments`):
+
+| Binance | Kraken perp | tier-1 max leverage | tick size |
+|---|---|---:|---|
+| ROSEUSDT | PF_ROSEUSD | 10× | 1e-06 |
+| BCHUSDT | PF_BCHUSD | 50× | 0.01 |
+| GRTUSDT | PF_GRTUSD | 20× | 1e-05 |
+| 1INCHUSDT | PF_1INCHUSD | 10× | 1e-05 |
+| ADAUSDT | PF_ADAUSD | 50× | 1e-05 |
+| KAVAUSDT | PF_KAVAUSD | 10× | 1e-05 |
+| 1000SHIBUSDT | PF_SHIBUSD | 50× | 1e-09 |
+| ENSUSDT | PF_ENSUSD | 20× | 0.001 |
+| XLMUSDT | PF_XLMUSD | 50× | 1e-05 |
+| IMXUSDT | PF_IMXUSD | 20× | 0.0001 |
+| ETCUSDT | PF_ETCUSD | 50× | 0.001 |
+| RUNEUSDT | PF_RUNEUSD | 20× | 0.0001 |
+| AVAXUSDT | PF_AVAXUSD | 50× | 0.001 |
+| APTUSDT | PF_APTUSD | 50× | 0.0001 |
+| DOTUSDT | PF_DOTUSD | 50× | 0.0001 |
+| FILUSDT | PF_FILUSD | 50× | 0.0001 |
+
+Notes vs the 2026-06-10 scouting doc:
+
+- **Leverage is better than the scouted blanket 10×:** 50× on 8 symbols, 20× on 5,
+  10× only on ROSE/1INCH/KAVA. Tier-1 initial margin = 2% / 5% / 10% respectively.
+  CAVEAT: instrument max ≠ what an EEA retail client is granted — verify actual
+  post-KYC limits (MiFID appropriateness outcome may cap lower). STAGE_1 margin
+  estimate stays conservatively at ~$1.5–2k until verified.
+- **1000SHIB unit conversion:** Binance trades the 1000-SHIB contract; Kraken trades
+  raw SHIB (PF_SHIBUSD, tick 1e-9). The port executor must convert qty ×1000 and
+  price ÷1000 for this symbol. Port-time detail; recorded here so it isn't lost.
+- All 16 are `flexible_futures` (multi-collateral perps), funding coefficient 8h —
+  funding-model re-basing vs our Binance 8h-cadence CSVs is a port-time task
+  (scouting finding #5), not admin.
+
+---
+
+## Checklist — Kraken (presumptive primary)
+
+Do in order; each step gates the next.
+
+- [ ] **1. Create Kraken account** at kraken.com — Romania onboards under
+  **Payward Europe (CySEC 342/17, MiFID II)**. Use a dedicated email; enable
+  2FA (authenticator app, not SMS) immediately.
+- [ ] **2. KYC to Intermediate, then Pro** — ID document + proof of residence +
+  occupation/funding questionnaire. Pro is the tier futures wants; Intermediate
+  unlocks SEPA. Expect hours-to-days.
+- [ ] **3. Activate Kraken Futures** — sign in at futures.kraken.com with the same
+  account; complete the EEA derivatives **appropriateness questionnaire** (MiFID II).
+  Record the leverage limits actually granted (see caveat above).
+- [ ] **4. Verify the fee schedule on YOUR account** — expect base tier
+  5bp taker / 2bp maker (10bp RT = the exact `--fee-bps 10` backtest assumption).
+  Screenshot/record the EEA fee page for the port pre-reg.
+- [ ] **5. SEPA EUR test deposit** (~€100) — verifies the funding rail end-to-end.
+  Do NOT fund beyond a test amount before the verdict. EUR is accepted as futures
+  collateral (scouting finding #2) — confirm EUR shows as usable margin collateral
+  in the futures wallet, or whether conversion to USD-equivalent is required.
+- [ ] **6. Create TWO API key pairs** on futures.kraken.com (Settings → API keys):
+  - `read-only` — monitoring/reconciliation.
+  - `trade` — order placement (Kraken Futures keys cannot withdraw; withdrawals
+    live on the spot account — confirm this on the key-creation screen).
+  Store in `~/.kraken-futures.env` (same pattern as `~/.binance-testnet.env`);
+  never in the repo. Note creation date for rotation hygiene.
+- [ ] **7. Demo environment** — create a **demo-futures.kraken.com** account +
+  demo API keys. This is the Layer-2/Layer-3-equivalent venue for the port's
+  validation gates; confirming it works NOW de-risks the port timeline.
+  Smoke test: authenticated `GET /derivatives/api/v3/accounts` returns 200.
+- [ ] **8. Record everything** in a short note (account tier granted, leverage
+  limits, fee tier, collateral behavior, demo creds location) — input to the
+  port pre-registration.
+
+## Checklist — OKX EU (fallback, optional / lower priority)
+
+- [ ] Create account under the OKX EU (MiCA/MiFID II) entity; KYC only.
+- [ ] Verify whether **crypto-perp retail access** is actually granted to a Romanian
+  retail client (scouting couldn't confirm; their API geo-403'd our IP). If perps
+  aren't retail-accessible, note it and stop — Bybit EU re-check happens at port time.
+
+## What NOT to do (unchanged locks)
+
+- No executor code, no Kraken adapter, no port pre-registration work (that opens at
+  verdict; needs operator sanction to draft earlier).
+- No real positions anywhere; test deposit stays idle.
+- No changes to the live paper run, its symbols, or its config.

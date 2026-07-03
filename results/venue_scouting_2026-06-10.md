@@ -76,6 +76,16 @@ No code, no accounts, no executor work until the forward-paper verdict. If PROMO
 the port milestone opens with this note as input and pre-registers: venue, fee/funding
 re-basing, margin-concurrency model, Layer 2/3-equivalent gates on the chosen venue.
 
+## Addendum (2026-07-04): Kraken leverage is per-instrument, not blanket 10×
+
+Re-verified against the instruments API during account-prep (operator-sanctioned;
+see `docs/venue_port_admin_checklist.md`): tier-1 max leverage is **50× on 8 of the
+deployed-16, 20× on 5, 10× only on ROSE/1INCH/KAVA** (initial margin 2%/5%/10%).
+Finding #3's margin math was built on the conservative blanket 10× — it remains the
+planning number until post-KYC EEA-retail limits are recorded. Also: Kraken trades raw
+SHIB (`PF_SHIBUSD`), so the port executor needs a ×1000 unit conversion vs Binance's
+1000SHIBUSDT contract.
+
 ## Addendum: exact live-config backtest on the FULL 57 universe (2026-06-10, operator question)
 
 First-ever run of the EXACT live config (EMA9/21 4H short 6:1 mh504 fundingCSV fee10/slip5)
