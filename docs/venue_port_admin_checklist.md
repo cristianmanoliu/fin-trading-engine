@@ -78,10 +78,23 @@ Do in order; each step gates the next.
     live on the spot account — confirm this on the key-creation screen).
   Store in `~/.kraken-futures.env` (same pattern as `~/.binance-testnet.env`);
   never in the repo. Note creation date for rotation hygiene.
-- [ ] **7. Demo environment** — create a **demo-futures.kraken.com** account +
+- [x] **7. Demo environment** — create a **demo-futures.kraken.com** account +
   demo API keys. This is the Layer-2/Layer-3-equivalent venue for the port's
   validation gates; confirming it works NOW de-risks the port timeline.
   Smoke test: authenticated `GET /derivatives/api/v3/accounts` returns 200.
+
+  **Status 2026-07-04:** demo account + full-access API keys created (operator).
+  Creds in `~/.kraken-futures-demo.env` (chmod 600, NOT in repo). Smoke tool
+  committed: `scripts/kraken_demo_smoke.py` (read-only, stdlib-only; implements
+  the Futures v3 signing scheme — HMAC-SHA512 over SHA256(postData+nonce+path),
+  path stripped of `/derivatives`). **200-confirmation PENDING:** the demo
+  `/derivatives` REST gateway returned 503 for ALL endpoints incl. public
+  unauthenticated ones (instruments/tickers) while prod returned 200 and the
+  demo history API worked — a demo-side partial outage, not an auth problem.
+  Re-run `python3 scripts/kraken_demo_smoke.py` until it prints SMOKE PASS.
+  **Port-pre-reg note:** demo REST availability is NOT 100%; the port's
+  Layer-2/3-equivalent gates must tolerate demo outages (retry/backoff, don't
+  count outage windows as parity failures).
 - [ ] **8. Record everything** in a short note (account tier granted, leverage
   limits, fee tier, collateral behavior, demo creds location) — input to the
   port pre-registration.
