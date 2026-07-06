@@ -95,6 +95,18 @@ Do in order; each step gates the next.
   **Port-pre-reg note:** demo REST availability is NOT 100%; the port's
   Layer-2/3-equivalent gates must tolerate demo outages (retry/backoff, don't
   count outage windows as parity failures).
+
+  **Status 2026-07-06:** outage ONGOING (day 3). Ruled out on our end:
+  VPS (different IP) gets the identical 503-demo/200-prod split, so it is
+  NOT an IP block (cf. the Layer-3 reconciler self-ban); Kraken's status
+  page does not cover the demo environment, so there is no incident feed.
+  **Retry policy (operator-chosen): MANUAL — run
+  `python3 scripts/kraken_demo_smoke.py` at the START of every session
+  until SMOKE PASS.** An automated watcher exists but is deliberately NOT
+  installed: `scripts/kraken_demo_recovery_watch.sh` (tested; polls demo
+  public endpoint, one-shot plain-text Telegram on 200, marker-file
+  disarm). If the outage drags past ~2026-07-13, reconsider installing it
+  (one crontab line on the VPS) and/or contact Kraken support.
 - [ ] **8. Record everything** in a short note (account tier granted, leverage
   limits, fee tier, collateral behavior, demo creds location) — input to the
   port pre-registration.
