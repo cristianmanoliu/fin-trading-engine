@@ -1,0 +1,37 @@
+══════════════════════════════════════════════════════════════════════════════
+  LAG SUMMARY  2026-07-05T06:07:31Z  →  root@178.105.24.230
+══════════════════════════════════════════════════════════════════════════════
+
+  Per-engine source-to-receipt lag (latest heartbeat):
+
+  symbol         p50_ms    p99_ms    max_ms    samples   tier
+  ------         ------    ------    ------    -------   ----
+  roseusdt       4931      10050     10257     256       TYPICAL
+  bchusdt        4473      10168     10227     256       TYPICAL
+  grtusdt        5382      10352     10746     256       TYPICAL
+  1inchusdt      5279      10243     10292     256       TYPICAL
+  adausdt        5810      10169     10267     256       TYPICAL
+  kavausdt       4377      10072     10246     256       TYPICAL
+  1000shibusdt   4863      10181     10223     256       TYPICAL
+  ensusdt        4685      10054     10276     256       TYPICAL
+  xlmusdt        5953      10103     10239     256       TYPICAL
+  imxusdt        5932      10037     10164     256       TYPICAL
+  etcusdt        4585      10161     10267     256       TYPICAL
+  runeusdt       5252      10064     10181     256       TYPICAL
+  avaxusdt       5908      10209     10250     256       TYPICAL
+  aptusdt        5469      10156     10280     256       TYPICAL
+  dotusdt        5696      10149     10275     256       TYPICAL
+  filusdt        6036      10130     10185     256       TYPICAL
+
+  Fleet rollup:
+    OK        : 0 engines
+    TYPICAL   : 16 engines
+    DEGRADED  : 0 engines
+    HIGH      : 0 engines
+    NO_DATA   : 0 engines
+
+    Max p99 across fleet: 10352ms (grtusdt)
+    Median p99:           10156ms
+
+  >>> VERDICT: HEALTHY (no degraded engines)
+══════════════════════════════════════════════════════════════════════════════

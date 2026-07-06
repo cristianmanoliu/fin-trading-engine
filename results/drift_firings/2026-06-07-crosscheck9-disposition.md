@@ -274,3 +274,79 @@ no structural evidence of edge-death. The 06-28 mechanical KILL snapshot is
 - n=75 closed trades, day 50 — approaching the 60d/150-trade power floor.
   Earliest STAGE_1 estimated ~2026-08-17 per forward paper snapshot.
 - All 16 engines TYPICAL lag tier, fleet healthy.
+
+## 2026-07-05 checkpoint — HOLD (9th consecutive censoring-benign reading)
+
+**Drift cron:** weekly launchd fired 2026-07-05 06:07:09 UTC (`drift_check_history.jsonl`
+exit 1 DRIFT_FIRED). Auto-generated decision snapshots emitted mechanical
+`VERDICT: KILL (Rule 1)` — same 2026-05-27 ↔ 2026-06-07 firing pair, not a new
+signal. Cross-check 9 below is the human gate.
+
+**Journals fetched:** 2026-07-06 (`scripts/journal_fetch.sh`).
+**Tool:** `python3 scripts/crosscheck9_losers_mae.py --prior-max 1.071` (read-only, exit 0).
+
+### Condition 1 — `mae_r` flat ✓ PASS
+
+```
+mae_r losers: n=65  min=1.0000  max=1.0710  mean=1.0094  p50=1.0050
+>1.071 (prior max): 0 trades
+>1.10 (edge-death threshold): 0 trades
+```
+
+Max unchanged at 1.0710 vs 06-28 (n=64→65, +1 loser, max pinned). Mean
+−0.0001 — distribution stable, not drifting deeper. **No structural
+deepening.**
+
+### Condition 2 — open positions favorable ✓ PASS
+
+3 open positions (all SHORT). Live marks via
+`fapi.binance.com/fapi/v1/ticker/price` 2026-07-06:
+
+```
+1000SHIBUSDT  entry=0.004903  curr=0.004340  R=+3.68  (+11.5% below entry)
+1INCHUSDT     entry=0.07210   curr=0.07120   R=+0.28  (+1.2% below entry)
+APTUSDT       entry=0.65730   curr=0.61890   R=+0.98  (+5.8% below entry)
+```
+
+All 3 favorable (current below entry). **Predominantly favorable → PASS.**
+(RUNE closed 2026-07-03 20:20 at −$1,049 / mfe_r 1.734 — textbook benign
+censoring, was +1.7R before reversing to the stop.)
+
+### Condition 3 — `n_closed_winners < ~15` ✓ PASS
+
+```
+outcome breakdown: 65 STOP, 13 TARGET
+n_closed_winners: 13
+```
+
+13 < 15. Unchanged since 06-28; WR ≈16.7% (13/78) — still inside the
+censoring regime, no winner-count blowout.
+
+### Rule-6 rationale decomposition (advisory)
+
+`python3 scripts/drift_decompose.py` (exit 0, recipe per
+`docs/findings/2026-07-04.md`): **BENIGN-consistent.** Target-win
+like-for-like gap −0.7% (flip < −5%); live stop-overshoot +1.9bp of
+notional over 65 losers (flip > 10bp). Like-for-like edge geometry matches
+the 2026-05-07 backtest reference; loss-side gap remains cost-scaling.
+
+### Mechanical verdict
+
+All three conditions PASS → **CENSORING-BENIGN → HOLD.** 9th consecutive
+reading. The detector's winner-truncation blindspot continues to suppress WR;
+no structural evidence of edge-death. The 07-05 mechanical KILL snapshot is
+**NOT honored** — same firing pair, same benign cause. Forward-paper continues.
+
+### Notable this week
+
+- **60-day power floor crosses ~2026-07-08** (day 57/60 at snapshot time).
+  Trade floor still distant: 78/150 closed. Per CLAUDE.md the promotion
+  thresholds apply literally — whichever comes second — so the 150-trade
+  floor governs; earliest verdict remains ~2026-08-25.
+- Realized PnL $+345 (was +$3,745 at 06-28): RUNE stop −$1,049 plus two
+  further stops (n 75→78). Still net-positive; unrealized R on the 3 opens
+  is strongly favorable (SHIB +3.68R).
+- 1000SHIBUSDT + APTUSDT hit 504h max-hold ~2026-07-08 20:00 UTC — expect
+  max-hold closes journaled with the lying outcome label; classify by
+  realized R.
+- Fleet: all 16 engines TYPICAL lag tier, max p99 10.4s — HEALTHY.
