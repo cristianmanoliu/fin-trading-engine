@@ -107,6 +107,22 @@ Do in order; each step gates the next.
   public endpoint, one-shot plain-text Telegram on 200, marker-file
   disarm). If the outage drags past ~2026-07-13, reconsider installing it
   (one crontab line on the VPS) and/or contact Kraken support.
+
+  **Status 2026-07-06 (later, outage day 4): PIVOT to prod smoke —
+  operator decision.** The step-7 INTENT (confirm our v3 signing code
+  against a live Kraken Futures gateway) no longer waits on the demo:
+  `scripts/kraken_demo_smoke.py --prod` smokes the REAL
+  futures.kraken.com account instead (read-only `GET /accounts`, no
+  orders, no balance needed; creds from step 6's read-only key in
+  `~/.kraken-futures.env`, keys `KRAKEN_API_KEY`/`KRAKEN_API_SECRET`).
+  Tests: `scripts/test_kraken_demo_smoke.py`. Prod smoke is gated on the
+  operator completing steps 1–6 (started 2026-07-06). Demo remains the
+  preferred order-placement sandbox at port time; if the demo env is
+  still unreliable then, the port pre-reg may designate €100-scale prod
+  micro-orders as the Layer-2-equivalent — that is a PORT-TIME pre-reg
+  decision, NOT sanctioned now. The manual demo retry continues only as
+  a low-effort session-start habit until either SMOKE PASS or prod
+  smoke passes (whichever first closes step 7's intent).
 - [ ] **8. Record everything** in a short note (account tier granted, leverage
   limits, fee tier, collateral behavior, demo creds location) — input to the
   port pre-registration.
@@ -122,5 +138,8 @@ Do in order; each step gates the next.
 
 - No executor code, no Kraken adapter, no port pre-registration work (that opens at
   verdict; needs operator sanction to draft earlier).
-- No real positions anywhere; test deposit stays idle.
+- No real positions anywhere; test deposit stays idle. **The 2026-07-06 prod-smoke
+  pivot does NOT relax this: prod API access is read-only verification, the €100
+  step-5 deposit sits untouched, and no order is placed on any venue before the
+  forward-paper verdict.**
 - No changes to the live paper run, its symbols, or its config.
