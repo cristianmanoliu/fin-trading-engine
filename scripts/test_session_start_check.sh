@@ -90,7 +90,8 @@ if [[ -n "${SSH_FIXTURE_FILE:-}" ]] && [[ -f "$SSH_FIXTURE_FILE" ]]; then
     cat "$SSH_FIXTURE_FILE"
     exit 0
 fi
-# Default fixture: 16 active services, 0 failed, drift fresh (now-2d), layer3 fresh (now-1h).
+# Default fixture: 16 active services, 0 failed, drift fresh (now-2d), layer3
+# fresh (now-1h), no alert-worthy log lines.
 NOW=$(date -u +%s)
 DRIFT_TS=$((NOW - 86400 * 2))
 LAYER3_TS=$((NOW - 3600))
@@ -106,6 +107,7 @@ cat <<TAIL
 ${DRIFT_TS}
 === layer3 ===
 ${LAYER3_TS}
+=== alerts ===
 === ts ===
 ${NOW}
 TAIL
@@ -136,6 +138,7 @@ assert_contains "T1 ci success" "$out" "CI green on main"
 assert_contains "T1 services" "$out" "16 services active on VPS, 0 failed"
 assert_contains "T1 drift fresh" "$out" "drift detector last ran 2d ago"
 assert_contains "T1 layer3 fresh" "$out" "Layer 3 cron last ran 0d ago"
+assert_contains "T1 no alerts" "$out" "no alert-worthy engine-log lines"
 assert_contains "T1 CLEAN" "$out" "CLEAN — safe to proceed"
 
 # ── T2: CI failed on main → WARN ───────────────────────────────────────────
@@ -181,6 +184,7 @@ cat > "$ssh_failed" <<EOF
 $((NOW - 86400 * 2))
 === layer3 ===
 $((NOW - 3600))
+=== alerts ===
 === ts ===
 ${NOW}
 EOF
@@ -206,6 +210,7 @@ $(for i in $(seq 1 16); do echo "  paper-live@sym${i}.service"; done)
 $((NOW - 86400 * 10))
 === layer3 ===
 $((NOW - 3600))
+=== alerts ===
 === ts ===
 ${NOW}
 EOF
@@ -232,6 +237,7 @@ $(for i in $(seq 1 16); do echo "  paper-live@sym${i}.service"; done)
 missing
 === layer3 ===
 $((NOW - 3600))
+=== alerts ===
 === ts ===
 ${NOW}
 EOF
@@ -256,6 +262,7 @@ $(for i in $(seq 1 16); do echo "  paper-live@sym${i}.service"; done)
 $((NOW - 86400 * 2))
 === layer3 ===
 missing
+=== alerts ===
 === ts ===
 ${NOW}
 EOF
@@ -294,6 +301,61 @@ set -e
 assert_eq "T9 exit 0" "$rc" "0"
 assert_contains "T9 in-flight warn" "$out" "CI conclusion empty"
 assert_contains "T9 watch hint" "$out" "gh run watch 777"
+
+# ── T10: alert-worthy log lines on VPS → WARN with samples ─────────────────
+echo
+echo "── T10: engine-log alerts → WARN ──"
+ssh_alerts="${TMPDIR_ROOT}/ssh_alerts.txt"
+NOW=$(date -u +%s)
+cat > "$ssh_alerts" <<EOF
+=== services ===
+$(for i in $(seq 1 16); do echo "  paper-live@sym${i}.service"; done)
+=== failed ===
+=== drift ===
+$((NOW - 86400 * 2))
+=== layer3 ===
+$((NOW - 3600))
+=== alerts ===
+{"time":"2026-07-06T08:00:05Z","level":"WARN","msg":"signal rejected: quantized qty outside symbol bounds","symbol":"ENSUSDT"}
+{"time":"2026-07-06T09:00:00Z","level":"ERROR","msg":"telegram send failed (CRITICAL alert lost)"}
+=== ts ===
+${NOW}
+EOF
+
+set +e
+out=$(run_check "" "$ssh_alerts")
+rc=$?
+set -e
+
+assert_eq "T10 exit 0 (non-strict)" "$rc" "0"
+assert_contains "T10 alert warn" "$out" "2 alert-worthy engine-log line(s)"
+assert_contains "T10 sample shown" "$out" "quantized qty outside symbol bounds"
+assert_contains "T10 review msg" "$out" "review before substantive work"
+
+# ── T11: alerts section absent from remote output → WARN (fail-open guard) ──
+echo
+echo "── T11: alerts sentinel missing → WARN ──"
+ssh_no_sentinel="${TMPDIR_ROOT}/ssh_no_sentinel.txt"
+NOW=$(date -u +%s)
+cat > "$ssh_no_sentinel" <<EOF
+=== services ===
+$(for i in $(seq 1 16); do echo "  paper-live@sym${i}.service"; done)
+=== failed ===
+=== drift ===
+$((NOW - 86400 * 2))
+=== layer3 ===
+$((NOW - 3600))
+=== ts ===
+${NOW}
+EOF
+
+set +e
+out=$(run_check "" "$ssh_no_sentinel")
+rc=$?
+set -e
+
+assert_contains "T11 sentinel missing warn" "$out" "alerts section missing from remote output"
+assert_not_contains "T11 no false clean" "$out" "no alert-worthy engine-log lines"
 
 # ── Summary ─────────────────────────────────────────────────────────────────
 echo

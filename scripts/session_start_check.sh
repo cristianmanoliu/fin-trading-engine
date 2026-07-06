@@ -18,6 +18,13 @@
 #      OR Layer 3 wrapper if enabled).
 #   3. Drift detector freshness — should be ≤8 days (weekly cadence).
 #   4. Layer 3 cron freshness — should be ≤8 days if cron is installed.
+#   5. Alert-worthy engine-log lines (last 2 calendar days by the line's
+#      own slog "time" field, scanned across *.log + *.log.1) — slog ERROR
+#      plus the named WARN patterns that cover every historically-unnoticed
+#      CRITICAL Telegram (safety-gate block, order reject, position drift,
+#      telegram send failure). Added 2026-07-07 after three
+#      fired-but-unnoticed alerts. NOTE: the date filter runs remote-side,
+#      so the mock-ssh test harness cannot exercise it — verified live.
 #
 # This is NOT a replacement for post_deploy_check.sh (which is exhaustive
 # and runs as part of deploy). This is the minimal "did anything go
@@ -144,6 +151,15 @@ remote_combined=$(
         else
             echo "missing"
         fi
+        echo "=== alerts ==="
+        # Patterns mirror the historically-unnoticed alerts (see header §5).
+        # The date cutoff on the slog "time" field is load-bearing: the log
+        # dir contains stale never-rotated files (retired testnet-engine@,
+        # removed symbols) whose old lines would otherwise surface forever.
+        cutoff=$(date -u -d "2 days ago" +%Y-%m-%d)
+        grep -hE "\"level\":\"ERROR\"|signal blocked by safety gate|signal rejected|position drift detected|telegram send failed" \
+            /var/log/paper-live/*.log /var/log/paper-live/*.log.1 2>/dev/null \
+            | awk -F"\"" -v c="$cutoff" "substr(\$4,1,10) >= c" | tail -8
         echo "=== ts ==="
         date -u +%s
     ' 2>/dev/null
@@ -195,6 +211,25 @@ else
             add_ok "Layer 3 cron last ran ${age_days}d ago (≤${MAX_AGE_DAYS}d)"
         else
             add_warn "Layer 3 cron last ran ${age_days}d ago (>${MAX_AGE_DAYS}d) — weekly cron may be broken"
+        fi
+    fi
+
+    # --- 5. Alert-worthy engine-log lines (~48h) ---
+    # Missing sentinel is a WARN, not a silent pass — the remote script
+    # always emits it, so its absence means truncated/partial SSH output
+    # (audit-lens: never fail open on missing data).
+    if ! echo "$remote_combined" | grep -q '^=== alerts ==='; then
+        add_warn "alerts section missing from remote output — cannot verify engine-log alerts"
+    else
+        alert_lines=$(echo "$remote_combined" | awk '/=== alerts ===/{f=1;next}/===/{f=0}f')
+        if [[ -z "$alert_lines" ]]; then
+            add_ok "no alert-worthy engine-log lines (last ~48h of VPS logs)"
+        else
+            n_alerts=$(echo "$alert_lines" | grep -c .)
+            add_warn "${n_alerts} alert-worthy engine-log line(s) on VPS (last ~48h) — samples in ⓘ below; check the engine log at each ts"
+            while IFS= read -r aline; do
+                add_info "alert: ${aline:0:200}"
+            done <<< "$(echo "$alert_lines" | head -5)"
         fi
     fi
 fi
