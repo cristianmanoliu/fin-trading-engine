@@ -65,6 +65,18 @@ Do in order; each step gates the next.
 - [ ] **3. Activate Kraken Futures** — sign in at futures.kraken.com with the same
   account; complete the EEA derivatives **appropriateness questionnaire** (MiFID II).
   Record the leverage limits actually granted (see caveat above).
+
+  **Status 2026-07-07: FAILED the appropriateness questionnaire** — "not
+  currently eligible", retake allowed after 30 days (**~2026-08-06**, before
+  the ~2026-08-25 verdict, so the timeline still works with one clean pass).
+  Consequences while blocked: no futures activation → no futures API keys →
+  prod smoke (step 7 pivot) blocked too; steps 4/6/8 gate on this. Before the
+  retake: review derivatives mechanics (margin, leverage, liquidation,
+  funding, max-loss scenarios) — answer honestly, do NOT inflate real-money
+  trading history. If the retake also fails, re-rank venues: OKX EU likely
+  has the same MiFID gate; Hyperliquid has no appropriateness gate (DEX,
+  different risk profile — needs its own scouting pass). Support cannot
+  override MiFID eligibility; don't burn time there.
 - [ ] **4. Verify the fee schedule on YOUR account** — expect base tier
   5bp taker / 2bp maker (10bp RT = the exact `--fee-bps 10` backtest assumption).
   Screenshot/record the EEA fee page for the port pre-reg.
@@ -72,6 +84,12 @@ Do in order; each step gates the next.
   Do NOT fund beyond a test amount before the verdict. EUR is accepted as futures
   collateral (scouting finding #2) — confirm EUR shows as usable margin collateral
   in the futures wallet, or whether conversion to USD-equivalent is required.
+
+  **Status 2026-07-07: rail VERIFIED** — €10 SEPA deposit landed (shows as
+  ~10.72 USD in the spot portfolio view; whether that is display-currency
+  or an actual conversion is unresolved). The futures-collateral half of
+  this step is blocked on step 3 (no futures wallet access until the
+  appropriateness retake passes). Deposit sits idle per the lock.
 - [ ] **6. Create TWO API key pairs** on futures.kraken.com (Settings → API keys):
   - `read-only` — monitoring/reconciliation.
   - `trade` — order placement (Kraken Futures keys cannot withdraw; withdrawals
