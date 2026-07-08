@@ -90,10 +90,11 @@ if [[ -n "${SSH_FIXTURE_FILE:-}" ]] && [[ -f "$SSH_FIXTURE_FILE" ]]; then
     cat "$SSH_FIXTURE_FILE"
     exit 0
 fi
-# Default fixture: 16 active services, 0 failed, drift fresh (now-2d), layer3
-# fresh (now-1h), no alert-worthy log lines.
+# Default fixture: 16 active services, 0 failed, layer3 fresh (now-1h), no
+# alert-worthy log lines. NOTE: no drift section — drift freshness is a LOCAL
+# check (launchd runs the detector on the operator Mac; the VPS copy is a
+# stale rsync mirror). Fixtures must mirror the real remote writer.
 NOW=$(date -u +%s)
-DRIFT_TS=$((NOW - 86400 * 2))
 LAYER3_TS=$((NOW - 3600))
 cat <<HEADER
 === services ===
@@ -103,8 +104,6 @@ for i in $(seq 1 16); do
 done
 cat <<TAIL
 === failed ===
-=== drift ===
-${DRIFT_TS}
 === layer3 ===
 ${LAYER3_TS}
 === alerts ===
@@ -114,14 +113,30 @@ TAIL
 EOF
 chmod +x "$MOCK_SSH"
 
+# Portable "touch a file with mtime N days ago" (GNU date -d @ / BSD date -r).
+touch_days_ago() {
+    local file="$1" days="$2"
+    local epoch fmt
+    epoch=$(( $(date +%s) - 86400 * days ))
+    fmt=$(date -d "@${epoch}" +%Y%m%d%H%M.%S 2>/dev/null || date -r "$epoch" +%Y%m%d%H%M.%S)
+    : > "$file"
+    touch -t "$fmt" "$file"
+}
+
+# Default local drift-history fixture: fresh (now-2d).
+DRIFT_DEFAULT="${TMPDIR_ROOT}/drift_history_default.jsonl"
+touch_days_ago "$DRIFT_DEFAULT" 2
+
 run_check() {
     # Call with: <gh_fixture_file_or_empty> <ssh_fixture_file_or_empty> [extra args]
+    # Local drift-history path override via DRIFT_FIXTURE_FILE (default: fresh now-2d).
     local gh_fix="${1:-}"; shift
     local ssh_fix="${1:-}"; shift
     GH_FIXTURE_FILE="$gh_fix" \
     SSH_FIXTURE_FILE="$ssh_fix" \
     SESSION_CHECK_GH="$MOCK_GH" \
     SESSION_CHECK_SSH="$MOCK_SSH" \
+    SESSION_CHECK_DRIFT_HISTORY="${DRIFT_FIXTURE_FILE:-$DRIFT_DEFAULT}" \
         bash "$CHECK" "$@" 2>&1
 }
 
@@ -136,7 +151,7 @@ set -e
 assert_eq "T1 exit 0" "$rc" "0"
 assert_contains "T1 ci success" "$out" "CI green on main"
 assert_contains "T1 services" "$out" "16 services active on VPS, 0 failed"
-assert_contains "T1 drift fresh" "$out" "drift detector last ran 2d ago"
+assert_contains "T1 drift fresh" "$out" "drift detector last ran 2d ago (local"
 assert_contains "T1 layer3 fresh" "$out" "Layer 3 cron last ran 0d ago"
 assert_contains "T1 no alerts" "$out" "no alert-worthy engine-log lines"
 assert_contains "T1 CLEAN" "$out" "CLEAN — safe to proceed"
@@ -180,8 +195,6 @@ cat > "$ssh_failed" <<EOF
   paper-live@brokenA.service
   paper-live@brokenB.service
   paper-live@brokenC.service
-=== drift ===
-$((NOW - 86400 * 2))
 === layer3 ===
 $((NOW - 3600))
 === alerts ===
@@ -197,53 +210,26 @@ set -e
 assert_eq "T4 exit 0" "$rc" "0"
 assert_contains "T4 failed services warn" "$out" "3 failed service(s)"
 
-# ── T5: stale drift detector → WARN ────────────────────────────────────────
+# ── T5: stale LOCAL drift history (10d) → WARN ─────────────────────────────
 echo
-echo "── T5: drift detector stale (10d) → WARN ──"
-ssh_drift_stale="${TMPDIR_ROOT}/ssh_drift_stale.txt"
-NOW=$(date -u +%s)
-cat > "$ssh_drift_stale" <<EOF
-=== services ===
-$(for i in $(seq 1 16); do echo "  paper-live@sym${i}.service"; done)
-=== failed ===
-=== drift ===
-$((NOW - 86400 * 10))
-=== layer3 ===
-$((NOW - 3600))
-=== alerts ===
-=== ts ===
-${NOW}
-EOF
+echo "── T5: drift detector stale (10d, local file) → WARN ──"
+drift_stale="${TMPDIR_ROOT}/drift_history_stale.jsonl"
+touch_days_ago "$drift_stale" 10
 
 set +e
-out=$(run_check "" "$ssh_drift_stale")
+out=$(DRIFT_FIXTURE_FILE="$drift_stale" run_check "" "")
 rc=$?
 set -e
 
 assert_eq "T5 exit 0" "$rc" "0"
 assert_contains "T5 drift stale warn" "$out" "drift detector last ran 10d ago"
-assert_contains "T5 cron broken hint" "$out" "weekly cron may be broken"
+assert_contains "T5 launchd broken hint" "$out" "launchd job may be broken"
 
-# ── T6: missing drift history → WARN ───────────────────────────────────────
+# ── T6: missing LOCAL drift history → WARN ─────────────────────────────────
 echo
-echo "── T6: missing drift history → WARN ──"
-ssh_drift_missing="${TMPDIR_ROOT}/ssh_drift_missing.txt"
-NOW=$(date -u +%s)
-cat > "$ssh_drift_missing" <<EOF
-=== services ===
-$(for i in $(seq 1 16); do echo "  paper-live@sym${i}.service"; done)
-=== failed ===
-=== drift ===
-missing
-=== layer3 ===
-$((NOW - 3600))
-=== alerts ===
-=== ts ===
-${NOW}
-EOF
-
+echo "── T6: missing local drift history → WARN ──"
 set +e
-out=$(run_check "" "$ssh_drift_missing")
+out=$(DRIFT_FIXTURE_FILE="${TMPDIR_ROOT}/does_not_exist.jsonl" run_check "" "")
 rc=$?
 set -e
 
@@ -258,8 +244,6 @@ cat > "$ssh_layer3_missing" <<EOF
 === services ===
 $(for i in $(seq 1 16); do echo "  paper-live@sym${i}.service"; done)
 === failed ===
-=== drift ===
-$((NOW - 86400 * 2))
 === layer3 ===
 missing
 === alerts ===
@@ -311,8 +295,6 @@ cat > "$ssh_alerts" <<EOF
 === services ===
 $(for i in $(seq 1 16); do echo "  paper-live@sym${i}.service"; done)
 === failed ===
-=== drift ===
-$((NOW - 86400 * 2))
 === layer3 ===
 $((NOW - 3600))
 === alerts ===
@@ -341,8 +323,6 @@ cat > "$ssh_no_sentinel" <<EOF
 === services ===
 $(for i in $(seq 1 16); do echo "  paper-live@sym${i}.service"; done)
 === failed ===
-=== drift ===
-$((NOW - 86400 * 2))
 === layer3 ===
 $((NOW - 3600))
 === ts ===

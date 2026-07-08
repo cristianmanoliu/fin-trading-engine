@@ -17,6 +17,11 @@
 #   2. All systemd services active on the VPS (16 paper-live + 1 testnet
 #      OR Layer 3 wrapper if enabled).
 #   3. Drift detector freshness — should be ≤8 days (weekly cadence).
+#      Checked against the LOCAL results/drift_check_history.jsonl: the
+#      detector runs on the operator Mac via launchd
+#      (com.tradingengine.drift-check); the VPS copy is only an rsync
+#      mirror refreshed on deploy/sync, so its mtime goes stale whenever
+#      no deploy happens for a week — a false positive (hit 2026-07-08).
 #   4. Layer 3 cron freshness — should be ≤8 days if cron is installed.
 #   5. Alert-worthy engine-log lines (last 2 calendar days by the line's
 #      own slog "time" field, scanned across *.log + *.log.1) — slog ERROR
@@ -40,6 +45,8 @@
 #   SESSION_CHECK_GH          — gh binary (default: gh)
 #   SESSION_CHECK_SSH         — ssh binary (default: ssh)
 #   SESSION_CHECK_MAX_AGE_DAYS — staleness threshold (default: 8)
+#   SESSION_CHECK_DRIFT_HISTORY — local drift history path
+#                                 (default: <repo>/results/drift_check_history.jsonl)
 #
 # Exit codes:
 #   0  CLEAN — all checks pass OR warnings reported in non-strict mode
@@ -63,10 +70,13 @@ while [[ $# -gt 0 ]]; do
 done
 
 # --- env ---
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 VPS="${SESSION_CHECK_VPS:-root@178.105.24.230}"
 GH="${SESSION_CHECK_GH:-gh}"
 SSH="${SESSION_CHECK_SSH:-ssh}"
 MAX_AGE_DAYS="${SESSION_CHECK_MAX_AGE_DAYS:-8}"
+DRIFT_HISTORY="${SESSION_CHECK_DRIFT_HISTORY:-${ROOT}/results/drift_check_history.jsonl}"
 
 # --- output ---
 WARNINGS=()
@@ -133,15 +143,6 @@ remote_combined=$(
         systemctl list-units --type=service --state=failed --no-legend \
             "paper-live@*.service" "testnet-engine@*.service" 2>/dev/null \
             | awk "{print \$1}"
-        echo "=== drift ==="
-        # Drift detector freshness via history file mtime.
-        if [[ -f /opt/trading-engine/results/drift_check_history.jsonl ]]; then
-            stat -c %Y /opt/trading-engine/results/drift_check_history.jsonl 2>/dev/null \
-                || stat -f %m /opt/trading-engine/results/drift_check_history.jsonl 2>/dev/null \
-                || echo 0
-        else
-            echo "missing"
-        fi
         echo "=== layer3 ==="
         # Layer 3 cron history freshness (file may not exist if cron not installed yet).
         if [[ -f /var/log/paper-live/layer3_history.jsonl ]]; then
@@ -166,12 +167,11 @@ remote_combined=$(
 )
 
 if [[ -z "$remote_combined" ]]; then
-    add_warn "SSH to ${VPS} failed or returned empty — cannot check services/drift/layer3 freshness"
+    add_warn "SSH to ${VPS} failed or returned empty — cannot check services/layer3 freshness"
 else
     # Parse sections by sentinel markers.
     active_services=$(echo "$remote_combined" | awk '/=== services ===/{f=1;next}/===/{f=0}f')
     failed_services=$(echo "$remote_combined" | awk '/=== failed ===/{f=1;next}/===/{f=0}f')
-    drift_mtime=$(echo "$remote_combined" | awk '/=== drift ===/{getline; print}')
     layer3_mtime=$(echo "$remote_combined" | awk '/=== layer3 ===/{getline; print}')
     remote_now=$(echo "$remote_combined" | awk '/=== ts ===/{getline; print}')
 
@@ -184,19 +184,6 @@ else
         add_warn "VPS has ${n_failed} failed service(s). ssh ${VPS} 'systemctl --failed'"
     else
         add_warn "VPS only ${n_active} services active (expected ≥16 — deployed-16 paper-live cohort)"
-    fi
-
-    # --- 3. Drift detector freshness ---
-    if [[ "$drift_mtime" == "missing" ]]; then
-        add_warn "drift_check_history.jsonl missing on VPS — drift detector may have never run"
-    elif [[ "$drift_mtime" =~ ^[0-9]+$ ]] && [[ "$remote_now" =~ ^[0-9]+$ ]]; then
-        age_seconds=$(( remote_now - drift_mtime ))
-        age_days=$(( age_seconds / 86400 ))
-        if [[ "$age_days" -le "$MAX_AGE_DAYS" ]]; then
-            add_ok "drift detector last ran ${age_days}d ago (≤${MAX_AGE_DAYS}d)"
-        else
-            add_warn "drift detector last ran ${age_days}d ago (>${MAX_AGE_DAYS}d) — weekly cron may be broken"
-        fi
     fi
 
     # --- 4. Layer 3 cron freshness ---
@@ -231,6 +218,28 @@ else
                 add_info "alert: ${aline:0:200}"
             done <<< "$(echo "$alert_lines" | head -5)"
         fi
+    fi
+fi
+
+# --- 3. Drift detector freshness (LOCAL) ---
+# The detector runs on this machine via launchd (com.tradingengine.drift-check)
+# and appends to results/drift_check_history.jsonl. The VPS copy is an rsync
+# mirror that only refreshes on deploy/sync — checking it produced a false
+# stale-WARN whenever no deploy happened for >MAX_AGE_DAYS (2026-07-08).
+if [[ ! -f "$DRIFT_HISTORY" ]]; then
+    add_warn "drift_check_history.jsonl missing locally (${DRIFT_HISTORY}) — drift detector may have never run"
+else
+    drift_mtime=$(stat -c %Y "$DRIFT_HISTORY" 2>/dev/null || stat -f %m "$DRIFT_HISTORY" 2>/dev/null || echo "")
+    local_now=$(date +%s)
+    if [[ "$drift_mtime" =~ ^[0-9]+$ ]]; then
+        age_days=$(( (local_now - drift_mtime) / 86400 ))
+        if [[ "$age_days" -le "$MAX_AGE_DAYS" ]]; then
+            add_ok "drift detector last ran ${age_days}d ago (local, ≤${MAX_AGE_DAYS}d)"
+        else
+            add_warn "drift detector last ran ${age_days}d ago (>${MAX_AGE_DAYS}d) — weekly launchd job may be broken: launchctl list | grep drift-check"
+        fi
+    else
+        add_warn "cannot stat ${DRIFT_HISTORY} — drift freshness unknown"
     fi
 fi
 
