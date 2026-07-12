@@ -1,0 +1,2 @@
+ERROR: ssh to root@178.105.24.230 failed (exit=255) — could not fetch heartbeats
+ssh: connect to host 178.105.24.230 port 22: Network is unreachable

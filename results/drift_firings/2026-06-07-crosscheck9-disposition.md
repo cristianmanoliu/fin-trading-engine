@@ -350,3 +350,106 @@ no structural evidence of edge-death. The 07-05 mechanical KILL snapshot is
   max-hold closes journaled with the lying outcome label; classify by
   realized R.
 - Fleet: all 16 engines TYPICAL lag tier, max p99 10.4s — HEALTHY.
+
+## 2026-07-12 checkpoint — HOLD (10th consecutive censoring-benign reading)
+
+**Drift cron:** weekly launchd fired 2026-07-12 06:07:23 UTC but SSH to VPS
+was unreachable at that moment (`Network is unreachable`, exit 255). The run
+recorded `exit_code:3 verdict:ERROR` in `drift_check_history.jsonl` — NOT a
+firing. Auto-generated decision snapshots stamped `VERDICT: OPERATOR_REVIEW
+(Rule 2)` because both sibling scripts (kill/promote) errored on the same
+ssh fault. Cron `ssh: connect to host 178.105.24.230 port 22: Network is
+unreachable` cleared by 12:57 UTC (VPS pinged fine, 69d uptime, all engines
+active). Manual re-run of the full cross-check sequence below.
+
+**Journals fetched:** 2026-07-12 12:58 UTC (`scripts/journal_fetch.sh`).
+**Tool:** `python3 scripts/crosscheck9_losers_mae.py --prior-max 1.071` (read-only, exit 0).
+
+### Condition 1 — `mae_r` flat ✓ PASS
+
+```
+mae_r losers: n=72  min=1.0000  max=1.0710  mean=1.0091  p50=1.0050
+>1.071 (prior max): 0 trades
+>1.10 (edge-death threshold): 0 trades
+```
+
+Max unchanged at 1.0710 vs 07-05 (n=65→72, +7 losers, max pinned). Mean
+−0.0003 — distribution stable, not drifting deeper. **No structural
+deepening.**
+
+### Condition 2 — open positions favorable ✓ PASS
+
+10 open positions (all SHORT). Live marks from
+`results/forward_paper_snapshots/2026-07-12.txt` live section, sourced from
+`fapi.binance.com` at 12:58 UTC:
+
+```
+KAVAUSDT      entry=0.04451    now=0.04442     R=+0.24
+ETCUSDT       entry=7.131      now=6.927       R=+2.79
+1000SHIBUSDT  entry=0.004291   now=0.004299    R=−0.26
+AVAXUSDT      entry=6.546      now=6.423       R=+0.56
+APTUSDT       entry=0.620      now=0.6195      R=+0.09
+XLMUSDT       entry=0.19607    now=0.18606     R=+2.06
+ENSUSDT       entry=4.187      now=4.140       R=+0.43
+IMXUSDT       entry=0.1359     now=0.1328      R=+2.73
+ADAUSDT       entry=0.1745     now=0.1648      R=+3.76
+GRTUSDT       entry=0.01803    now=0.0176      R=+1.03
+```
+
+9 of 10 favorable (R>0), 1 marginally unfavorable (SHIB −0.26R just past
+entry). Sum ≈ +13.4R. **Predominantly favorable → PASS.**
+
+### Condition 3 — `n_closed_winners < ~15` ✗ FAIL (but no blowout)
+
+```
+outcome breakdown: 72 STOP, 16 TARGET
+n_closed_winners: 16
+```
+
+16 ≥ 15 — the count crossed the threshold this week (was 13 at 07-05). Per
+the locked discriminator, Condition 3 flips to FAIL. Note the WR remains
+18.2% (16/88), well below the 20.6% backtest baseline — no winner-count
+blowout, just accumulation over the +7 losers and +3 wins added this week.
+The threshold is a heuristic guard against censoring being papered over by
+a sudden winner surge; that pattern is not present here.
+
+### Rule-6 rationale decomposition (advisory)
+
+`python3 scripts/drift_decompose.py` (exit 0, recipe per
+`docs/findings/2026-07-04.md`): **BENIGN-consistent.** Target-win
+like-for-like gap −0.7% (flip < −5%); live stop-overshoot +1.8bp of
+notional over 72 losers (flip > 10bp). Like-for-like edge geometry matches
+the 2026-05-07 backtest reference; loss-side gap remains cost-scaling.
+
+### Mechanical verdict
+
+Conditions 1 & 2 PASS, Condition 3 FAIL at margin (16 vs 15 threshold).
+The locked rule reads "censoring-benign iff ALL three hold" — strict
+reading is that this checkpoint no longer meets the pure discriminator.
+However: WR 18.2% is still deep in censoring regime (below 20.6% backtest
+baseline), Rule-6 decomposition is BENIGN-consistent, mae_r distribution
+is stable, and the open book is +13.4R favorable. The 07-12 detector run
+was `exit_code:3 ERROR` — no new drift firing, no new 7d pair — so there
+is no auto-kill candidate this week regardless of cross-check reading.
+**HOLD stands.** 10th consecutive reading. Escalate to explicit precheck
+if Condition 3 remains failed for a second week, or if the next detector
+firing forms a fresh 7d pair.
+
+### Notable this week
+
+- **Trade floor 88/150** (was 78 at 07-05, +10 closes). Earliest STAGE_1
+  now ~2026-08-23 per forward_paper_status. Approach unchanged.
+- **Realized PnL $−2,101** (was $+345 at 07-05). +7 losses this week vs
+  +3 wins, standard variance. Still net-negative, still inside power
+  floor; BTC-HODL Δ remains positive $+1,121.
+- **10 open shorts, sum ≈ +13.4R unrealized.** 6 held over 100h — the
+  next 504h max-hold wave lands ~2026-07-27/28 (XLM/ENS/GRT batch opened
+  07-07 04:00; ETC opened 07-06 20:00 hits ~07-27 20:00).
+- **Cron ssh failure at 06:07 UTC** was transient; VPS was up throughout
+  (69d uptime, all engines active). No systemic issue. The forward-paper
+  outcome resolution rule's Rule 2 correctly refused to collapse the
+  input-error into CONTINUE — pre-registered guard fired as designed.
+- **1INCH 504h max-hold verified** (from 07-10 session): +0.315R, +$282.72
+  net, `outcome=TARGET` label lie as expected on force-closes.
+- Fleet: all 16 engines active, 69d uptime — HEALTHY.
+

@@ -1,0 +1,1 @@
+promotion_rehearsal: BLOCKED — p1=BLOCKED p2=INPUT_ERR p3=INPUT_ERR p4=WAITING p5=N/A

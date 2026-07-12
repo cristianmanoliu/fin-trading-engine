@@ -1,0 +1,14 @@
+══════════════════════════════════════════════════════════════════════════════
+  Forward-paper resolution — 2026-07-12 06:07 UTC
+  Locked rule: results/forward_paper_outcome_resolution_decision_rule_2026-05-10.md
+══════════════════════════════════════════════════════════════════════════════
+
+  Snapshot:        /Users/cristianmanoliu/Main/code/active/fin-trading-engine/results/forward_paper_snapshots/2026-07-12.txt (0d old)
+  Live cohort:     n=None trades / None days / pnl=$None
+  Drift state:     last exit=3 (0d ago)
+  Sibling exits:   kill=3 promote=3
+
+  >>> VERDICT: OPERATOR_REVIEW  (Rule 2)
+      • sibling decision script error (kill_exit=3, promote_exit=3) — input/env failure must not collapse into CONTINUE
+
+══════════════════════════════════════════════════════════════════════════════

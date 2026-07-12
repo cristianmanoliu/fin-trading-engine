@@ -1,0 +1,1 @@
+ssh fetch failed: Command '['ssh', 'root@178.105.24.230', 'tar -cf - -C /var/log/paper-live/journal . 2>/dev/null']' returned non-zero exit status 255.
