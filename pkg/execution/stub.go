@@ -137,6 +137,14 @@ type Stub struct {
 	JournalPath string
 	Symbol      string // required when JournalPath is set
 
+	// Cohort labels this Stub's slog output so live vs shadow lines are
+	// distinguishable in /var/log/paper-live/<symbol>.log. cmd/engine sets
+	// "live" for the live runner and the shadow spec label (e.g. "alt5-15-336")
+	// for each shadow runner. Empty is allowed — backtest leaves this unset —
+	// in which case the cohort field is omitted from log output entirely
+	// (preserves backtest log parity).
+	Cohort string
+
 	// Notifier is opt-in. When set, Stub fires SeverityCritical alerts on
 	// journal-write failures. Stub journals are the forward-paper data
 	// source feeding the STAGE_1 promotion decision — a silent journal
@@ -154,6 +162,15 @@ type Stub struct {
 
 	// audit counter: LONG wins reclassified to STOP due to same-bar ambiguity
 	ambiguousOverrideCount int
+}
+
+// prependCohort returns args with a leading "cohort"/Cohort pair when Cohort
+// is set. Empty Cohort → args unchanged, preserving backtest log parity.
+func (s *Stub) prependCohort(args []any) []any {
+	if s.Cohort == "" {
+		return args
+	}
+	return append([]any{"cohort", s.Cohort}, args...)
 }
 
 type journalEntry struct {
@@ -347,15 +364,17 @@ func (s *Stub) RecoverFromJournal() (recovered bool, err error) {
 	}
 
 	slog.Info("position recovered from journal",
-		"symbol", s.Symbol,
-		"side", side.String(),
-		"entry", sig.EntryPrice,
-		"stop", sig.StopLoss,
-		"target", sig.TakeProfit,
-		"ts", lastOpen.TS,
-		"midRHit", midRHit,
-		"remainingFrac", remainingFrac,
-		"journal_path", s.JournalPath,
+		s.prependCohort([]any{
+			"symbol", s.Symbol,
+			"side", side.String(),
+			"entry", sig.EntryPrice,
+			"stop", sig.StopLoss,
+			"target", sig.TakeProfit,
+			"ts", lastOpen.TS,
+			"midRHit", midRHit,
+			"remainingFrac", remainingFrac,
+			"journal_path", s.JournalPath,
+		})...,
 	)
 	return true, nil
 }
@@ -456,11 +475,14 @@ func (s *Stub) OnSignal(sig *models.Signal) {
 		RemainingFrac:    1.0,
 	}
 	slog.Info("position opened",
-		"side", sig.Side,
-		"entry", sig.EntryPrice,
-		"stop", sig.StopLoss,
-		"target", sig.TakeProfit,
-		"reason", sig.Reason)
+		s.prependCohort([]any{
+			"side", sig.Side,
+			"entry", sig.EntryPrice,
+			"stop", sig.StopLoss,
+			"target", sig.TakeProfit,
+			"reason", sig.Reason,
+		})...,
+	)
 	s.appendJournal(journalEntry{
 		Event:  "open",
 		Symbol: s.Symbol,
@@ -839,7 +861,7 @@ func (s *Stub) closePosition(exitPrice float64, exitTime time.Time, won bool) {
 		logArgs = append(logArgs, "pnl_usd", math.Round(pnlUSDT*100)/100)
 	}
 	logArgs = append(logArgs, "reason", sig.Reason)
-	slog.Info("position closed", logArgs...)
+	slog.Info("position closed", s.prependCohort(logArgs)...)
 
 	stopDistPct := 0.0
 	if sig.EntryPrice > 0 {

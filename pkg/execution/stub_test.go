@@ -2,7 +2,9 @@ package execution
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1343,4 +1345,91 @@ func TestSummary_ForceClosesOpenPositionAsLoss(t *testing.T) {
 	if r.slipUSDT != 50 {
 		t.Errorf("slipUSDT: got %v want 50 (5bp on $100k notional)", r.slipUSDT)
 	}
+}
+
+// TestCohortLabel_AppearsInOpenAndCloseSlog pins the shadow-log observability
+// contract: when Stub.Cohort is set, "position opened" and "position closed"
+// slog lines carry a cohort field, so operators can distinguish live-runner
+// output from shadow-runner output in the shared per-symbol log file. When
+// Cohort is unset (backtest path), the field is omitted entirely — preserves
+// existing backtest log parity.
+func TestCohortLabel_AppearsInOpenAndCloseSlog(t *testing.T) {
+	drive := func(cohort string) string {
+		var buf bytes.Buffer
+		prev := slog.Default()
+		slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, nil)))
+		defer slog.SetDefault(prev)
+
+		stub := &Stub{
+			StakeUSDT: 1000,
+			Symbol:    "BTCUSDT",
+			Cohort:    cohort,
+		}
+		sig := &models.Signal{
+			Symbol:     "BTCUSDT",
+			Side:       models.Long,
+			EntryPrice: 50000,
+			StopLoss:   49000,
+			TakeProfit: 52000,
+			Timestamp:  time.Now().UTC(),
+			Reason:     "test",
+		}
+		stub.OnSignal(sig)
+		stub.OnTick(models.Tick{Symbol: "BTCUSDT", Timestamp: time.Now().UTC(), Price: 52001})
+		return buf.String()
+	}
+
+	t.Run("shadow cohort label emitted on open + close", func(t *testing.T) {
+		out := drive("alt5-15-336")
+		lines := strings.Split(strings.TrimSpace(out), "\n")
+		var open, closed map[string]any
+		for _, line := range lines {
+			var m map[string]any
+			if err := json.Unmarshal([]byte(line), &m); err != nil {
+				t.Fatalf("non-JSON slog line: %q err=%v", line, err)
+			}
+			switch m["msg"] {
+			case "position opened":
+				open = m
+			case "position closed":
+				closed = m
+			}
+		}
+		if open == nil {
+			t.Fatal("no 'position opened' line captured")
+		}
+		if got := open["cohort"]; got != "alt5-15-336" {
+			t.Errorf("open cohort: got %v want alt5-15-336", got)
+		}
+		if closed == nil {
+			t.Fatal("no 'position closed' line captured")
+		}
+		if got := closed["cohort"]; got != "alt5-15-336" {
+			t.Errorf("close cohort: got %v want alt5-15-336", got)
+		}
+	})
+
+	t.Run("empty cohort → field omitted (backtest parity)", func(t *testing.T) {
+		out := drive("")
+		lines := strings.Split(strings.TrimSpace(out), "\n")
+		for _, line := range lines {
+			var m map[string]any
+			if err := json.Unmarshal([]byte(line), &m); err != nil {
+				t.Fatalf("non-JSON slog line: %q err=%v", line, err)
+			}
+			if msg, _ := m["msg"].(string); msg != "position opened" && msg != "position closed" {
+				continue
+			}
+			if _, present := m["cohort"]; present {
+				t.Errorf("cohort field must be absent when Cohort unset; line=%q", line)
+			}
+		}
+	})
+
+	t.Run("live cohort label emitted", func(t *testing.T) {
+		out := drive("live")
+		if !strings.Contains(out, `"cohort":"live"`) {
+			t.Errorf("expected cohort=live in slog output; got:\n%s", out)
+		}
+	})
 }
