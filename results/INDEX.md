@@ -254,5 +254,8 @@ Note: `*_verdict_*` files for 2026-05-07/08 rules are covered by the `+ _verdict
 - `btc_hodl_notional_amendment_2026-05-12.md` — HODL benchmark notional amendment ($16k)
 - `kill_deploy_fail_taxonomy_2026-05-12.md`, `partial_canon_resolution_2026-05-12.md`, `time_anchor_resolution_2026-05-12.md` — 05-12 resolution docs
 
+### 2026-07-13 venue port
+- `docs/superpowers/specs/2026-07-13-venue-port-kraken-design.md` — **pre-reg** for Kraken Futures executor port. Locked 2026-07-13; activates at PROMOTE (~2026-08-25). Decides: venue (Kraken, Payward Europe), book (16 symbols unchanged, Binance klines), executor architecture (KrakenLive = Binance arch rule + 5 deltas), Layer 2/3-equivalent validation gates (demo shadow primary, prod micro-orders fallback), venue fallback ladder (OKX EU → Bybit EU → Hyperliquid). Supersedes "Binance only" venue clause in the staging protocol.
+
 ### Amendments to existing locks
 - `real_money_executor_architecture_decision_rule_2026-05-08.md` — **Addendum 2026-06-11**: Gate A basis notional → per-trade risk; Gate B cap → 10× stake (migration trigger #1, testnet integration data; see `docs/findings/2026-06-11.md`)
