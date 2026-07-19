@@ -453,3 +453,103 @@ firing forms a fresh 7d pair.
   net, `outcome=TARGET` label lie as expected on force-closes.
 - Fleet: all 16 engines active, 69d uptime — HEALTHY.
 
+
+## 2026-07-19 checkpoint — HOLD (11th consecutive censoring-benign reading)
+
+**Drift cron:** weekly launchd fired 2026-07-19 06:32 UTC but SSH to VPS was
+unreachable at that moment (`ssh: connect to host 178.105.24.230 port 22:
+Network is unreachable`, exit 255). Auto-generated decision snapshots
+(`results/decision_snapshots/2026-07-19-*.txt`) stamped `VERDICT:
+OPERATOR_REVIEW (Rule 2)` because both sibling scripts (kill/promote) errored
+on the same ssh fault — NOT a firing (same transient pattern as 07-12). VPS
+reachable again by ~14:30 UTC (16/16 engines active running, system running,
+no restart loops). Manual re-run of the full cross-check sequence below.
+
+**Journals fetched:** 2026-07-19 ~13:38 UTC newest line (`scripts/journal_fetch.sh`).
+**Tool:** `python3 scripts/crosscheck9_losers_mae.py --prior-max 1.071` (read-only, exit 0).
+
+### Condition 1 — `mae_r` flat ✓ PASS
+
+```
+mae_r losers: n=88  min=1.0000  max=1.0710  mean=1.0098  p50=1.0060
+>1.071 (prior max): 0 trades
+>1.10 (edge-death threshold): 0 trades
+```
+
+Max pinned at 1.0710 (unchanged since 07-05/07-12), n=72→88 (+16 losers),
+mean +0.0007. Distribution stable, not drifting deeper. **No structural
+deepening.**
+
+### Condition 2 — open positions favorable ✓ PASS
+
+6 open positions (all SHORT). Live marks from `fapi.binance.com` at ~14:40
+UTC. Open set derived by chronological per-symbol event merge across all
+month files (the naive last-open-per-file scan mis-attributes superseded
+opens — RUNE/1INCH/SHIB were flagged stale and dropped; see note below):
+
+```
+APTUSDT   entry=0.60830   mark=0.59880   R=+1.44   (opened 07-18 12:00)
+BCHUSDT   entry=236.20    mark=216.17    R=+2.31   (opened 07-13 04:00)
+DOTUSDT   entry=0.84200   mark=0.82400   R=+1.66   (opened 07-18 08:00)
+ETCUSDT   entry=6.96400   mark=6.91700   R=+0.81   (opened 07-19 08:00)
+GRTUSDT   entry=0.01803   mark=0.01653   R=+3.58   (opened 07-07 04:00)
+XLMUSDT   entry=0.19607   mark=0.19002   R=+1.24   (opened 07-07 04:00)
+```
+
+**6 of 6 favorable (R>0), net aggregate +11.05R.** Cleanest Cond 2 reading
+in the series. **Predominantly favorable → PASS.**
+
+### Condition 3 — `n_closed_winners < ~15` ✗ FAIL (but flat, no blowout)
+
+```
+outcome breakdown: 88 STOP, 20 TARGET
+n_closed_winners: 20
+```
+
+20 ≥ 15 — FAIL under the strict discriminator. But 20 is **flat across four
+consecutive reads** (07-15/16/17 advisory + 07-19 real). WR 18.5% (20/108),
+still below the 20.6% backtest baseline — no winner-count blowout, just
+accumulation over the +16 losers and +4 wins added since 07-12. The
+threshold guards against censoring being papered over by a sudden winner
+surge; that pattern is absent (winners flat, losers rising).
+
+### Rule-6 rationale decomposition (advisory)
+
+`python3 scripts/drift_decompose.py` (exit 0): **BENIGN-consistent.**
+Target-win like-for-like gap −0.9% (flip < −5%); live stop-overshoot +1.7bp
+of notional over 88 losers (flip > 10bp); max-hold share of wins live 25% vs
+backtest 22%; live target wins n=15 mean +$5,920 vs backtest mean +$5,971.
+Like-for-like edge geometry matches the 2026-05-07 reference; loss-side gap
+remains cost-scaling.
+
+### Mechanical verdict
+
+Conditions 1 & 2 PASS, Condition 3 FAIL (20 ≥ 15, flat). Escalation rule:
+consecutive Cond-3 FAIL **AND** (decompose flips OR another condition flips)
+→ precheck disposition. Second clause is **UNMET** — decompose BENIGN,
+Cond 1 flat, Cond 2 strongly favorable (+11.05R). The 07-19 detector run was
+`exit_code:3 ERROR` (ssh transient) — no new firing, no new 7d pair, no
+auto-kill candidate regardless of cross-check reading. **HOLD stands. 11th
+consecutive reading.** Escalate to explicit precheck only if a future
+checkpoint pairs Cond-3 FAIL with a decompose flip or a fresh 7d detector
+pair.
+
+### Notable this week
+
+- **Trade floor 108/150** (was 88 at 07-12, +20 closes). Earliest STAGE_1
+  reach unchanged (~2026-08-23 territory). Approach unchanged.
+- **Realized PnL +$3,365** (was −$2,101 at 07-12) — recovered net-positive
+  on the +20 closes (+4 wins, +16 losses; the wins carried it). Still inside
+  the power floor (108 < 150).
+- **6 open shorts, net +11.05R unrealized** (~+$10,900 marked). Two 07-07
+  opens (GRT, XLM) approach the 504h max-hold wave ~07-27/28.
+- **Cron ssh failure at 06:32 UTC** transient; VPS up throughout (16/16
+  engines active). Rule 2 correctly refused to collapse the input-error into
+  CONTINUE — pre-registered guard fired as designed.
+- **Cond 2 open-set method note:** the correct open set requires a
+  chronological per-symbol merge across ALL month files. A naive
+  "last open event per file" scan surfaces superseded opens (RUNE 06-25,
+  1INCH, SHIB) that were later closed — those must be dropped. Verified 6
+  truly-open positions; unit sizing = $1k / |entry−stop| (matches a known
+  ETC close to the dollar).
+- Fleet: all 16 engines active running — HEALTHY.

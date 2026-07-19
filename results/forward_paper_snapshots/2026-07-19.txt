@@ -1,0 +1,1 @@
+ssh: connect to host 178.105.24.230 port 22: Network is unreachable
