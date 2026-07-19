@@ -140,12 +140,8 @@ def main():
             risk   = abs(entry - stop)
             # Price at R=0 is the entry price (exit == entry → 0 gain/loss on pts)
             # Price for the winner threshold is entry ± epsilon (just above 0R)
-            if side == "SHORT":
-                r0_price   = entry   # exit at entry = 0R
-                stop_price = stop    # exit at stop = −1R (loss)
-            else:
-                r0_price   = entry
-                stop_price = stop
+            # r0_price is the entry either way; stop (−1R) is printed directly below
+            r0_price = entry
 
             print(f"  {sym}")
             print(f"    side={side}  entry={entry}  stop={stop}  target={target}")
