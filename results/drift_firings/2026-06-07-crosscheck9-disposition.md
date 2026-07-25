@@ -553,3 +553,60 @@ pair.
   truly-open positions; unit sizing = $1k / |entry−stop| (matches a known
   ETC close to the dollar).
 - Fleet: all 16 engines active running — HEALTHY.
+
+## 2026-07-26 checkpoint — HOLD (12th consecutive censoring-benign reading)
+
+Full manual sequence (`run_drift_check.sh` NOT used — standing prohibition;
+it mutates `drift_check_history.jsonl` and would manufacture a false 7d pair).
+Journals fetched 2026-07-25 via `scripts/journal_fetch.sh`; live marks from
+`fapi.binance.com/fapi/v1/ticker/price`.
+
+- **Condition 1** (`crosscheck9_losers_mae.py --prior-max 1.071`, exit 0):
+  ✓ **PASS**. losers n=95 (was 88), max=**1.0710 — unchanged**, mean=1.0098,
+  p50=1.0060. 0 trades >1.071, 0 >1.10. Seven new losers added and the max
+  did not move: no structural deepening.
+- **Condition 2** (manual chronological per-symbol open-set merge across all
+  month files; 9 open shorts): ✓ **PASS** — **8/9 favorable, net +16.33R**,
+  the strongest reading in the series (was 6/6 / +11.05R at 07-19). Only
+  APTUSDT adverse at −0.61R (24h old). GRT +4.30 / XLM +3.50 / BCH +3.09 /
+  ETC +2.02 / ADA +1.63 / ENS +1.19 / RUNE +0.98 / DOT +0.24.
+- **Condition 3**: ✗ **FAIL-at-margin**. 95 STOP / 20 TARGET → 20 winners
+  ≥ 15. **Flat at 20 for a 5th consecutive read** (07-15/16/17 advisory,
+  07-19 real, 07-26 real). WR 17.4% (20/115), below the 20.6% backtest
+  baseline → accumulation of losers, not a blowout.
+- **Decompose** (`drift_decompose.py`, exit 0): **BENIGN-consistent**.
+  Target-win like-for-like gap **−0.9%** (flip if < −5%); live stop-overshoot
+  **+1.7bp** over 95 losers (flip if > 10bp). Both unchanged from 07-19.
+  Neither flips.
+- **Detector history:** no new firing since 2026-07-05. The 07-12 and 07-19
+  cron runs are `exit_code:3 ERROR` (ssh transient), not firings. No fresh
+  7d pair, no auto-kill candidate.
+
+**Verdict:** Escalation rule = consecutive Cond-3 FAIL **AND** (decompose
+flips OR another condition flips). The second clause is **UNMET** — decompose
+BENIGN, Cond 1 flat, Cond 2 strongly favorable. **HOLD stands, 12th
+consecutive reading.** Escalate to explicit precheck only if a future
+checkpoint pairs Cond-3 FAIL with a decompose flip or a fresh 7d detector pair.
+
+### Notable this week
+
+- **Trade floor 115/150** (was 108 at 07-19, +7 closes). All seven were
+  losers (STOP 88→95, TARGET flat at 20).
+- **Realized PnL −$4,499** (was +$3,365 at 07-19) — swung net-negative on
+  the +7 all-loser closes. Still inside the power floor (115 < 150).
+- **Monthly sign alternates:** 2026-05 −$27,021 (WR 5.4%, n=37) /
+  2026-06 +$28,415 (WR 27.5%, n=40) / 2026-07 −$5,894 (WR 18.4%, n=38).
+  Cumulative −$4,500 is noise around zero with a ±$28k monthly swing.
+- **Concentration:** positive symbols sum +$39,080, negative −$43,580.
+  1000SHIB +$19,496 on 6 trades and ADA +$12,118 on 8 carry the upside;
+  ETC −$14,520 on 13 the downside. Single-sym 23.6% (< 40% gate) but the
+  result rests on ~14 of 115 trades.
+- **9 open shorts, net +16.33R unrealized.** GRT + XLM (both 07-07 opens,
+  ~448h) cross the 504h max-hold ~2026-07-28 04:00 UTC. GRT at +4.30R may
+  reach the 6.0R target first and close as a genuine TARGET instead.
+- **Gate status vs STAGE_0→STAGE_1:** 5 of 6 criteria FAIL — trades 115/150,
+  net −$4,499 (needs positive), PnL vs 60% pro-rated (needs ~+$8.8k),
+  BTC-HODL Δ −$1,352, drift-clean-30d unmet (last two cron runs exit 3).
+  Only single-symbol <40% passes. The binding constraint is **net-positive**,
+  not trade count — reaching 150 trades in August does not fix it.
+- Fleet: all 16 engines active — HEALTHY.
