@@ -257,5 +257,8 @@ Note: `*_verdict_*` files for 2026-05-07/08 rules are covered by the `+ _verdict
 ### 2026-07-13 venue port
 - `docs/superpowers/specs/2026-07-13-venue-port-kraken-design.md` — **pre-reg** for Kraken Futures executor port. Locked 2026-07-13; activates at PROMOTE (~2026-08-25). Decides: venue (Kraken, Payward Europe), book (16 symbols unchanged, Binance klines), executor architecture (KrakenLive = Binance arch rule + 5 deltas), Layer 2/3-equivalent validation gates (demo shadow primary, prod micro-orders fallback), venue fallback ladder (OKX EU → Bybit EU → Hyperliquid). Supersedes "Binance only" venue clause in the staging protocol.
 
+### 2026-07-26 cost decomposition
+- `stop_distance_cost_filter_verdict_2026-07-26.md` — **REJECT** (no pre-reg opened; hypothesis falsified same-session). Durable finding: live forward-paper is **gross +$3,489**, destroyed by $11.2k costs at **67× avg leverage**; **breakeven fee = 0.20 bp**, so no reachable fee schedule (incl. maker/maker) makes the current config profitable. The suggested tight-stop filter fails a mechanism test (`corr(stop_dist, gross)` = +0.011; tightest quintile is the *best* on NET) and a permutation test (**p = 0.601**). Worked example of the PBO-0.52 prior.
+
 ### Amendments to existing locks
 - `real_money_executor_architecture_decision_rule_2026-05-08.md` — **Addendum 2026-06-11**: Gate A basis notional → per-trade risk; Gate B cap → 10× stake (migration trigger #1, testnet integration data; see `docs/findings/2026-06-11.md`)
