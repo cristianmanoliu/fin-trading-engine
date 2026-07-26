@@ -59,6 +59,8 @@ go.work.sum
 #   field embeds absolute paths so it isn't portable. Regenerates from cron.
 results/drift_runs/
 results/drift_check_history.jsonl
+# - drift_check_history_cron.jsonl: same, for the cron-scoped split (2026-07-26)
+results/drift_check_history_cron.jsonl
 NEXT.md
 resume-claude.sh
 
