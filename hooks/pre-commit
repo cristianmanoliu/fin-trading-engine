@@ -1,0 +1,13 @@
+#!/bin/sh
+# Pre-commit hook: scan staged changes for secrets via gitleaks.
+#
+# Enable after cloning:  git config core.hooksPath hooks
+# Bypass once (rare!):   git commit --no-verify
+
+if ! command -v gitleaks >/dev/null 2>&1; then
+    echo "[pre-commit] gitleaks not installed — skipping secret scan"
+    echo "  install:  brew install gitleaks"
+    exit 0
+fi
+
+gitleaks git --staged --redact --no-banner --verbose
