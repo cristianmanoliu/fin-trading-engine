@@ -745,7 +745,16 @@ fi
 # only at deploy time. With these two touchpoints, "cron silently died" gets
 # surfaced at every natural operator interaction with the system.
 SCRIPT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-DRIFT_HISTORY="${SCRIPT_ROOT}/results/drift_check_history.jsonl"
+# This heartbeat asks "is the weekly CRON alive?", so it reads the cron-scoped
+# history written by weekly_audit.sh — not the decision-grade
+# drift_check_history.jsonl, which only deliberate operator runs touch and which
+# is therefore stale by design after the 2026-07-26 split. Legacy fallback keeps
+# a pre-split checkout reporting correctly.
+if [[ -f "${SCRIPT_ROOT}/results/drift_check_history_cron.jsonl" ]]; then
+    DRIFT_HISTORY="${SCRIPT_ROOT}/results/drift_check_history_cron.jsonl"
+else
+    DRIFT_HISTORY="${SCRIPT_ROOT}/results/drift_check_history.jsonl"
+fi
 echo
 echo "$SEP"
 echo "  Drift detector heartbeat"

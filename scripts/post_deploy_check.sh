@@ -706,7 +706,15 @@ fi
 # freshness.
 echo ""
 echo "11. Drift detector cron freshness"
-HISTORY="${ROOT}/results/drift_check_history.jsonl"
+# §11 measures CRON freshness, so it reads the cron-scoped history written by
+# weekly_audit.sh. The decision-grade drift_check_history.jsonl is written only
+# by deliberate operator runs and is stale by design (2026-07-26 split); reading
+# it here would false-WARN every week. Legacy fallback for pre-split checkouts.
+if [[ -f "${ROOT}/results/drift_check_history_cron.jsonl" ]]; then
+    HISTORY="${ROOT}/results/drift_check_history_cron.jsonl"
+else
+    HISTORY="${ROOT}/results/drift_check_history.jsonl"
+fi
 LAUNCHD_LABEL="com.tradingengine.drift-check"
 NOW_EPOCH=$(date -u +%s)
 # Capture launchctl output first — `set -euo pipefail` + `grep -q` causes a

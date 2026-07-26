@@ -76,7 +76,17 @@ VPS="${SESSION_CHECK_VPS:-root@178.105.24.230}"
 GH="${SESSION_CHECK_GH:-gh}"
 SSH="${SESSION_CHECK_SSH:-ssh}"
 MAX_AGE_DAYS="${SESSION_CHECK_MAX_AGE_DAYS:-8}"
-DRIFT_HISTORY="${SESSION_CHECK_DRIFT_HISTORY:-${ROOT}/results/drift_check_history.jsonl}"
+# Freshness is a question about THE CRON ("did the weekly job run?"), so it
+# reads the cron-scoped history that weekly_audit.sh writes — not the
+# decision-grade drift_check_history.jsonl, which is only touched by deliberate
+# operator runs and would therefore go stale by design (2026-07-26 split).
+# Falls back to the legacy path so a repo predating the split still reports.
+if [[ -f "${ROOT}/results/drift_check_history_cron.jsonl" ]]; then
+    _default_drift_history="${ROOT}/results/drift_check_history_cron.jsonl"
+else
+    _default_drift_history="${ROOT}/results/drift_check_history.jsonl"
+fi
+DRIFT_HISTORY="${SESSION_CHECK_DRIFT_HISTORY:-${_default_drift_history}}"
 
 # --- output ---
 WARNINGS=()

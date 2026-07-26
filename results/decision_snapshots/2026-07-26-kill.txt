@@ -10,7 +10,7 @@
   3. 3 consecutive days each loss >5.0× stake ($1000, STAGE_0)  <3 consecutive days < $-5000  no qualifying run             [OPERATOR-VERIFY]
   4. Single-symbol >50.0% PnL                                 ≤50.0%                        9.4% (1000SHIBUSDT)           [CONTINUE]
   5. Unrecoverable engine/exchange error                      operator-verify (Telegram + post_deploy_check §5)  (deferred)                    [DEFERRED]
-  6. Drawdown >20.0% over 60d window                          ≤20.0%                        63.5% (peak $34926, trough $12766)  [KILL]
+  6. Drawdown >20.0% over 60d window                          ≤20.0%                        66.6% (peak $34926, trough $11670)  [KILL]
 
 ════════════════════════════════════════════════════════════════════════════════════════════════════
   >>> VERDICT: KILL — at least one kill criterion fires. Stop the protocol immediately per pre-reg §'When kill fires' (cease new positions, let existing positions close at stops/targets, mark milestone KILLED, no auto-resumption).

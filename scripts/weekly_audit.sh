@@ -18,8 +18,13 @@
 #
 # Snapshot failure is non-fatal — a transient SSH or jq error at snapshot
 # time should not mask a real drift verdict. The drift check ran first
-# anyway, so the decision-grade signal is already persisted to
-# results/drift_check_history.jsonl regardless of what happens here.
+# anyway, so its signal is already persisted regardless of what happens here.
+#
+# History file: this wrapper writes results/drift_check_history_CRON.jsonl,
+# NOT the decision-grade results/drift_check_history.jsonl that
+# kill_protocol_check criterion #1 evaluates. Only a deliberate operator run of
+# run_drift_check.sh writes the latter. Override with DRIFT_CHECK_HISTORY if you
+# genuinely need the cron to write elsewhere. See the stage-1 comment below.
 #
 # Usage:
 #   ./scripts/weekly_audit.sh              # default — invoked by launchd
@@ -139,7 +144,29 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT" || { echo "weekly_audit: cd to $REPO_ROOT failed" >&2; exit 1; }
 
 # --- 1. Drift check (decision-grade signal) ---
-"${REPO_ROOT}/scripts/run_drift_check.sh" --quiet
+# History file is CRON-SCOPED, not the operator's decision-grade history.
+#
+# WHY (2026-07-26): run_drift_check.sh appends a row to its history file and
+# then evaluates the locked "two firings >= 7 days apart" rule across the whole
+# file. When this weekly cron shares one file with operator-initiated runs, an
+# unattended schedule silently accumulates rows that feed a KILL criterion —
+# kill_protocol_check #1 reads exactly that file. The manual cross-check
+# protocol therefore forbids running this wrapper by hand
+# (results/drift_firings/2026-06-07-crosscheck9-disposition.md).
+#
+# Splitting the files keeps both instruments honest: the cron still detects and
+# alerts on drift every Sunday (its exit code is preserved below and drives the
+# Telegram tiers), but the decision-grade history that criterion #1 evaluates is
+# only ever written by a deliberate operator run.
+#
+# NOTE this does NOT retroactively change the 2026-07-26 KILL verdict. Auditing
+# the existing history by timestamp shows the 05-27 <-> 06-07 firing pair
+# includes MANUAL runs and predates the prohibition text (first committed
+# 2026-07-25), so criterion #1 fired on real signal. See
+# docs/findings/2026-07-26-forward-paper-KILL.md.
+DRIFT_HISTORY_CRON="${DRIFT_CHECK_HISTORY:-${REPO_ROOT}/results/drift_check_history_cron.jsonl}"
+DRIFT_CHECK_HISTORY="$DRIFT_HISTORY_CRON" \
+    "${REPO_ROOT}/scripts/run_drift_check.sh" --quiet
 DRIFT_EXIT=$?
 
 # --- 2. Forward-paper snapshot (operational telemetry) ---

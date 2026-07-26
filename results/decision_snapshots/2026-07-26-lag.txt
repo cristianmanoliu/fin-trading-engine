@@ -1,27 +1,27 @@
 ══════════════════════════════════════════════════════════════════════════════
-  LAG SUMMARY  2026-07-26T06:00:20Z  →  root@178.105.24.230
+  LAG SUMMARY  2026-07-26T08:29:49Z  →  root@178.105.24.230
 ══════════════════════════════════════════════════════════════════════════════
 
   Per-engine source-to-receipt lag (latest heartbeat):
 
   symbol         p50_ms    p99_ms    max_ms    samples   tier
   ------         ------    ------    ------    -------   ----
-  roseusdt       3277      9981      10277     256       TYPICAL
-  bchusdt        5344      10197     10270     256       TYPICAL
-  grtusdt        5040      10200     10278     256       TYPICAL
-  1inchusdt      4793      9766      10245     256       TYPICAL
-  adausdt        5521      10224     10238     256       TYPICAL
-  kavausdt       5734      10196     10274     256       TYPICAL
-  1000shibusdt   5440      9788      10015     256       TYPICAL
-  ensusdt        4963      9314      10179     256       TYPICAL
-  xlmusdt        5954      10198     10284     256       TYPICAL
-  imxusdt        5159      10032     10077     256       TYPICAL
-  etcusdt        5139      10150     10268     256       TYPICAL
-  runeusdt       4728      10242     10246     256       TYPICAL
-  avaxusdt       6137      10194     10222     256       TYPICAL
-  aptusdt        4532      10070     10132     256       TYPICAL
-  dotusdt        5622      10317     10349     256       TYPICAL
-  filusdt        5032      10210     10261     256       TYPICAL
+  roseusdt       4477      10079     10278     256       TYPICAL
+  bchusdt        5160      10209     10269     256       TYPICAL
+  grtusdt        5571      10211     10638     256       TYPICAL
+  1inchusdt      3339      9779      10240     256       TYPICAL
+  adausdt        5420      10088     10226     256       TYPICAL
+  kavausdt       5099      10185     10266     256       TYPICAL
+  1000shibusdt   4862      9667      10183     256       TYPICAL
+  ensusdt        5775      10182     10203     256       TYPICAL
+  xlmusdt        5245      10049     10246     256       TYPICAL
+  imxusdt        5569      10195     10285     256       TYPICAL
+  etcusdt        5740      10288     10694     256       TYPICAL
+  runeusdt       5317      10079     10269     256       TYPICAL
+  avaxusdt       5619      10183     10250     256       TYPICAL
+  aptusdt        4111      10565     10674     256       TYPICAL
+  dotusdt        4444      10063     10695     256       TYPICAL
+  filusdt        5465      10083     10241     256       TYPICAL
 
   Fleet rollup:
     OK        : 0 engines
@@ -30,8 +30,8 @@
     HIGH      : 0 engines
     NO_DATA   : 0 engines
 
-    Max p99 across fleet: 10317ms (dotusdt)
-    Median p99:           10196ms
+    Max p99 across fleet: 10565ms (aptusdt)
+    Median p99:           10182ms
 
   >>> VERDICT: HEALTHY (no degraded engines)
 ══════════════════════════════════════════════════════════════════════════════

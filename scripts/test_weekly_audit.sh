@@ -174,6 +174,46 @@ assert_eq "layer3 count -1 → SSH_FAILURE" "$(_classify_layer3_health -1)" "SSH
 assert_eq "layer3 empty → UNEXPECTED"    "$(_classify_layer3_health '')"  "UNEXPECTED"
 assert_eq "layer3 'abc' → UNEXPECTED"    "$(_classify_layer3_health abc)" "UNEXPECTED"
 
+# ─────────────────────────────────────────────────────────────────────
+# History-file split (2026-07-26): the weekly cron must NEVER write the
+# decision-grade results/drift_check_history.jsonl that kill_protocol_check
+# criterion #1 evaluates. An unattended schedule feeding a KILL criterion is
+# how "two firings >=7d apart" accumulates without an operator ever deciding
+# to run the detector.
+# ─────────────────────────────────────────────────────────────────────
+_wa_tmp="$(mktemp -d)"
+trap 'rm -rf "$_wa_tmp"' EXIT
+mkdir -p "$_wa_tmp/results" "$_wa_tmp/scripts"
+: > "$_wa_tmp/results/drift_check_history.jsonl"
+
+# Fake run_drift_check.sh: appends one row to whatever DRIFT_CHECK_HISTORY says,
+# mirroring the real script's env-var seam.
+cat > "$_wa_tmp/scripts/run_drift_check.sh" <<'FAKE'
+#!/usr/bin/env bash
+H="${DRIFT_CHECK_HISTORY:?DRIFT_CHECK_HISTORY unset — cron would write the decision-grade file}"
+mkdir -p "$(dirname "$H")"
+echo '{"ts":"2026-01-01T06:00:00Z","exit_code":1,"verdict":"DRIFT_FIRED"}' >> "$H"
+exit 1
+FAKE
+chmod +x "$_wa_tmp/scripts/run_drift_check.sh"
+
+# Reproduce the wrapper's stage-1 invocation exactly as weekly_audit.sh does it.
+(
+  REPO_ROOT="$_wa_tmp"
+  DRIFT_HISTORY_CRON="${DRIFT_CHECK_HISTORY:-${REPO_ROOT}/results/drift_check_history_cron.jsonl}"
+  DRIFT_CHECK_HISTORY="$DRIFT_HISTORY_CRON" \
+      "${REPO_ROOT}/scripts/run_drift_check.sh" --quiet
+) >/dev/null 2>&1
+
+assert_eq "cron run leaves decision-grade history EMPTY" \
+    "$(wc -l < "$_wa_tmp/results/drift_check_history.jsonl" | tr -d ' ')" "0"
+assert_eq "cron run writes exactly 1 row to the cron history" \
+    "$(wc -l < "$_wa_tmp/results/drift_check_history_cron.jsonl" | tr -d ' ')" "1"
+# REGRESSION: the seam must be an explicit env var, not a default -- if a future
+# edit drops it, the fake above exits non-zero on the :? and this catches it.
+assert_eq "cron history file exists after run" \
+    "$([[ -f "$_wa_tmp/results/drift_check_history_cron.jsonl" ]] && echo yes || echo no)" "yes"
+
 # --- summary ---
 echo
 TOTAL=$((PASS + FAIL))

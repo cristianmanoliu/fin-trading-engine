@@ -1,0 +1,15 @@
+{"ts":"2026-05-09T06:16:56Z","exit_code":2,"verdict":"INSUFFICIENT_DATA","log_file":"/Users/cristianmanoliu/Main/source.code/github/trading-engine/results/drift_runs/2026-05-09T06:16:56Z.log"}
+{"ts":"2026-05-10T06:00:02Z","exit_code":2,"verdict":"INSUFFICIENT_DATA","log_file":"/Users/cristianmanoliu/Main/source.code/github/trading-engine/results/drift_runs/2026-05-10T06:00:02Z.log"}
+{"ts":"2026-05-17T06:00:04Z","exit_code":2,"verdict":"INSUFFICIENT_DATA","log_file":"/Users/cristianmanoliu/Main/source.code/github/trading-engine/results/drift_runs/2026-05-17T06:00:04Z.log"}
+{"ts":"2026-05-24T06:01:02Z","exit_code":2,"verdict":"INSUFFICIENT_DATA","log_file":"/Users/cristianmanoliu/Main/code/active/fin-trading-engine/results/drift_runs/2026-05-24T06:01:02Z.log"}
+{"ts":"2026-05-30T06:10:51Z","exit_code":1,"verdict":"DRIFT_FIRED","log_file":"/Users/cristianmanoliu/Main/code/active/fin-trading-engine/results/drift_runs/2026-05-30T06:10:51Z.log"}
+{"ts":"2026-05-31T06:07:36Z","exit_code":1,"verdict":"DRIFT_FIRED","log_file":"/Users/cristianmanoliu/Main/code/active/fin-trading-engine/results/drift_runs/2026-05-31T06:07:36Z.log"}
+{"ts":"2026-06-07T06:00:05Z","exit_code":1,"verdict":"DRIFT_FIRED","log_file":"/Users/cristianmanoliu/Main/code/active/fin-trading-engine/results/drift_runs/2026-06-07T06:00:05Z.log"}
+{"ts":"2026-06-14T06:00:05Z","exit_code":1,"verdict":"DRIFT_FIRED","log_file":"/Users/cristianmanoliu/Main/code/active/fin-trading-engine/results/drift_runs/2026-06-14T06:00:05Z.log"}
+{"ts":"2026-06-21T06:00:00Z","exit_code":1,"verdict":"DRIFT_FIRED","log_file":"/Users/cristianmanoliu/Main/code/active/fin-trading-engine/results/drift_runs/2026-06-21T06:00:00Z.log"}
+{"ts":"2026-06-28T06:05:55Z","exit_code":1,"verdict":"DRIFT_FIRED","log_file":"/Users/cristianmanoliu/Main/code/active/fin-trading-engine/results/drift_runs/2026-06-28T06:05:55Z.log"}
+{"ts":"2026-07-05T06:07:09Z","exit_code":1,"verdict":"DRIFT_FIRED","log_file":"/Users/cristianmanoliu/Main/code/active/fin-trading-engine/results/drift_runs/2026-07-05T06:07:09Z.log"}
+{"ts":"2026-07-12T06:07:23Z","exit_code":3,"verdict":"ERROR","log_file":"/Users/cristianmanoliu/Main/code/active/fin-trading-engine/results/drift_runs/2026-07-12T06:07:23Z.log"}
+{"ts":"2026-07-19T06:32:13Z","exit_code":3,"verdict":"ERROR","log_file":"/Users/cristianmanoliu/Main/code/active/fin-trading-engine/results/drift_runs/2026-07-19T06:32:13Z.log"}
+{"ts":"2026-07-26T06:00:00Z","exit_code":1,"verdict":"DRIFT_FIRED","log_file":"/Users/cristianmanoliu/Main/code/active/fin-trading-engine/results/drift_runs/2026-07-26T06:00:00Z.log"}
+{"ts":"2026-07-26T08:29:43Z","exit_code":1,"verdict":"DRIFT_FIRED","log_file":"/Users/cristianmanoliu/Main/code/active/fin-trading-engine/results/drift_runs/2026-07-26T08:29:43Z.log"}

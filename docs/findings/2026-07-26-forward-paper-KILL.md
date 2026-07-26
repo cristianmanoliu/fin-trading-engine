@@ -69,12 +69,30 @@ session will otherwise hit it and be confused:
 Both are correct about different things:
 
 1. The manual protocol carries a **standing prohibition** on running
-   `run_drift_check.sh`, precisely because "it mutates
-   `drift_check_history.jsonl` and would manufacture a false 7d pair."
-   The launchd cron runs it anyway and has been appending `DRIFT_FIRED`
-   rows (2026-06-21, 06-28, 07-05, 07-26). Kill criterion #1 reads that file.
-   **So criterion #1 is partly self-inflicted by the cron and should be treated
-   with suspicion on its own.**
+   `run_drift_check.sh`, because "it mutates `drift_check_history.jsonl` and
+   would manufacture a false 7d pair." The launchd cron
+   (`weekly_audit.sh:142`) runs it every Sunday regardless, appending
+   `DRIFT_FIRED` rows. Kill criterion #1 reads that file.
+
+   **CORRECTION (added after auditing the file — the first version of this
+   finding overstated the contamination).** The firing pair criterion #1
+   actually keyed on is **2026-05-27 ↔ 2026-06-07**, and auditing every row by
+   timestamp shows:
+
+   - `2026-05-27T17:44:44Z` — **MANUAL** (not a 06:0x Sunday cron slot)
+   - `2026-05-30T19:31:42Z` — **MANUAL**, also `DRIFT_FIRED`
+   - `2026-06-07T06:00:05Z` — cron
+
+   So a ≥7-day-apart pair (05-27 ↔ 06-07, and independently 05-27 ↔ 05-30 is
+   <7d but 05-30 ↔ 06-07 is not) exists from **operator-initiated runs**, not
+   only cron ones. Further, `git log -S "standing prohibition"` shows the
+   prohibition text first entered the repo on **2026-07-25** — *after* both
+   firings. The cron was not violating a rule that existed at the time, and it
+   did not fabricate the pair.
+
+   **Revised reading: criterion #1 is real, not an artifact.** The cron is still
+   worth fixing (it writes decision-grade state on a schedule, which is fragile
+   and makes future audits ambiguous), but it does not undermine this verdict.
 2. **Criterion #6 is independent of all of that.** It reads trade PnL, not
    drift history. It fires on its own.
 3. The automated detector's fire is on `loss_pnl_abs`: live losses average
@@ -83,10 +101,17 @@ Both are correct about different things:
    "censoring-benign" reading the operator has diagnosed 12 times. Taken alone
    it would not justify a kill.
 
-**Conclusion: the kill does not rest on the contested drift criterion.** It
-rests on criterion #6 plus the plain economics — net-negative, losing to HODL,
-63.5% give-back of peak. Even discarding criterion #1 entirely, the verdict is
-unchanged.
+**Conclusion: the kill stands, and now on firmer ground than first stated.**
+Criterion #1 turns out to be genuine (the pair includes manual runs and predates
+the prohibition), and criterion #6 plus the plain economics — net-negative,
+losing to HODL by $2,425, 63.5% give-back of peak — fire independently of it.
+Even discarding criterion #1 entirely, the verdict is unchanged.
+
+The manual HOLD readings are not wrong either: they assess whether the *drift
+mechanism* indicates structural breakdown, and "censoring-benign" is a fair
+reading of a +4% loss-size gap. But a strategy can be free of mechanism drift
+and still simply lose money, which is what criterion #6 and the promotion gates
+measure. Both instruments were reporting accurately about different questions.
 
 ## Why this was always the likely outcome
 
