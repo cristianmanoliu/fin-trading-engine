@@ -37,7 +37,10 @@ mkdir -p /tmp/oa
 
 run_arm() {  # name extra span_start span_end span_endmonth outdir
     local name="$1" extra="$2" ys="$3" ye="$4" em="$5" od="$6"
-    [ -s "${od}/${name}.txt" ] && { echo "skip ${od}/${name}" >> "$LOG"; return 0; }
+    if [ -s "${od}/${name}.txt" ]; then
+        echo "skip ${od}/${name}" >> "$LOG"
+        return 0
+    fi
     SHARED_BINARY="$BIN" VARIANT="$name" EXTRA="$extra" \
       START_YEAR="$ys" END_YEAR="$ye" END_YEAR_MONTH="$em" \
       bash scripts/cost_geometry_sweep.sh "${od}/${name}.txt" >> "$LOG" 2>&1
@@ -58,7 +61,9 @@ declare -a ARMS=(
 )
 echo "=== TRAIN arms: ${#ARMS[@]} ===" >> "$LOG"
 for a in "${ARMS[@]}"; do
-    run_arm "${a%%|*}" "${a#*|}" 2020 2023 12 "$OUT_TRAIN"
+    # never let one failing arm abort the whole unattended run
+    run_arm "${a%%|*}" "${a#*|}" 2020 2023 12 "$OUT_TRAIN" || \
+        echo "ARM FAILED: ${a%%|*}" >> "$LOG"
 done
 echo "TRAIN_DONE" >> "$LOG"
 
