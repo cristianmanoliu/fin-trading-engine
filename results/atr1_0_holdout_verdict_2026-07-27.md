@@ -1,8 +1,22 @@
-# ATR 1.0 Stop Sizing — VERDICT: STRONGEST CANDIDATE FOUND (held-out significant)
+# ATR 1.0 Stop Sizing — VERDICT: NOT ACTIONABLE (universe-wide significant, deployed-16 NEGATIVE)
 
-**Status:** Research finding, 2026-07-27. **Held-out significant — the first result in this
-project's history to clear a genuine out-of-sample significance test.** Still research-only:
-no live change, no promotion, no capital.
+> ⛔ **SUPERSEDING FINDING (2026-07-27, same session, added after the analysis below).**
+> The universe-wide result reported in this document is real but **does not transfer to the
+> book actually traded.** On the **deployed-16** the effect is **NEGATIVE in BOTH periods**:
+> TRAIN −$26,050 (beats baseline on 5/16), TEST −$23,808 (6/16, median −$4,041). The entire
+> +$335,855 comes from the 41 symbols that are NOT deployed (+$359,663 on TEST, 30/41).
+>
+> **Cause identified:** `corr(baseline NET, atr1.0 improvement) = −0.523`. atr1.0 helps the
+> symbols the wick stop handles *worst* and hurts the ones it handles *best*. The deployed-16
+> were selected by walk-forward **on the wick-stop config** (mean universe rank 22.9 vs 31.4
+> for the other 41), so atr1.0 systematically **undoes that selection** — it is regression
+> toward the universe mean, not a better stop rule for this book.
+>
+> **Consequence: no shadow engine, no promotion, no live change.** The recommendation at the
+> bottom of this document is WITHDRAWN. See §"Deployed-16 transfer test" below.
+
+**Status:** Research finding, 2026-07-27. Universe-wide held-out significant; **fails the
+transfer test to the deployed book.** Research-only: no live change, no promotion, no capital.
 **Harness:** `scripts/cost_geometry_sweep.sh` + `scripts/overnight_arc_2026-07-27.sh`
 **Split:** TRAIN 2020-01 → 2023-12 (selection). TEST 2024-01 → 2025-04 (held out, opened after
 the shortlist was fixed).
@@ -128,15 +142,63 @@ luck-bar to ~1.22 annualized. atr1.0's TEST Sharpe should be computed against th
 any promotion argument is made — that calculation is NOT yet done and is the first task for
 the next session.
 
-## Recommended next step (not taken)
+## Deployed-16 transfer test — THE DECISIVE RESULT
 
-Deploy `--atr-stop-mult 1.0` as a **9th shadow engine**. Zero incremental REST weight, zero
-forward-paper degrees of freedom, and it starts accruing genuine out-of-sample live evidence
-immediately. This matches the operator's stated plan: shadow anything promising for months
-before any capital.
+The universe-wide result above is computed on all 57 symbols. The live book trades **16**.
+Splitting the same held-out data by deployment status:
+
+| Group | TRAIN Δ NET | beats | TEST Δ NET | beats | TEST median |
+|---|---:|---:|---:|---:|---:|
+| **Deployed-16** | **−$26,050** | 5/16 | **−$23,808** | 6/16 | **−$4,041** |
+| Non-deployed 41 | +$405,704 | 30/41 | +$359,663 | 30/41 | — |
+
+**Negative on the deployed book in BOTH periods.** The consistency across two independent
+spans rules out chance — this is structural.
+
+Per-symbol TEST deltas, deployed-16 (10 of 16 negative):
+
+| Symbol | Δ | Symbol | Δ |
+|---|---:|---|---:|
+| APTUSDT | +13,848 | ETCUSDT | −4,041 |
+| KAVAUSDT | +13,097 | GRTUSDT | −4,326 |
+| ROSEUSDT | +5,800 | DOTUSDT | −4,922 |
+| IMXUSDT | +4,126 | ADAUSDT | −5,940 |
+| ENSUSDT | +3,754 | 1INCHUSDT | −6,006 |
+| RUNEUSDT | +1,552 | 1000SHIBUSDT | −8,167 |
+| BCHUSDT | −157 | XLMUSDT | −8,524 |
+| | | AVAXUSDT | −9,493 |
+| | | FILUSDT | −14,409 |
+
+### Why — selection interaction
+
+`corr(baseline NET, atr1.0 improvement) = **−0.523**`
+
+atr1.0 improves the symbols the wick stop handles *worst* and degrades those it handles
+*best*. The deployed-16 were chosen by walk-forward **under the wick-stop config** — their
+mean universe rank on baseline NET is **22.9** vs **31.4** for the other 41 (1 = best).
+
+So the universe-wide gain is largely **regression toward the universe mean**: atr1.0 lifts the
+tail of poorly-handled symbols. Applied to a book already selected for wick-stop performance,
+that same mechanism runs in reverse.
+
+This is a **selection-interaction effect**, and it is a general lesson: *a universe-wide
+parameter improvement cannot be assumed to transfer to a book that was itself selected under
+the old parameter.* Any future config change must be evaluated on the deployed set, not the
+universe.
+
+## Recommendation: NONE — do not deploy, do not shadow
+
+The earlier recommendation (9th shadow engine) is **WITHDRAWN**. A shadow costs calendar time,
+which is this project's scarcest resource, and the pre-test expectation on the deployed book is
+**negative in both measured periods**. There is no basis for spending months of shadow time on
+it.
 
 **Do not alter the live config. The ~2026-08-25 forward-paper verdict is unaffected** and must
 resolve on the config that has been running since 2026-05-05.
+
+If the idea is ever revisited it must be re-derived on the deployed-16 from the start —
+including re-running symbol selection under the ATR stop, which is a much larger piece of work
+and would spend substantially more of the DSR budget.
 
 ## Reproduction
 
