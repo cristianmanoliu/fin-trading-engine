@@ -109,6 +109,26 @@ bash scripts/journal_fetch.sh root@178.105.24.230
 go run ./cmd/dashboard --journal-dir results/journal_cache --results-dir results --port 8080
 ```
 
+### Journal cache layout + P&L recompute
+
+`results/journal_cache/` (gitignored) after `journal_fetch.sh` holds THREE kinds of journal, only one of which is the live book:
+
+| Path | What | In live book? |
+|---|---|---|
+| `results/journal_cache/*.jsonl` | live engines, one file per `SYMBOL-YYYY-MM` | **YES** |
+| `results/journal_cache/shadow/<algo>/*.jsonl` | 8 research shadows | NO |
+| `results/journal_cache/archive/option_c_*/` | **falsified** Option C (superseded 2026-05-07) | NO |
+
+**P&L recompute recipe** (no committed script for the plain book summary): python3 over `results/journal_cache/*.jsonl` — **FLAT glob, non-recursive** — skip any path containing `shadow` / `layer3` / **`archive`**; sum `pnl_usd` where `event=="close"`; symbol = `basename.split('-')[0]`; fees/slip via `fee_usd` / `slip_usd`.
+
+> **Trap (hit 2026-07-29):** a recursive `**/*.jsonl` glob filtered only on `shadow`/`layer3` silently readmits `archive/option_c_*` and reports **339 trades / +$86,376** instead of **126 / +$3,410** — a 25× overstatement that would corrupt any checkpoint fed by it. The flat glob is load-bearing. If you make it recursive, `archive` MUST be excluded. Sanity check: flat and recursive globs must agree; live trade count is ~126 (2026-07-29), not hundreds.
+
+Other journal gotchas:
+- **`outcome` labels LIE on max-hold force-closes.** A 504h force-close is written as `TARGET` even when the target was never touched (XLM 2026-07-28T04:00:00Z, +4.95R). Any close at exactly `HH:00:00Z` on a 504h boundary is suspect — classify by realized R, not the label. SHORT: `R = (entry − exit) / |entry − stop|`.
+- **`scripts/maxhold_wave_classifier.py` shows only UPCOMING boundaries** — for already-closed trades read the journal close events directly.
+- **`forward_paper_status.sh` reads `JOURNAL_DIR` from env** — always invoke as `env -u JOURNAL_DIR bash scripts/forward_paper_status.sh` or it silently reads the wrong directory.
+- **Heredoc CWD trap:** shell state does not persist between Bash calls. Use absolute paths inside `python3 - <<'EOF'` heredocs; relative paths silently match zero files (symptom: `ZeroDivisionError` on a `100*w/n`).
+
 **Post-deploy validation is mandatory.** After ANY `deploy/redeploy.sh`, run `scripts/post_deploy_check.sh`. 13 audit sections: engines active, watchdog timers, binary md5, tick freshness, ERROR logs, rate-limit, position recoveries, executor mode, funding-CSV staleness, disk/log size, drift cron freshness, restart-loop, live-config compliance. Sections 4/5/6 apply 5-min uptime gate. `STRICT=1` exits non-zero + fires Telegram WARN (CI-friendly).
 
 **Daily digest** (Telegram, VPS cron 09:00 UTC). One-screen summary: trades/WR/PnL per cohort + open positions + verdict. `DRY_RUN=1` prints instead of sending. Log: `/var/log/paper-live/daily_digest.log`.
@@ -262,7 +282,9 @@ Threshold-based criteria below are **advisory only** (30-40% FP under null). See
 
 **Decision-grade kill: `scripts/live_vs_backtest_drift.py`** — Welch t + WR z-test, Bonferroni-corrected, α_family=0.001 (FP=12.1%, TP=100%). **Weekly cadence only** (daily → 28%/yr FP). Two firings 7+ days apart OR drift+threshold match = auto-kill.
 
-**Canonical invocation: `scripts/run_drift_check.sh`** — wraps detector, persists history, evaluates two-firings rule. Exit codes: 0 CLEAN / 1 INVESTIGATION / 2 INSUFFICIENT / 3 ERROR / 4 AUTO-KILL. Use `--quiet` for cron.
+**Canonical invocation: `scripts/run_drift_check.sh`** — wraps detector, persists history, evaluates two-firings rule. Exit codes: 0 CLEAN / 1 INVESTIGATION / 2 INSUFFICIENT / 3 ERROR / 4 AUTO-KILL / **5 HISTORY_CORRUPT** (malformed line in `drift_check_history.jsonl`; two-firings rule unevaluable until repaired). Use `--quiet` for cron.
+
+> **DO NOT run `run_drift_check.sh` ad-hoc.** It **appends to `results/drift_check_history.jsonl`**. An off-cadence run manufactures a false 7-days-apart pair and can fabricate an exit-4 auto-kill. Weekly cron/launchd only. Read-only alternatives for manual inspection: `scripts/crosscheck9_losers_mae.py`, `scripts/drift_decompose.py` (both take `--live-dir results/journal_cache`).
 
 **Scheduled: `scripts/weekly_audit.sh`** via launchd (Sunday 09:00). Stages: (1) drift, (2) `forward_paper_status.sh` snapshot, (3) `cmd/journal_validate` (Telegram CRITICAL on errors). Plist: `deploy/drift-check.launchd.plist`. Telegram alerts on codes 1/3 (WARN) + 4 (CRITICAL); 0/2 silent.
 

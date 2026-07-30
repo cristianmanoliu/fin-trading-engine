@@ -74,7 +74,7 @@ python3 scripts/realized_cost_trajectory.py
 
 - Refresh funding CSVs: `scripts/refresh_funding.sh && deploy/redeploy.sh all`
   - **Note:** VPS-cron (`funding_refresh_cron.sh`, Sundays 03:00 UTC) is the authoritative writer. `deploy/sync.sh` now uses `rsync -u` (skip-if-VPS-newer) so a post-cron redeploy will not clobber freshly downloaded CSVs.
-- Verify drift-cron is actually firing: `launchctl list | grep tradingengine` (last column = exit code: 0 CLEAN / 1 INVESTIGATION / 2 INSUFFICIENT / 3 ERROR / 4 AUTO-KILL)
+- Verify drift-cron is actually firing: `launchctl list | grep tradingengine` (last column = exit code: 0 CLEAN / 1 INVESTIGATION / 2 INSUFFICIENT / 3 ERROR / 4 AUTO-KILL / 5 HISTORY_CORRUPT)
 
 ---
 
