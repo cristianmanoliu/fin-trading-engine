@@ -1,0 +1,245 @@
+
+══════════════════════════════════════════════════════════════════════════════
+  Forward-paper go/no-go status — 2026-08-02 06:00 UTC
+  Source: root@178.105.24.230  (/var/log/paper-live/journal)
+══════════════════════════════════════════════════════════════════════════════
+
+  ── live ───────────────────────────────────────────────────────────────────
+    Days elapsed:          85 / 60 (since first close)  [PASS]
+    Trades closed:        129 / 150              [IN-PROGRESS]
+    Wins / WR:             23 / 17.8%             [PENDING]
+    Net PnL:             $+14                       [INSUFFICIENT]
+    Realized fee bps:    10.00   / ≤12bp                [PASS]
+    Realized slip bps:   5.00    / ≤20bp (losers)       [PASS]
+    BTC-HODL Δ vs $16000: $+3352         (HODL=$-3337)  [INSUFFICIENT]
+    30d windows / kill-pairs: 2 / 0                    [PASS]
+    Single-sym pct:      18.2% (1000SHIBUSDT)        [INSUFFICIENT]
+    Top symbols:         1000SHIBUSDT@+19496  , ADAUSDT@+18051  , ETCUSDT@-16758  
+    First trade:         2026-05-08T08:31:59
+    Last trade:          2026-07-31T17:37:34
+    Open positions:      5 (0 LONG, 5 SHORT)
+      1INCHUSDT     SHORT  entry=0.08162    stop=0.083123   target=0.0726018  now=0.08218    R=-0.37 (TP=+6.0R)  held= 38.0h  opened=2026-07-31T16:00:00
+      APTUSDT       SHORT  entry=0.5921     stop=0.61041    target=0.482241   now=0.5662     R=+1.41 (TP=+6.0R)  held=126.0h  opened=2026-07-28T00:00:00
+      BCHUSDT       SHORT  entry=236.2      stop=244.865    target=184.212    now=210.97     R=+2.91 (TP=+6.0R)  held=482.0h  opened=2026-07-13T04:00:00
+      IMXUSDT       SHORT  entry=0.1221     stop=0.126326   target=0.0967428  now=0.1096     R=+2.96 (TP=+6.0R)  held=134.0h  opened=2026-07-27T16:00:00
+      DOTUSDT       SHORT  entry=0.8213     stop=0.842141   target=0.696252   now=0.7942     R=+1.30 (TP=+6.0R)  held=242.0h  opened=2026-07-23T04:00:00
+    >>> VERDICT: WAITING (insufficient data)
+
+  layer3                      (no data yet)
+
+  ── shadow/alt10-30-504 ────────────────────────────────────────────────────
+    Days elapsed:          64 / 60 (since first close)  [PASS]
+    Trades closed:         68 / 150              [IN-PROGRESS]
+    Wins / WR:             16 / 23.5%             [PENDING]
+    Net PnL:             $+27775                    [INSUFFICIENT]
+    Realized fee bps:    10.00   / ≤12bp                [PASS]
+    Realized slip bps:   5.00    / ≤20bp (losers)       [PASS]
+    BTC-HODL Δ vs $16000: $+30033        (HODL=$-2257)  [INSUFFICIENT]
+    30d windows / kill-pairs: 2 / 0                    [PASS]
+    Single-sym pct:      15.5% (BCHUSDT)        [INSUFFICIENT]
+    Top symbols:         BCHUSDT@+10706  , ADAUSDT@+9741  , ROSEUSDT@+8574  
+    First trade:         2026-05-30T02:12:01
+    Last trade:          2026-08-02T05:21:37
+    Open positions:      6 (0 LONG, 6 SHORT)
+      FILUSDT       SHORT  entry=0.7207     stop=0.752352   target=0.53079    now=0.718      R=+0.09 (TP=+6.0R)  held=134.0h  opened=2026-07-27T16:00:00
+      APTUSDT       SHORT  entry=0.5921     stop=0.61041    target=0.482241   now=0.5662     R=+1.41 (TP=+6.0R)  held=126.0h  opened=2026-07-28T00:00:00
+      XLMUSDT       SHORT  entry=0.18389    stop=0.187878   target=0.159964   now=0.17693    R=+1.75 (TP=+6.0R)  held=242.0h  opened=2026-07-23T04:00:00
+      BCHUSDT       SHORT  entry=207.29     stop=214.264    target=165.446    now=210.97     R=-0.53 (TP=+6.0R)  held= 42.0h  opened=2026-07-31T12:00:00
+      IMXUSDT       SHORT  entry=0.1221     stop=0.126326   target=0.0967428  now=0.1096     R=+2.96 (TP=+6.0R)  held=134.0h  opened=2026-07-27T16:00:00
+      DOTUSDT       SHORT  entry=0.8213     stop=0.842141   target=0.696252   now=0.7942     R=+1.30 (TP=+6.0R)  held=242.0h  opened=2026-07-23T04:00:00
+    >>> VERDICT: WAITING (insufficient data)
+
+  ── shadow/alt12-26-504 ────────────────────────────────────────────────────
+    Days elapsed:          66 / 60 (since first close)  [PASS]
+    Trades closed:         77 / 150              [IN-PROGRESS]
+    Wins / WR:             18 / 23.4%             [PENDING]
+    Net PnL:             $+34223                    [INSUFFICIENT]
+    Realized fee bps:    10.00   / ≤12bp                [PASS]
+    Realized slip bps:   5.00    / ≤20bp (losers)       [PASS]
+    BTC-HODL Δ vs $16000: $+36584        (HODL=$-2361)  [INSUFFICIENT]
+    30d windows / kill-pairs: 2 / 0                    [PASS]
+    Single-sym pct:      12.9% (ETCUSDT)        [INSUFFICIENT]
+    Top symbols:         ETCUSDT@-12060  , ADAUSDT@+9741  , GRTUSDT@+9716  
+    First trade:         2026-05-27T12:22:42
+    Last trade:          2026-08-02T05:21:37
+    Open positions:      7 (0 LONG, 7 SHORT)
+      1INCHUSDT     SHORT  entry=0.08162    stop=0.083123   target=0.0726018  now=0.08218    R=-0.37 (TP=+6.0R)  held= 38.0h  opened=2026-07-31T16:00:00
+      FILUSDT       SHORT  entry=0.7207     stop=0.752352   target=0.53079    now=0.718      R=+0.09 (TP=+6.0R)  held=134.0h  opened=2026-07-27T16:00:00
+      APTUSDT       SHORT  entry=0.5921     stop=0.61041    target=0.482241   now=0.5662     R=+1.41 (TP=+6.0R)  held=126.0h  opened=2026-07-28T00:00:00
+      XLMUSDT       SHORT  entry=0.18389    stop=0.187878   target=0.159964   now=0.17693    R=+1.75 (TP=+6.0R)  held=242.0h  opened=2026-07-23T04:00:00
+      BCHUSDT       SHORT  entry=207.29     stop=214.264    target=165.446    now=210.97     R=-0.53 (TP=+6.0R)  held= 42.0h  opened=2026-07-31T12:00:00
+      IMXUSDT       SHORT  entry=0.1221     stop=0.126326   target=0.0967428  now=0.1096     R=+2.96 (TP=+6.0R)  held=134.0h  opened=2026-07-27T16:00:00
+      DOTUSDT       SHORT  entry=0.8213     stop=0.842141   target=0.696252   now=0.7942     R=+1.30 (TP=+6.0R)  held=242.0h  opened=2026-07-23T04:00:00
+    >>> VERDICT: WAITING (insufficient data)
+
+  ── shadow/alt21-50-504 ────────────────────────────────────────────────────
+    Days elapsed:          44 / 60 (since first close)  [IN-PROGRESS]
+    Trades closed:         17 / 150              [IN-PROGRESS]
+    Wins / WR:              3 / 17.6%             [PENDING]
+    Net PnL:             $+1950                     [INSUFFICIENT]
+    Realized fee bps:    10.00   / ≤12bp                [PASS]
+    Realized slip bps:   5.00    / ≤20bp (losers)       [PASS]
+    BTC-HODL Δ vs $16000: $+1820         (HODL=$+129)  [INSUFFICIENT]
+    30d windows / kill-pairs: 1 / 0                    [PENDING]
+    Single-sym pct:      18.7% (ROSEUSDT)        [INSUFFICIENT]
+    Top symbols:         ROSEUSDT@+4881  , ETCUSDT@+4619  , APTUSDT@+4496  
+    First trade:         2026-06-18T23:52:27
+    Last trade:          2026-07-29T09:48:30
+    Open positions:      1 (0 LONG, 1 SHORT)
+      XLMUSDT       SHORT  entry=0.18246    stop=0.184975   target=0.167371   now=0.17693    R=+2.20 (TP=+6.0R)  held=230.0h  opened=2026-07-23T16:00:00
+    >>> VERDICT: WAITING (insufficient data)
+
+  ── shadow/alt5-15-336 ─────────────────────────────────────────────────────
+    Days elapsed:          85 / 60 (since first close)  [PASS]
+    Trades closed:        228 / 150              [PASS]
+    Wins / WR:             51 / 22.4%             [PASS]
+    Net PnL:             $+74578                    [PASS]
+    Realized fee bps:    10.00   / ≤12bp                [PASS]
+    Realized slip bps:   5.00    / ≤20bp (losers)       [PASS]
+    BTC-HODL Δ vs $16000: $+77916        (HODL=$-3337)  [PASS]
+    30d windows / kill-pairs: 2 / 0                    [PASS]
+    Single-sym pct:      17.0% (ADAUSDT)        [PASS]
+    Top symbols:         ADAUSDT@+21071  , 1INCHUSDT@+12624  , IMXUSDT@+11978  
+    First trade:         2026-05-08T15:55:01
+    Last trade:          2026-08-01T14:18:34
+    Open positions:      7 (0 LONG, 7 SHORT)
+      ETCUSDT       SHORT  entry=6.784      stop=6.96095    target=5.72228    now=6.655      R=+0.73 (TP=+6.0R)  held=126.0h  opened=2026-07-28T00:00:00
+      1INCHUSDT     SHORT  entry=0.08223    stop=0.0844544  target=0.0688838  now=0.08218    R=+0.02 (TP=+6.0R)  held= 42.0h  opened=2026-07-31T12:00:00
+      FILUSDT       SHORT  entry=0.7207     stop=0.752352   target=0.53079    now=0.718      R=+0.09 (TP=+6.0R)  held=134.0h  opened=2026-07-27T16:00:00
+      XLMUSDT       SHORT  entry=0.18707    stop=0.192292   target=0.155737   now=0.17693    R=+1.94 (TP=+6.0R)  held=250.0h  opened=2026-07-22T20:00:00
+      BCHUSDT       SHORT  entry=207.29     stop=214.264    target=165.446    now=210.97     R=-0.53 (TP=+6.0R)  held= 42.0h  opened=2026-07-31T12:00:00
+      ENSUSDT       SHORT  entry=4.287      stop=4.31231    target=4.13515    now=4.26       R=+1.07 (TP=+6.0R)  held= 46.0h  opened=2026-07-31T08:00:00
+      IMXUSDT       SHORT  entry=0.1221     stop=0.126326   target=0.0967428  now=0.1096     R=+2.96 (TP=+6.0R)  held=134.0h  opened=2026-07-27T16:00:00
+    >>> VERDICT: DEPLOY-READY — all criteria met
+
+  ── shadow/alt5-15-504 ─────────────────────────────────────────────────────
+    Days elapsed:          85 / 60 (since first close)  [PASS]
+    Trades closed:        209 / 150              [PASS]
+    Wins / WR:             47 / 22.5%             [PASS]
+    Net PnL:             $+77480                    [PASS]
+    Realized fee bps:    10.00   / ≤12bp                [PASS]
+    Realized slip bps:   5.00    / ≤20bp (losers)       [PASS]
+    BTC-HODL Δ vs $16000: $+80818        (HODL=$-3337)  [PASS]
+    30d windows / kill-pairs: 2 / 0                    [PASS]
+    Single-sym pct:      17.1% (ADAUSDT)        [PASS]
+    Top symbols:         ADAUSDT@+21071  , 1INCHUSDT@+12624  , ROSEUSDT@+11637  
+    First trade:         2026-05-08T15:55:01
+    Last trade:          2026-08-01T14:18:34
+    Open positions:      7 (0 LONG, 7 SHORT)
+      ETCUSDT       SHORT  entry=6.784      stop=6.96095    target=5.72228    now=6.655      R=+0.73 (TP=+6.0R)  held=126.0h  opened=2026-07-28T00:00:00
+      1INCHUSDT     SHORT  entry=0.08223    stop=0.0844544  target=0.0688838  now=0.08218    R=+0.02 (TP=+6.0R)  held= 42.0h  opened=2026-07-31T12:00:00
+      FILUSDT       SHORT  entry=0.7207     stop=0.752352   target=0.53079    now=0.718      R=+0.09 (TP=+6.0R)  held=134.0h  opened=2026-07-27T16:00:00
+      XLMUSDT       SHORT  entry=0.18707    stop=0.192292   target=0.155737   now=0.17693    R=+1.94 (TP=+6.0R)  held=250.0h  opened=2026-07-22T20:00:00
+      BCHUSDT       SHORT  entry=240.05     stop=247.187    target=197.228    now=210.97     R=+4.07 (TP=+6.0R)  held=486.0h  opened=2026-07-13T00:00:00
+      ENSUSDT       SHORT  entry=4.287      stop=4.31231    target=4.13515    now=4.26       R=+1.07 (TP=+6.0R)  held= 46.0h  opened=2026-07-31T08:00:00
+      IMXUSDT       SHORT  entry=0.1221     stop=0.126326   target=0.0967428  now=0.1096     R=+2.96 (TP=+6.0R)  held=134.0h  opened=2026-07-27T16:00:00
+    >>> VERDICT: DEPLOY-READY — all criteria met
+
+  ── shadow/alt5-21-504 ─────────────────────────────────────────────────────
+    Days elapsed:          67 / 60 (since first close)  [PASS]
+    Trades closed:        124 / 150              [IN-PROGRESS]
+    Wins / WR:             25 / 20.2%             [PENDING]
+    Net PnL:             $+19585                    [INSUFFICIENT]
+    Realized fee bps:    10.00   / ≤12bp                [PASS]
+    Realized slip bps:   5.00    / ≤20bp (losers)       [PASS]
+    BTC-HODL Δ vs $16000: $+21946        (HODL=$-2361)  [INSUFFICIENT]
+    30d windows / kill-pairs: 2 / 0                    [PASS]
+    Single-sym pct:      20.5% (ADAUSDT)        [INSUFFICIENT]
+    Top symbols:         ADAUSDT@+17988  , AVAXUSDT@+6612  , RUNEUSDT@-6568  
+    First trade:         2026-05-27T01:00:42
+    Last trade:          2026-08-01T14:02:20
+    Open positions:      8 (0 LONG, 8 SHORT)
+      ETCUSDT       SHORT  entry=6.662      stop=6.8108     target=5.76918    now=6.655      R=+0.05 (TP=+6.0R)  held= 50.0h  opened=2026-07-31T04:00:00
+      1INCHUSDT     SHORT  entry=0.08223    stop=0.0844544  target=0.0688838  now=0.08218    R=+0.02 (TP=+6.0R)  held= 42.0h  opened=2026-07-31T12:00:00
+      FILUSDT       SHORT  entry=0.7207     stop=0.752352   target=0.53079    now=0.718      R=+0.09 (TP=+6.0R)  held=134.0h  opened=2026-07-27T16:00:00
+      XLMUSDT       SHORT  entry=0.18707    stop=0.192292   target=0.155737   now=0.17693    R=+1.94 (TP=+6.0R)  held=250.0h  opened=2026-07-22T20:00:00
+      BCHUSDT       SHORT  entry=236.2      stop=244.865    target=184.212    now=210.97     R=+2.91 (TP=+6.0R)  held=482.0h  opened=2026-07-13T04:00:00
+      IMXUSDT       SHORT  entry=0.1221     stop=0.126326   target=0.0967428  now=0.1096     R=+2.96 (TP=+6.0R)  held=134.0h  opened=2026-07-27T16:00:00
+      GRTUSDT       SHORT  entry=0.01596    stop=0.0162863  target=0.0140024  now=0.01455    R=+4.32 (TP=+6.0R)  held=162.0h  opened=2026-07-26T12:00:00
+      DOTUSDT       SHORT  entry=0.8213     stop=0.842141   target=0.696252   now=0.7942     R=+1.30 (TP=+6.0R)  held=242.0h  opened=2026-07-23T04:00:00
+    >>> VERDICT: WAITING (insufficient data)
+
+  ── shadow/alt7-14-504 ─────────────────────────────────────────────────────
+    Days elapsed:          67 / 60 (since first close)  [PASS]
+    Trades closed:        130 / 150              [IN-PROGRESS]
+    Wins / WR:             29 / 22.3%             [PENDING]
+    Net PnL:             $+32835                    [INSUFFICIENT]
+    Realized fee bps:    10.00   / ≤12bp                [PASS]
+    Realized slip bps:   5.00    / ≤20bp (losers)       [PASS]
+    BTC-HODL Δ vs $16000: $+35197        (HODL=$-2361)  [INSUFFICIENT]
+    30d windows / kill-pairs: 2 / 0                    [PASS]
+    Single-sym pct:      24.3% (ADAUSDT)        [INSUFFICIENT]
+    Top symbols:         ADAUSDT@+18161  , ROSEUSDT@+10082  , RUNEUSDT@-7751  
+    First trade:         2026-05-27T01:00:42
+    Last trade:          2026-08-01T14:02:20
+    Open positions:      7 (0 LONG, 7 SHORT)
+      ETCUSDT       SHORT  entry=6.662      stop=6.8108     target=5.76918    now=6.655      R=+0.05 (TP=+6.0R)  held= 50.0h  opened=2026-07-31T04:00:00
+      1INCHUSDT     SHORT  entry=0.08223    stop=0.0844544  target=0.0688838  now=0.08218    R=+0.02 (TP=+6.0R)  held= 42.0h  opened=2026-07-31T12:00:00
+      FILUSDT       SHORT  entry=0.7207     stop=0.752352   target=0.53079    now=0.718      R=+0.09 (TP=+6.0R)  held=134.0h  opened=2026-07-27T16:00:00
+      XLMUSDT       SHORT  entry=0.18707    stop=0.192292   target=0.155737   now=0.17693    R=+1.94 (TP=+6.0R)  held=250.0h  opened=2026-07-22T20:00:00
+      BCHUSDT       SHORT  entry=240.05     stop=247.187    target=197.228    now=210.97     R=+4.07 (TP=+6.0R)  held=486.0h  opened=2026-07-13T00:00:00
+      IMXUSDT       SHORT  entry=0.1221     stop=0.126326   target=0.0967428  now=0.1096     R=+2.96 (TP=+6.0R)  held=134.0h  opened=2026-07-27T16:00:00
+      DOTUSDT       SHORT  entry=0.8213     stop=0.842141   target=0.696252   now=0.7942     R=+1.30 (TP=+6.0R)  held=242.0h  opened=2026-07-23T04:00:00
+    >>> VERDICT: WAITING (insufficient data)
+
+  ── shadow/bb20 ────────────────────────────────────────────────────────────
+    Days elapsed:          84 / 60 (since first close)  [PASS]
+    Trades closed:        155 / 150              [PASS]
+    Wins / WR:             30 / 19.4%             [PASS]
+    Net PnL:             $+3158                     [PASS]
+    Realized fee bps:    10.00   / ≤12bp                [PASS]
+    Realized slip bps:   5.00    / ≤20bp (losers)       [PASS]
+    BTC-HODL Δ vs $16000: $+6571         (HODL=$-3412)  [PASS]
+    30d windows / kill-pairs: 2 / 0                    [PASS]
+    Single-sym pct:      16.7% (FILUSDT)        [PASS]
+    Top symbols:         FILUSDT@-13647  , ETCUSDT@-13632  , ADAUSDT@+9440  
+    First trade:         2026-05-09T13:20:39
+    Last trade:          2026-08-02T04:53:09
+    Open positions:      5 (0 LONG, 5 SHORT)
+      KAVAUSDT      SHORT  entry=0.0438     stop=0.0444944  target=0.0396333  now=0.0408     R=+4.32 (TP=+6.0R)  held= 82.0h  opened=2026-07-29T20:00:00
+      XLMUSDT       SHORT  entry=0.18389    stop=0.187878   target=0.159964   now=0.17693    R=+1.75 (TP=+6.0R)  held=242.0h  opened=2026-07-23T04:00:00
+      BCHUSDT       SHORT  entry=236.2      stop=244.865    target=184.212    now=210.97     R=+2.91 (TP=+6.0R)  held=482.0h  opened=2026-07-13T04:00:00
+      IMXUSDT       SHORT  entry=0.1179     stop=0.122422   target=0.0907662  now=0.1096     R=+1.84 (TP=+6.0R)  held=126.0h  opened=2026-07-28T00:00:00
+      DOTUSDT       SHORT  entry=0.7915     stop=0.813212   target=0.661226   now=0.7942     R=-0.12 (TP=+6.0R)  held=134.0h  opened=2026-07-27T16:00:00
+    >>> VERDICT: DEPLOY-READY — all criteria met
+
+══════════════════════════════════════════════════════════════════════════════
+  Promotion countdown (paper → STAGE_1)
+══════════════════════════════════════════════════════════════════════════════
+    Live cohort:    129 / 150 trades   |   85 / 60 days
+    Trades to go:   21 at observed rate (1.52/day) → ~14 days
+    Days to go:     0
+    Binding gate:   trades (max of days/trades) → earliest STAGE_1 ~2026-08-16
+
+══════════════════════════════════════════════════════════════════════════════
+  Drift detector heartbeat
+══════════════════════════════════════════════════════════════════════════════
+    last drift run (2026-08-02T06:00:03Z)               [✓ 0d ago]
+
+══════════════════════════════════════════════════════════════════════════════
+  Resolution verdict (per LIMBO rule, results/forward_paper_outcome_resolution_decision_rule_2026-05-10.md)
+══════════════════════════════════════════════════════════════════════════════
+  >>> 🚨 KILL — locked criterion fired; EXECUTE auto-kill per auto_kill_execution_decision_rule_2026-05-08.md
+      • kill_protocol_check fires (locked criteria: slip>30, drawdown 20%, single-sym>50%, 3-consecutive-day-loss>5×stake)
+
+══════════════════════════════════════════════════════════════════════════════
+  Notes:
+  - Realized fee/slip bps come from journal cost decomposition (gross/fee/slip/notional)
+  - Slip bps computed on the losing-trade (outcome=STOP) subsample only — partial closes
+    and full target hits are excluded since slippage is modeled on losers only
+  - n/a means no closes carry the cost decomposition yet (engine restart needed before
+    new closes will land in the journal — old closes pre-extension show as 0 fee/slip)
+  - Open positions = symbols where opens > closes in the journal — visibility for trades
+    riding pre-first-close (e.g. fresh-deploy windows or rare-signal cohorts)
+  - Open-position prices fetched live from Binance fapi /v1/ticker/price;
+    R-multiple is the strategy's native unit: +R = profit toward target,
+    −R = adverse toward stop (−1R = stop touched, TP=+NR shows the target R)
+  - PnL/single-sym/HODL-cumul verdicts gated on trades ≥ $MIN_TRADES
+    (kill-bar mis-calibration verdict 2026-05-07 made these advisory-only;
+    decision-grade kill is scripts/run_drift_check.sh)
+  - Kill criteria 'first 60 days net-negative' = same as Net PnL FAIL post 60-day mark
+  - BTC-HODL benchmark notional: $16000 (override via BENCHMARK_NOTIONAL env);
+    consecutive 30d window kill threshold: $5000 (override via KILL_HODL_WINDOW_USD)
+  - All criteria from CLAUDE.md ## Forward-paper go/no-go criteria
+══════════════════════════════════════════════════════════════════════════════
+
