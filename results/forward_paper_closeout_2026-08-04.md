@@ -196,14 +196,27 @@ locked rule outputs when allowed to fire).
 - Last drift checkpoint: 2026-08-02, **HOLD (13th consecutive)**, no escalation.
 - Last commit before close-out: `cf0daa8`.
 - 2 positions open and abandoned (§1).
-- VPS decommissioned 2026-08-04 (16 live engines + 8 research shadows).
-- `results/journal_cache/` is gitignored. **All 417 raw journal files (live +
-  8 shadows + Layer 3) were archived before shutdown to
-  `~/Main/notes/ai/fin-trading-engine_journals_final_2026-08-04.tar.gz`**
-  (151 KB) — outside the repo, surviving VPS decommission. Together with this
-  document and the committed weekly snapshots in `results/decision_snapshots/`
-  and `results/forward_paper_snapshots/`, that is the complete surviving
-  record. Re-analysis of the raw trade stream remains possible.
+- **VPS decommissioned and destroyed 2026-08-04.** 16 live engines + 8 research
+  shadows stopped and disabled, timers and cron removed, `/opt/trading-engine`
+  and `/var/log/paper-live` deleted, `/etc/paper-live/env` shredded, Hetzner
+  server destroyed from console. **Nothing of this system runs anywhere.**
+- `results/journal_cache/` is gitignored. All 417 raw journal files (live +
+  8 shadows + Layer 3) were archived before shutdown to:
+
+  ```
+  ~/Main/notes/ai/fin-trading-engine_journals_final_2026-08-04.tar.gz
+  151 KB   sha256 46e2cb5719c16a5b02e6a66a887e12e007f11c0c24949b474ef9686614e7876a
+  ```
+
+  Verified restorable before the wipe: extracted clean, 417 files, reproduced
+  the 134-trade / −$1,626.58 book exactly.
+
+  > **This tarball is now the ONLY copy of the raw trade data.** The VPS was
+  > destroyed and the local `results/journal_cache/` is gitignored and
+  > untracked. If both are lost, the per-trade record is unrecoverable and only
+  > this document plus the committed weekly snapshots in
+  > `results/decision_snapshots/` and `results/forward_paper_snapshots/`
+  > survive. Consider a second copy if the raw stream has any future value.
 
 The strategy was falsified on cost grounds, with the mechanism understood and
 the gross edge confirmed real. That is a complete finding, arrived at without
