@@ -1,5 +1,21 @@
 # Version 2 — what the run taught, and how to build the next one
 
+> **RESOLVED 2026-08-05 — both Option A and Option B are closed negative.**
+> §3's ranking is superseded; read these first:
+> - **Option A (maker execution): NO-GO** — `maker_execution_verdict_2026-08-05.md`.
+>   Fill rate passes (77.3%) but missed trades ARE systematically the winners
+>   (−7.1pp winner-vs-loser fill gap, z=−3.74, same sign at every window, n=2,882).
+>   Per this doc's own locked rule, **the strategy class is closed for good.**
+> - **Option B (wider stops): ALREADY ANSWERED before this doc proposed it** —
+>   `wider_stop_option_b_disposition_2026-08-05.md`. Three verdicts from
+>   2026-07-26/27: fee mechanism real (~65% cut, 57/57 symbols) but reaches only
+>   0.86× breakeven, and **negative on the deployed-16 in both periods.**
+>
+> §1's break-even finding (8bp needed, 10bp paid) stands and is unaffected — but
+> neither maker execution nor wider stops can collect those 2bp. The only
+> remaining route is a cheaper **taker** venue, which is a venue-access problem,
+> not a strategy problem.
+
 Companion to `forward_paper_closeout_2026-08-04.md`. That document records
 what happened. This one records **what to do differently**, written while the
 evidence is still fresh and before hindsight smooths it over.
@@ -109,9 +125,42 @@ analysis during the run was subtly wrong until this was caught.
 **v2 rule: exit reason is written by the code path that performs the exit,
 never inferred. One enum, one writer, asserted in a test.**
 
+### L7. A universe-wide improvement does not transfer to a selected book
+
+*(added 2026-08-05 from the Option B disposition)*
+
+`--atr-stop-mult 1.0` was universe-wide significant (+$336k on held-out test,
+t=+3.83, p<0.001, better on 36/57 symbols) and **negative on the deployed-16 in
+both train and test**. `corr(baseline NET, improvement) = −0.523`: it helps the
+symbols the old parameter handled worst and hurts those it handled best.
+
+The deployed-16 were selected under the old parameter, so a universe-wide gain
+that is largely regression toward the mean runs **in reverse** on them.
+
+**v2 rule: evaluate every config change on the deployed set, not the universe.
+A parameter sweep on the full universe cannot license a change to a book that
+was itself selected under the old parameter.**
+
+### L8. A cost saving conditional on execution is not a cost saving
+
+*(added 2026-08-05 from the Option A verdict)*
+
+Maker entry saves 3bp on a strategy that needed 2bp — arithmetically sufficient.
+It is uncollectable: the saving is conditional on being filled, and for a SHORT
+a resting limit fails to fill exactly when price drops immediately, which is
+what a winner looks like. The 655 unfilled trades carried +$424k of gross.
+
+**v2 rule: before crediting an execution-cost improvement, ask what is
+conditional on the fill and whether that condition correlates with the outcome.
+Price the selection, not just the fee.**
+
 ---
 
 ## 3. What v2 should actually be
+
+> **Superseded — see the banner at the top of this document.** Options A and B
+> are both closed negative as of 2026-08-05. The ranking below is preserved as
+> the reasoning that led to those tests, not as live guidance.
 
 Ranked by expected value, given everything above.
 
