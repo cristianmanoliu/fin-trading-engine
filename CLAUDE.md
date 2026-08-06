@@ -28,6 +28,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 >
 > **Do not re-run Option A (maker) or Option B (wider stops)** — both are
 > pre-registered and settled. Do not start a new search here.
+>
+> **Open security item:** a still-live Telegram bot token sits in this repo's
+> git history (`deploy/install.sh` @ `0dfc9c5`). Current tree is clean and the
+> repo is private; the token is shared with four other projects, so rotation is
+> a coordinated decision. Documented and accepted, not fixed — see
+> [`SECURITY_NOTE.md`](./SECURITY_NOTE.md).
 
 **Operator-facing reference:** see `docs/OPERATOR_HANDBOOK.md` for daily/weekly cadence, Telegram tier guide, scenario playbook (drift fires, kill protocol, promotion ready, recovery drift, real-money emergency kill), and tool map. CLAUDE.md is project-history dense; the handbook is the focused operational reference. **Both are historical as of 2026-08-05 — see the banner above.**
 
