@@ -1,6 +1,12 @@
 # results/ index — decision rules, verdicts, and operational pre-registrations
 
-125 markdown artifacts (including INDEX) as of 2026-06-11, organized by lifecycle stage and category. Docs through 2026-05-24 are organized in the lifecycle/category sections below; later docs are in `## Additions 2026-05-24 → 2026-06-11` at the bottom.
+> **PROJECT CLOSED 2026-08-05.** Forward-paper terminated early on 2026-08-04
+> (134 trades, NET **−$1,626.58**, costs 114% of gross); the VPS was destroyed the
+> same day. Both v2 revival routes resolved NEGATIVE on 2026-08-05. **Zero real
+> money was ever deployed.** Nothing in this directory is live guidance — it is a
+> closed research record. Start at `## Close-out 2026-08-04 → 08-05` at the bottom.
+
+136 markdown artifacts (including INDEX) as of 2026-08-05, organized by lifecycle stage and category. Docs through 2026-05-24 are organized in the lifecycle/category sections below; later docs are in the dated additions sections at the bottom, ending with the close-out.
 
 **Three artifact types:**
 - `*_decision_rule_*.md` — pre-registered: rule LOCKED before data is observed
@@ -268,3 +274,24 @@ Note: `*_verdict_*` files for 2026-05-07/08 rules are covered by the `+ _verdict
 
 ### Amendments to existing locks
 - `real_money_executor_architecture_decision_rule_2026-05-08.md` — **Addendum 2026-06-11**: Gate A basis notional → per-trade risk; Gate B cap → 10× stake (migration trigger #1, testnet integration data; see `docs/findings/2026-06-11.md`)
+
+---
+
+## Close-out 2026-08-04 → 08-05
+
+The final chapter. Read these five in order; they supersede the operational
+posture of every document above.
+
+- `forward_paper_closeout_2026-08-04.md` — **TERMINATED EARLY** by operator decision at day 88 of ~112, 134 of a pre-registered 150 trades, with 2 positions still open. The formal verdict never fired. Final book: 134 trades, WR **17.9%**, gross +$11,420.10, fees $9,176.84, slip $3,869.84, **NET −$1,626.58** — costs **114.2% of gross**. Stake $1k/trade, paper only, **zero real money ever deployed**. Written against `results/journal_cache/` as fetched 2026-08-04T18:30Z; the VPS was destroyed the same day, making the journal archive the sole raw-data copy.
+
+- `v2_lessons_and_design_2026-08-04.md` — **the most useful document in this directory.** Companion to the close-out: what to do differently, not what happened. Its §1 is the correction to the story told throughout the run — **break-even was 8 bp; the run executed at 10 bp.** The strategy failed by **2 basis points**, not by an order of magnitude (gross edge +$85/trade vs $97/trade of cost). Structural but *narrow*. Carries eight lessons (L1–L8), of which L1 (validate the fee assumption first, in an afternoon, before any infrastructure), L4 (drop-top-5% is the honesty check that decides everything), and L7/L8 (added 08-05 from the verdicts below) generalize beyond this project. §3's Option A/B ranking is **superseded** by the two verdicts below — a banner at the top of the doc says so.
+
+- `maker_execution_prereg_2026-08-05.md` — **pre-reg**, locked before the 5y journal was generated. Exists because the first pass at the question, on the 134-trade book the same day, produced a **+$14.7k "improvement" that was an artifact of choosing the fill window after seeing the P&L** (a $23k swing across 5/15/30/60m). §1 records why the forward-paper book cannot answer this, so the underpowered pilot is never silently reused as evidence. Fixes the 5m window as the only non-free parameter (pessimistic end), a touch=fill optimistic queue model, 2bp maker entry / 5bp taker exit, and three criteria. Includes an escape clause: if windows disagree, the finding is window-dependent and NOT actionable.
+
+- `maker_execution_verdict_2026-08-05.md` — **NO-GO** (Option A). n=**2,882** paired trades (630 W / 2,252 L), 2020-01-20 → 2026-07-31, 21× the forward-paper book. Criterion 1 **PASSES** (fill rate 77.3%, latency p50=1m). Criteria 2 and 3 **FAIL**: winner fill 71.7% vs loser 78.8% = **−7.1pp, z=−3.74**, same sign at every window (5/15/30/60m) — so not a window artifact. Mechanism: for a SHORT, a resting sell-limit fails to fill only when price drops immediately and never returns — **exactly what a winner looks like**. The 655 unfilled trades carried **+$424,275 gross**. Maker net is worse by $219k–$338k, and drop-top-5% makes it worse still (−$86k → −$228k). Per the design doc's own locked language, **the strategy class is closed for good.** Harness: `scripts/maker_fill_replay.py` (read-only, `--selftest`).
+
+- `wider_stop_option_b_disposition_2026-08-05.md` — **ALREADY ANSWERED, NOT RE-RUN.** Option B was settled 9 days *before* the design doc proposed it, across three pre-registered verdicts with a held-out split (`atr_stop_cost_geometry_verdict_2026-07-26.md`, `atr1_0_holdout_verdict_2026-07-27.md`, `deployed16_direct_sweep_verdict_2026-07-27.md`). The fee mechanism is real and arithmetic (−65% on **57/57 symbols, both periods**) but reaches only **0.86× of breakeven**, and atr1.0 is **negative on the deployed-16 in both train and test**. Re-running would spend DSR budget to re-derive a settled answer. **Process lesson: grep `results/` before proposing a research direction** — the answer was three files away and the design doc missed it.
+
+**Net position after close-out.** The perp EMA class is exhausted. Both v2 routes are closed for independent reasons and do not compose into a rescue. The only remaining route to the missing 2bp is a **cheaper taker venue** (a market order always fills, so there is no adverse selection) — a venue-access problem, not a strategy problem, and blocked by the EEA region restriction (`venue_scouting_2026-06-10.md`, `docs/superpowers/specs/2026-07-13-venue-port-kraken-design.md`). The strategy-class search closed at **N≈85 trials, PBO 0.52**; the governing constraint is `viability_frontier_2026-07-27.md` ("THE LAW"), whose 30-second screening rule — require backtest gross ≥ 3× cost in R — retroactively rejects every candidate this project ever ran.
+
+**Do not re-run Option A or Option B.** Both are pre-registered and settled.

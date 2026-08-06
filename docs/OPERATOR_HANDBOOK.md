@@ -1,5 +1,23 @@
 # Operator handbook
 
+> # ⛔ INOPERATIVE — PROJECT CLOSED 2026-08-05
+>
+> **There is nothing to operate.** The VPS was destroyed 2026-08-04; all 16
+> engines, every cron (drift, digest, funding refresh, weekly audit) and the
+> local launchd timers are gone. Forward-paper was terminated early — 134
+> trades, **NET −$1,626.58**, costs 114% of gross. **Zero real money was ever
+> deployed.**
+>
+> Every cadence, alert response, and command below **will fail or mislead**:
+> the host does not answer, the crons do not fire, and no new journal data can
+> arrive. Do **not** run `scripts/run_drift_check.sh` — it appends to
+> `drift_check_history.jsonl` and an off-cadence run can fabricate a phantom
+> auto-kill against a book that is closed.
+>
+> Kept as a record of how the run was operated. For the outcome and the
+> transferable lessons see `results/INDEX.md` → `## Close-out 2026-08-04 →
+> 08-05`.
+
 Operator-facing distillation of the mechanized forward-paper monitoring
 system. Reference for "what should I look at, when, and what does it mean?"
 
@@ -9,7 +27,7 @@ For project history, locked decision rules, and architecture detail see
 
 ---
 
-## Mode you're in (2026-05-10)
+## Mode you're in (2026-05-10 — HISTORICAL; actual mode since 2026-08-05 is CLOSED)
 
 **MONITORING.** Forward-paper accumulating; mechanical machinery emits
 weekly verdict via `weekly_audit.sh` launchd cron. Earliest STAGE_1

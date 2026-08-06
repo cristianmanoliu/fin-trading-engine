@@ -2,9 +2,36 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-**Operator-facing reference:** see `docs/OPERATOR_HANDBOOK.md` for daily/weekly cadence, Telegram tier guide, scenario playbook (drift fires, kill protocol, promotion ready, recovery drift, real-money emergency kill), and tool map. CLAUDE.md is project-history dense; the handbook is the focused operational reference.
+> # ⛔ PROJECT CLOSED — 2026-08-05
+>
+> **Nothing is running anywhere.** The Hetzner VPS (`178.105.24.230`) was
+> **destroyed 2026-08-04**. All 16 engines, all crons (drift, digest, funding,
+> weekly audit) and the local launchd timers are gone. **Zero real money was
+> ever deployed, at any point.**
+>
+> Forward-paper was terminated early on 2026-08-04 at day 88 of ~112: **134
+> trades, WR 17.9%, NET −$1,626.58**, costs **114% of gross**. Break-even was
+> **8 bp**; the run paid **10 bp**. Both v2 revival routes closed NEGATIVE on
+> 2026-08-05 (maker execution → adverse selection, −7.1pp winner-fill gap at
+> n=2,882; wider stops → already answered 07-26/27). The perp EMA strategy
+> class is **closed**; the search ended at N≈85 trials, PBO 0.52.
+>
+> **Everything below this banner is historical.** It describes a live system
+> that no longer exists — every `ssh root@…`, `redeploy.sh`, `journal_fetch.sh`,
+> drift-check and cron instruction is **inoperative**. Read it as the record of
+> how the run was operated, not as instructions to follow.
+>
+> Start here instead: `results/INDEX.md` → `## Close-out 2026-08-04 → 08-05`,
+> then `results/v2_lessons_and_design_2026-08-04.md` (the transferable lessons)
+> and `results/viability_frontier_2026-07-27.md` (the screening rule that
+> retroactively rejects every candidate this project ran).
+>
+> **Do not re-run Option A (maker) or Option B (wider stops)** — both are
+> pre-registered and settled. Do not start a new search here.
 
-## Strategy status (2026-05-10)
+**Operator-facing reference:** see `docs/OPERATOR_HANDBOOK.md` for daily/weekly cadence, Telegram tier guide, scenario playbook (drift fires, kill protocol, promotion ready, recovery drift, real-money emergency kill), and tool map. CLAUDE.md is project-history dense; the handbook is the focused operational reference. **Both are historical as of 2026-08-05 — see the banner above.**
+
+## Strategy status (2026-05-10 — HISTORICAL, see banner)
 
 **Live:** 16 paper-trading engines on Hetzner VPS (1 live + **8 shadows** each). Journal-replay on startup prevents orphaned positions. KAVAUSDT + ENSUSDT additionally run a Layer 3 testnet shadow (see Layer 3 status below).
 - **Live config:** `--signal-tf 4H --side-filter short --target-rr 6.0 --max-hold-hours 504 --funding-csv-dir data/funding --fee-bps 10 --stop-slippage-bps 5` (EMA 9/21). 6-window walk-forward validated.
@@ -19,8 +46,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Session logs & pre-registration catalog
 
-Per-session narratives: `docs/findings/<date>.md`. Latest: `2026-05-12-pm.md`.
-Pre-registration catalog: `results/INDEX.md` (58 docs: 28 decision rules + 25 verdicts + 5 syntheses).
+Per-session narratives: `docs/findings/<date>.md`. Latest: `2026-07-28.md`.
+Pre-registration catalog: `results/INDEX.md` (136 docs: 43 decision rules + 51 verdicts + 4 syntheses + operational/state docs). **Read INDEX's top banner and its `## Close-out 2026-08-04 → 08-05` section first — the project is closed and most of this file describes a run that no longer exists.**
 Cumulative audit: 91 fail-opens closed across 8 sessions; pattern locks on silent-on-corrupt-input (5 impl) + ssh-failure-vs-data-failure (6 impl) + writer-equals-fixture (3 impl). See `docs/AUDIT_LENS.md`.
 
 **2026-05-19 research arc:** 6 pre-registered walk-forward sweeps mapping the strategy parameter landscape (EMA periods × timeframe / entry filters / side filter / exit mechanisms). Cross-cutting findings: LIVE config survives every structural perturbation tested; W3 (2025-2026) is filter-hostile; trail beats MLTP at loose thresholds; 2026-05-07 SUPPORTIVE findings don't replicate at slip=5 (cost-model fragility). All sweeps research-only, non-actionable per locked decision rule. **Index: `results/research_synthesis_2026-05-19.md`.** For the "is there anything solid in backtest we never deployed?" question, the closed-backlog ledger is `docs/RESEARCH_BACKLOG.md` (answer: no — every positive finding is already a shadow; the strategy-class search is closed).
