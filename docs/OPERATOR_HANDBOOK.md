@@ -69,6 +69,10 @@ The launchd cron `com.tradingengine.drift-check` fires every Sunday at 09:00 loc
 
 If you receive **NO Telegram alerts** Sunday 09:00–10:00, the system is healthy. **Status quo means silence.** Don't be alarmed by silence.
 
+> **No longer meaningful (2026-08-06).** The weekly job was disarmed, so silence
+> is now guaranteed and says nothing about health. There is no system left to be
+> healthy or unhealthy.
+
 If you want the Sunday read anyway:
 
 ```bash
@@ -339,6 +343,7 @@ Journals:  /var/log/paper-live/journal/
 Logs:      /var/log/paper-live/<symbol>.log
 Engines:   16 × paper-live@<symbol>.service (systemd template)
 Drift cron (local): com.tradingengine.drift-check (launchd, weekly Sunday 09:00)
+                    -- DISARMED 2026-08-06: unloaded and plist removed.
 ```
 
 ---

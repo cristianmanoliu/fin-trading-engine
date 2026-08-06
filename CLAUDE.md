@@ -315,6 +315,14 @@ Threshold-based criteria below are **advisory only** (30-40% FP under null). See
 
 **Scheduled: `scripts/weekly_audit.sh`** via launchd (Sunday 09:00). Stages: (1) drift, (2) `forward_paper_status.sh` snapshot, (3) `cmd/journal_validate` (Telegram CRITICAL on errors). Plist: `deploy/drift-check.launchd.plist`. Telegram alerts on codes 1/3 (WARN) + 4 (CRITICAL); 0/2 silent.
 
+> **DISARMED 2026-08-06.** `com.tradingengine.drift-check` was still loaded in
+> launchd and still firing weekly *after* the VPS was destroyed — its 2026-08-02
+> run logged `drift_check: AUTO-KILL CANDIDATE` and `resolution: exit=4
+> class=KILL` against a book that had already closed, and would have fired again
+> 08-09. Unloaded (`launchctl bootout`) and the installed plist removed from
+> `~/Library/LaunchAgents/`. The template stays in `deploy/` and is byte-identical
+> to what was installed, so it is reinstallable if ever needed. **Do not reload it.**
+
 **`cmd/journal_validate`** — cross-month consistency checker. Exit codes: 0 CLEAN / 1 WARN / 2 ERROR / 3 USAGE. `--exclude archive` skips pre-Bug-6.
 
 ### Statistical-power floor (before reading any signal)
