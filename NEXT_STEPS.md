@@ -1,193 +1,94 @@
-# NEXT_STEPS — P4-Combined forward-paper validation, 2026-05-05 onward
+# NEXT_STEPS — none. Project closed 2026-08-05.
 
-> **Supersedes the 2026-05-05 morning version** (which planned a 30-day quiet period on the 11-engine Option C deploy). Option C was falsified at realistic costs the same evening (NET −$143.76M, 0/57 profitable — `results/option_c_targetrr_realistic_2026-05-05.txt`); the VPS migrated to P4-Combined on 2026-05-07. The old document is preserved in git history.
+> **This file used to be a live work plan.** It prescribed a Layer 2 testnet
+> kickoff "this week", a `scripts/auto_kill.sh` orchestrator as "the next
+> fresh-session deliverable (~3-4 hr)", symbol additions "after Day 60", and a
+> promotion decision on ~2026-09-09. **None of that applies.** The prior
+> version is in git history (`git log -- NEXT_STEPS.md`); it is preserved there
+> rather than here because every instruction in it is now wrong, and a to-do
+> list at repo root is read as instructions no matter what caveat it carries.
 
-## Where we are
+## State
 
-**Live:** 16 paper-trading engines on Hetzner VPS `root@178.105.24.230`. Each engine runs **P4-Combined** as the live strategy + 3 shadow strategies (alt5-15-336, alt5-15-504, bb20). Live config — pinned, do not change:
+Nothing runs anywhere. The Hetzner VPS was destroyed **2026-08-04**; all 16
+engines, every cron, and the local launchd timers are gone. **Zero real money
+was ever deployed, at any point.**
 
-```
---signal-tf 4H --side-filter short --target-rr 6.0 --max-hold-hours 504
---funding-csv-dir data/funding --fee-bps 10 --stop-slippage-bps 5
-```
+Forward-paper was terminated early on 2026-08-04 at day 88 of ~112, at 134 of a
+pre-registered 150 trades. The formal verdict never fired.
 
-EMA 9/21 hardcoded. Wick stop, 6:1 fixed RR.
+| | |
+|---|---|
+| Trades | 134 |
+| Win rate | 17.9% |
+| Gross | +$11,420.10 |
+| Fees | $9,176.84 |
+| Slippage | $3,869.84 |
+| **Net** | **−$1,626.58** |
+| **Costs / gross** | **114.2%** |
 
-**Deployed symbols (`configs/symbols.yaml:deployed`, single source of truth):** 1000SHIBUSDT, 1INCHUSDT, ADAUSDT, APTUSDT, AVAXUSDT, BCHUSDT, DOTUSDT, ENSUSDT, ETCUSDT, FILUSDT, GRTUSDT, IMXUSDT, KAVAUSDT, ROSEUSDT, RUNEUSDT, XLMUSDT.
+Break-even was **8 bp**. The run paid **10 bp**. It failed by two basis points —
+structural, but narrow.
 
-**Forward-paper started:** 2026-05-05 20:06 UTC. Real-money allocation = ZERO.
+Both v2 revival routes closed NEGATIVE on 2026-08-05:
 
-**Honest annual expectation (anchor here):** walk-forward CI [−$111k, +$372k], mean +$130k/yr. Pro-rated honest annual ≈ $69k/yr at slip=25bp. Bootstrap CI [+$42k, +$220k] is tighter but underestimates per-quarter regime variance — do not anchor to it.
+- **Option A, maker entry — NO-GO.** Fill rate passes (77.3%, n=2,882), but
+  winner fill 71.7% vs loser 78.8% = **−7.1pp, z=−3.74**, same sign at every
+  window. For a SHORT, a resting sell-limit fails to fill only when price drops
+  immediately and never returns — exactly what a winner looks like. The 655
+  unfilled trades carried +$424,275 gross.
+- **Option B, wider stops — already answered** 9 days before it was proposed.
+  Fee mechanism real (−65% on 57/57 symbols) but reaches only 0.86× breakeven,
+  and negative on the deployed-16 in both train and test.
 
-## The dual-gate timeline
+The perp EMA class is closed. The search ended at **N≈85 trials, PBO 0.52**.
 
-The promotion criterion is **≥150 live trades AND ≥60 calendar days net-positive**. At the historical fleet rate of ~1.18 trades/day, these collide:
+## What to do next
 
-| Threshold | Hits at | Calendar date |
-|---|---|---|
-| 60 calendar days | Day 60 | **2026-07-04** |
-| 150 trades (~1.18/day) | Day 127 | **~2026-09-09** |
-| **Effective dual-gate (whichever-second)** | Day 127 | **~2026-09-09** |
+**Nothing, in this repo.** There is no next experiment. If you are an agent
+that has been asked to "keep working" or "find the next thing", the honest
+answer is that this project is finished — say so rather than manufacturing a
+plausible-looking task. Do **not**:
 
-So the real "decision day" is roughly **2026-09-09**, not Day 60. Plan accordingly.
+- Re-run Option A or Option B. Both are pre-registered and settled; re-running
+  spends DSR budget to re-derive a known answer.
+- Start a new strategy search here. See `results/viability_frontier_2026-07-27.md`
+  ("THE LAW") — its 30-second screening rule, *require backtest gross ≥ 3× cost
+  in R*, retroactively rejects every candidate this project ever ran.
+- Run `scripts/run_drift_check.sh`. It appends to `drift_check_history.jsonl`;
+  an off-cadence run can manufacture a false 7-day pair and a phantom exit-4
+  auto-kill against a book that is closed.
+- Build `scripts/auto_kill.sh`. The prior version of this file listed it as the
+  next deliverable. There is nothing left to kill.
 
-Earliest STAGE_4 ($1k/trade) reach per pre-reg protocol: ~2027-03-09.
+## Read instead
 
-## Calendar reminders to set NOW
+1. `results/INDEX.md` → `## Close-out 2026-08-04 → 08-05` — the five closing docs.
+2. `results/v2_lessons_and_design_2026-08-04.md` — **the transferable part.**
+   Eight lessons; L1 (validate the fee assumption in an afternoon, before any
+   infrastructure), L4 (drop-top-5% is the honesty check that decides
+   everything), L7 (a universe-wide gain does not transfer to a book selected
+   under the old parameter) and L8 (a cost saving conditional on the fill is not
+   a saving when fills correlate with outcome) generalize beyond crypto perps.
+3. `results/viability_frontier_2026-07-27.md` — the constraint any future
+   strategy must clear before code is written.
 
-- **2026-05-12 (Day 7)** — first weekly drift check (also auto-runs via launchd Sunday 09:00). Validate launchd job actually fired: `launchctl list | grep tradingengine` and check `results/drift_runs/launchd.{out,err}.log`.
-- **2026-06-04 (Day 30)** — first material checkpoint. Statistically thin (~35 trades at fleet rate) but meaningful PnL signal. Compare per-symbol live PnL vs backtest for the same window.
-- **2026-07-04 (Day 60)** — calendar gate satisfied. Trade-count gate still ~67 days out.
-- **~2026-09-09 (Day 127)** — projected dual-gate satisfaction. Real promotion decision; apply `results/real_money_protocol_decision_rule_2026-05-08.md` mechanically.
+## The remaining open question, for the record
 
-## What to do during the wait
+The only route to the missing 2 bp is a **cheaper taker venue** — a market
+order always fills, so there is no adverse selection. That is a venue-access
+problem, not a strategy problem, and it is blocked: the operator's Binance
+account region-blocks futures (EEA/Romania, confirmed by support, no timeline).
+Scouting is in `results/venue_scouting_2026-06-10.md`; a Kraken port is
+pre-registered at `docs/superpowers/specs/2026-07-13-venue-port-kraken-design.md`.
 
-### Daily (1 minute)
+That pre-registration activates **only** on a PROMOTE verdict, which will now
+never fire. It is closed by the same logic that closed everything else.
 
-```bash
-ssh root@178.105.24.230 'systemctl status "paper-live@*.service" --no-pager | grep Active' | grep -v active
-```
+## What the code is still good for
 
-No output = healthy. Any output = investigate that one engine, leave the rest alone.
-
-### Weekly (Sundays — 10 min)
-
-The `weekly_audit.sh` wrapper runs automatically via launchd. Manually verify by reviewing:
-
-```bash
-# Fresh drift check (decision-grade kill signal)
-./scripts/run_drift_check.sh
-
-# Forward-paper status snapshot
-./scripts/forward_paper_status.sh
-
-# VPS journal validation
-ssh root@178.105.24.230 './bin/journal_validate /var/log/paper-live/journal/'
-```
-
-**Drift detector exit codes that matter:**
-- `0` clean — continue
-- `1` investigation-grade firing — investigate; if a second firing follows ≥7 days later, **kill**
-- `2` insufficient data — keep waiting
-- `4` auto-kill candidate — already two firings 7+ days apart; halt the fleet
-
-### Monthly (Day 30, 60, 90 — 30 min)
-
-Read `results/forward_paper_snapshots/<latest>.txt`. Apply the decision matrix in CLAUDE.md "Day 30" / "Day 60" sections. Don't make symbol-rotation decisions before Day 60.
-
-## Active operator work (does NOT violate "no tinkering")
-
-These are the only **forward-motion** items permitted during forward-paper. Do them in order; each unblocks the next.
-
-### 1. Layer 2 testnet kickoff (this week)
-
-Plumbing + smoke harness complete; needs operator action:
-
-1. Generate testnet credentials at https://testnet.binancefuture.com (separate from mainnet keys).
-2. `export BINANCE_API_KEY=... BINANCE_API_SECRET=...`
-3. Run the smoke harness (5 min) to verify connectivity + auth + startup:
-   ```bash
-   LAYER2_SMOKE_ACKNOWLEDGE_TESTNET=YES bash scripts/layer2_smoke.sh BTCUSDT
-   ```
-   Exit codes: 0 PASS / 1-6 per failure shape (see script header). PASS = connectivity verified.
-4. After smoke PASS, run a longer 24-72h `--executor binance_live_testnet` window. This is when the writer-equals-model cost-stack gate flips from informationally-null to information-bearing (the first real fill produces non-Stub fee/slip).
-5. Verify with the testnet integration tests in `pkg/execution/binance_live_test.go`.
-
-Why now: Layer 2 must precede Layer 3, and Layer 3 needs 7 days of observation. Don't be on the critical path when forward-paper resolves.
-
-### 2. Layer 3 shadow parity (target start ~2026-08-25, before Day 127)
-
-Run TeeExecutor (stub primary + testnet shadow) for ≥7 days via `--layer3-binance-testnet-journal-dir DIR`, then:
-
-```bash
-./scripts/layer3_verdict.sh --stub-dir <stub> --testnet-dir DIR
-```
-
-Exit codes: 0 PASS / 1 THRESHOLD / 2 SIGNAL_DIV / 3 INPUT_ERROR / 4 INSUFFICIENT_DURATION. PASS is required to enter STAGE_1. Use `--skip-min-days` for a dry-run before the real 7-day window.
-
-### 3. Continued audit-fix sweep (ongoing)
-
-The 2026-05-10 session closed 9 fail-open / silent-failure fixes across 5 layers. Cumulative: 60 lens-applicable findings across 7 sessions (last 3 from T2a build, lens-as-self-correction). The "by the 3rd instance the lens is predictive" observation suggests more remain — but the critical-path audit is complete. Treat new findings as opportunistic, not scheduled. New adjacent pattern documented 2026-05-10 PM: writer-equals-model gate informationality — see `docs/AUDIT_LENS.md`.
-
-### 4. PROMOTE-day execution mechanic — DONE (operator can now use)
-
-When forward-paper resolves PROMOTE, the operator runs a single subcommand per phase:
-
-```bash
-bash scripts/stage_promotion.sh phase1 paper STAGE_1   # GATE verification
-bash scripts/stage_promotion.sh phase2                  # operator confirms config diff
-bash scripts/stage_promotion.sh phase3                  # redeploy + STRICT post_deploy
-bash scripts/stage_promotion.sh phase4                  # waits for FIRST_N_TRADES live closes (exit 9 = pending)
-bash scripts/stage_promotion.sh phase5                  # monitoring window 24-72h per stage
-bash scripts/stage_promotion.sh phase6                  # finalize + emit closure-template skeleton
-```
-
-The closure-template skeleton (per `results/promote_closure_template_decision_rule_2026-05-10.md`) prompts the operator to fill in the 11-section artifact within 7 days. State persists between phase invocations via `STATE: PHASE_<N>_COMPLETE` markers in the in-progress artifact, so phase-to-phase walks across days are normal — `phase4` and `phase5` are inherently calendar-bound.
-
-Rollback via `bash scripts/stage_promotion.sh rollback` per runbook §Rollback-path. `status` subcommand shows current progress.
-
-### 5. KILL-day execution mechanic — gap (next fresh-session piece)
-
-Symmetric to (4) but for the KILL path. `results/auto_kill_execution_decision_rule_2026-05-08.md` locks the 6 phases (HALT / OPEN-POSITIONS / ARCHIVE / DOCUMENT / NOTIFY / POSTMORTEM). `cmd/kill_switch` handles Phase 2 (close real-money positions). Phases 1/3/4/5/6 are scattered. A `scripts/auto_kill.sh` orchestrator analogous to `stage_promotion.sh` is the next fresh-session deliverable. ~3-4 hr; pattern transfers partially from `stage_promotion.sh` + `milestone2_launch.sh`. Per the session-length calibration memory: this IS a genuine fresh-session piece (different design space — single-shot urgent vs. staged calendar-bound).
-
-## Things to NOT do (the deal with yourself)
-
-For the next ~120 days you do NOT:
-
-- Change `target_rr`, `signal_tf`, `side-filter`, `max-hold-hours`, `fee-bps`, or `stop-slippage-bps`
-- Add or remove symbols from `configs/symbols.yaml:deployed` (currently 16; REST budget caps near 16-20 anyway at 10s aggTrade poll × 20 weight)
-- Modify code in `pkg/strategy/`, `pkg/execution/`, or `pkg/aggregator/`
-- Run additional sweeps "to check" something — every cell consumes statistical degrees of freedom already spent
-- Promote Strategy A pre-emptively from shadow data (A vs B is a forward-paper question; backtest difference was inside the noise floor)
-- Read into wins/losses inside the 60-day power floor (natural shorts-only WR is 20.6%, σ is enormous at low n)
-
-You DO:
-- Watch logs for engine deaths or error spam
-- Run weekly reconciliation (auto via launchd)
-- Layer 2 → Layer 3 plumbing per above
-- Bug fixes (explicitly allowed — actual bugs only, not "could be better")
-
-## Stopping rules
-
-**Decision-grade (auto-kill):**
-- Drift detector exit code `4` (two firings ≥7 days apart) → `ssh root@178.105.24.230 'systemctl stop "paper-live@*.service"'`, then investigate
-- Drift detector exit code `1` + a separate threshold criterion firing concurrently → same
-
-**Investigation triggers (run drift detector to confirm before acting):**
-- First 60 days net-negative
-- Realized stop-side slippage > 25bp (note: A2 sweep 2026-05-07 puts the actual breakeven cliff at ~81bp, linear in between)
-- Realized WR < 14% over ≥150 trades (below breakeven; rarely fires under any scenario)
-- Single symbol > 40% of cumulative live PnL (calibration: fires in 41% of healthy windows — high false-positive)
-- Two consecutive 30-day windows underperform BTC-HODL benchmark by >$5k each
-
-The full operator scenarios — drift fires, kill protocol, recovery drift, real-money emergency kill — are in `docs/OPERATOR_HANDBOOK.md`. Use it, not this doc, when something is on fire.
-
-## Pre-registered protocols (locked, mechanical application when forward-paper resolves)
-
-- `results/real_money_protocol_decision_rule_2026-05-08.md` — STAGE_1→4 sizing
-- `results/real_money_executor_architecture_decision_rule_2026-05-08.md` — Layer 2/3 gate definitions
-- `results/stage_promotion_runbook_decision_rule_2026-05-08.md` — 6-phase PROMOTE execution (implemented by `scripts/stage_promotion.sh`)
-- `results/promote_closure_template_decision_rule_2026-05-10.md` — 11-section PROMOTE-side closure artifact format
-- `results/auto_kill_execution_decision_rule_2026-05-08.md` — Path C close-all (orchestrator pending — see §5 above)
-- `results/postmortem_template_decision_rule_2026-05-08.md` — locked KILL closure template
-- `results/forward_paper_outcome_resolution_decision_rule_2026-05-10.md` — 5-verdict resolution tree
-- `results/INDEX.md` — full pre-reg catalog (58 artifacts = 30 decision rules + 22 verdicts + 5 syntheses + INDEX)
-
-When forward-paper resolves on ~2026-09-09: PROMOTE-day is `bash scripts/stage_promotion.sh phase1 paper STAGE_1`; KILL-day still requires the auto_kill.sh orchestrator (§5) which is the remaining gap. The rule files lock the decisions; the orchestrators (one shipped, one pending) execute them mechanically.
-
-## Roadmap (NOT urgent — do not let these sneak into the quiet period)
-
-- **Regime detector** — cross-asset realized vol, BTC dominance, etc.; pause engines in ranging conditions. Aspirational.
-- **Per-symbol stopping rule built into the engine** — auto-halt a symbol if 30-day rolling PnL < threshold. Aspirational.
-- **Add a few more symbols** (HBARUSDT, BNBUSDT, IOTAUSDT — GRTUSDT already deployed; TRXUSDT excluded as persistent OOS loser per `configs/symbols.yaml:persistent_losers`) up to the REST cap of ~16-20, **only after Day 60 if performance looks healthy**. Use absolute thresholds for any rotation, never within-window rank.
-
-**Code hygiene (non-PnL):**
-- `pkg/strategy/entry.go` — `MinRR` filter silently ignored in EMA mode. Apply for consistency.
-- `pkg/aggregator/aggregator.go` — at 4H boundaries, 5m candle is processed before 4H bias updates (deflationary, minor).
-- `pkg/execution/stub.go:261` — journal close timestamp uses `time.Now()` instead of tick timestamp. Cosmetic for live; backtest unaffected.
-- `CSVReplay` double-close (defer + main.go defer). Harmless but ugly.
-- `go mod tidy`.
-
-## The single most important sentence in this document
-
-**The work this period is patience and protocol adherence. The real test is not whether the strategy is profitable — it's whether you can leave a working hypothesis alone for ~120 days while the data accumulates. If you find yourself reading this doc looking for permission to tinker, the answer is no.**
+`go build ./...` and `go test ./...` both pass. The engine — journal replay,
+watchdog, drift detection, staged promotion protocol, Telegram tiering — is
+tested and directly reusable if a future project needs it. That, the
+pre-registration discipline, and the 8 bp finding are what this run produced.
+It cost ~3.5 months, ~€45 of hosting, and **zero dollars of trading capital**.

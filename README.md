@@ -2,14 +2,30 @@
 
 A Go-based algorithmic trading engine for Binance USDT-M Futures. Backtesting + paper-live engine + (gated) real-money executor.
 
-> **Operational source of truth: [`CLAUDE.md`](./CLAUDE.md).** It tracks the current strategy, deployment state, locked decision rules, known bugs, the forward-paper validation plan, and the staged real-money promotion protocol. This README covers the project surface — code layout, build/test commands, and operational tooling. For the *current* strategy / running state / open positions / next gate, read CLAUDE.md.
+> **Operational source of truth: [`CLAUDE.md`](./CLAUDE.md).** It tracks the strategy, deployment state, locked decision rules, known bugs, the forward-paper validation plan, and the staged real-money promotion protocol. This README covers the project surface — code layout, build/test commands, and operational tooling. **Both are historical as of 2026-08-05 — see Status below.**
 
-## Status (2026-05 forward-paper window)
+## Status — CLOSED (2026-08-05)
 
-- **Paper-live deploy:** 16 engines on a Hetzner VPS, each running 1 live + 3 shadow strategy variants per symbol.
-- **Live strategy:** `--signal-tf 4H --side-filter short --target-rr 6.0 --max-hold-hours 504`. EMA 9/21 cross. Selected via 6-window walk-forward validation.
-- **Real-money allocation:** ZERO. The `binance_live` executor is code-complete but gated behind forward-paper validation (≥150 trades, ≥60 days net-positive) plus pre-registered Layer 2 (testnet) + Layer 3 (7d shadow parity) gates per `results/real_money_executor_architecture_decision_rule_2026-05-08.md`.
-- **Decision-grade kill mechanism:** `scripts/run_drift_check.sh` (Welch t-test on Bonferroni-corrected metrics; locked at α=0.001). Wired to a weekly launchd cron with Telegram alerts on fire.
+**This project is finished and nothing is running.** The Hetzner VPS was
+destroyed 2026-08-04; all 16 engines, every cron, and the local launchd timers
+are gone. **Zero real money was ever deployed, at any point.**
+
+- **Outcome:** forward-paper terminated early at day 88 of ~112 — **134 trades, WR 17.9%, NET −$1,626.58**, costs **114.2% of gross** (gross +$11,420, fees $9,177, slip $3,870).
+- **Why:** break-even was **8 bp**; the run paid **10 bp**. It failed by two basis points — structural, but narrow.
+- **Both revival routes closed negative 2026-08-05.** Maker entry: fill rate passes (77.3%, n=2,882) but winner-vs-loser fill gap is **−7.1pp, z=−3.74** — a resting short limit misses exactly the trades that win. Wider stops: real fee cut (−65%, 57/57 symbols) reaching only 0.86× breakeven, negative on the deployed book.
+- **Strategy-class search closed** at N≈85 trials, PBO 0.52.
+
+Start with [`NEXT_STEPS.md`](./NEXT_STEPS.md), then `results/INDEX.md` →
+`## Close-out 2026-08-04 → 08-05`. The transferable lessons are in
+`results/v2_lessons_and_design_2026-08-04.md`; the screening rule that
+retroactively rejects every candidate this project ran is
+`results/viability_frontier_2026-07-27.md`.
+
+The run commands below still work against Binance's public API for backtests,
+but every deployment/monitoring instruction in this repo targets infrastructure
+that no longer exists. **`scripts/run_drift_check.sh` should not be run at all**
+— it mutates `drift_check_history.jsonl` and can fabricate a phantom auto-kill
+against a closed book.
 
 ## Build & test
 
@@ -94,6 +110,12 @@ docs/               findings/, plans/, DATA_RECOVERY.md
 ```
 
 ## Operational tooling
+
+> **Historical — none of this works.** The VPS these target was destroyed
+> 2026-08-04, so every `deploy/` and monitoring command below fails at the SSH.
+> `run_drift_check.sh` is worse than non-functional: it appends to
+> `drift_check_history.jsonl` and can fabricate a phantom auto-kill. Listed as
+> a record of how the run was operated.
 
 For the paper-live deploy:
 
