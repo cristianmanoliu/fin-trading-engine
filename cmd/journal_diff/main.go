@@ -17,12 +17,13 @@
 // 100 and flags violations of the threshold.
 //
 // Exit codes:
-//   0  PASS: all matched pairs within threshold AND no signal divergence
-//   1  THRESHOLD VIOLATION: ≥1 matched pair exceeds threshold
-//   2  SIGNAL DIVERGENCE: ≥1 closed trade in one journal has no peer in the
-//      other (the two executors disagreed on whether to trade)
-//   3  INPUT ERROR (bad flags / unreadable journal / corrupt entries beyond
-//      the corrupt-trailing-line tolerance)
+//
+//	0  PASS: all matched pairs within threshold AND no signal divergence
+//	1  THRESHOLD VIOLATION: ≥1 matched pair exceeds threshold
+//	2  SIGNAL DIVERGENCE: ≥1 closed trade in one journal has no peer in the
+//	   other (the two executors disagreed on whether to trade)
+//	3  INPUT ERROR (bad flags / unreadable journal / corrupt entries beyond
+//	   the corrupt-trailing-line tolerance)
 //
 // Both 1 and 2 mean Layer 3 FAILED — operator must NOT promote to STAGE_1
 // and must investigate.
@@ -65,12 +66,12 @@ type journalEntry struct {
 // unclosed "open".
 type trade struct {
 	Symbol  string
-	OpenTS  string  // RFC3339, the matching key across journals
-	Side    string  // "LONG" | "SHORT"
+	OpenTS  string // RFC3339, the matching key across journals
+	Side    string // "LONG" | "SHORT"
 	Entry   float64
 	Exit    float64
 	PnlUSD  float64
-	Outcome string  // "TARGET" | "STOP" | "PARTIAL" | "TIME"
+	Outcome string // "TARGET" | "STOP" | "PARTIAL" | "TIME"
 }
 
 // tradeKey is the across-journal matching identifier. Open timestamp is
@@ -231,9 +232,9 @@ func parseJournalFile(path string) ([]trade, error) {
 
 // pairing is one across-journal trade match.
 type pairing struct {
-	Key    tradeKey
-	A      *trade // from --dir-a (typically the Stub paper-money journal)
-	B      *trade // from --dir-b (typically the BinanceLive testnet journal)
+	Key     tradeKey
+	A       *trade // from --dir-a (typically the Stub paper-money journal)
+	B       *trade // from --dir-b (typically the BinanceLive testnet journal)
 	DiffPct float64
 }
 

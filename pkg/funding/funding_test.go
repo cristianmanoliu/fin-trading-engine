@@ -219,7 +219,7 @@ func TestHistorical_QuotedCSV_EndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewHistorical: %v", err)
 	}
-	openT := time.Date(2020, 1, 1, 0, 0, 1, 0, time.UTC) // strictly after event 1
+	openT := time.Date(2020, 1, 1, 0, 0, 1, 0, time.UTC)   // strictly after event 1
 	closeT := time.Date(2020, 1, 1, 12, 0, 0, 0, time.UTC) // covers event 2 only
 	notional := 100000.0
 	cost := h.ChargeFor(models.Long, notional, openT, closeT)

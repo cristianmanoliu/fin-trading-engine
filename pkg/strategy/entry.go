@@ -37,9 +37,9 @@ type EntryDetector struct {
 	// Bollinger state (used only when BollingerMode=true). Zone flags edge-trigger
 	// the entry: fire only on the FIRST close that enters the band region. Without
 	// this gate, sustained moves below the lower band would re-fire on every candle.
-	bollinger      *indicators.Bollinger
-	inBBLowerZone  bool // last evaluation: close was below lower band
-	inBBUpperZone  bool // last evaluation: close was above upper band
+	bollinger     *indicators.Bollinger
+	inBBLowerZone bool // last evaluation: close was below lower band
+	inBBUpperZone bool // last evaluation: close was above upper band
 
 	// D1 confluence state (used only when Confluence1DMode=true).
 	// Sample 4H closes at CloseTime hour=0 UTC into a 1D EMA pair. Used as
@@ -57,8 +57,8 @@ type EntryDetector struct {
 	// E1 vol-regime state (used only when VolFilterMode=true). Rolling window of
 	// 4H log returns; realized vol annualized via sqrt(6×365). Updated every AddCandle.
 	// Used as a gating filter inside checkEMACrossover. Cat E1: 2026-05-07.
-	logReturns      []float64
-	realizedVol30d  float64 // annualized; 0 until window has ≥30 returns
+	logReturns     []float64
+	realizedVol30d float64 // annualized; 0 until window has ≥30 returns
 
 	// F1 funding-cross state (used only when FundingCrossMode=true). The detector
 	// itself doesn't store funding history — it queries via this accessor at
@@ -108,10 +108,10 @@ type EntryConfig struct {
 	// MACDMode: enter on MACD line crossing signal line. Bullish cross (MACD up
 	// through signal) → long; bearish cross → short. Same exit framework as EMA.
 	// Cat A: MACD test (2026-05-07).
-	MACDMode     bool
-	MACDFast     int // 0 → defaults to 12
-	MACDSlow     int // 0 → defaults to 26
-	MACDSignal   int // 0 → defaults to 9
+	MACDMode   bool
+	MACDFast   int // 0 → defaults to 12
+	MACDSlow   int // 0 → defaults to 26
+	MACDSignal int // 0 → defaults to 9
 
 	// BollingerMode: enter on close breaking outside Bollinger bands. Close <
 	// lower band → bearish breakdown (short); close > upper band → bullish

@@ -21,10 +21,10 @@ func TestValidateExecutorArgs_StubAlwaysOK(t *testing.T) {
 
 func TestValidateExecutorArgs_BinanceLiveRequiresBothCreds(t *testing.T) {
 	cases := []struct {
-		name           string
-		key, secret    string
-		wantErr        bool
-		wantInMessage  string
+		name          string
+		key, secret   string
+		wantErr       bool
+		wantInMessage string
 	}{
 		{"both unset", "", "", true, "BINANCE_API_KEY"},
 		{"only key", "k", "", true, "BINANCE_API_KEY"},

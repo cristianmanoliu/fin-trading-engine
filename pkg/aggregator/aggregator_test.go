@@ -38,10 +38,10 @@ func TestAggregator_OHLCTrackingWithinCandle(t *testing.T) {
 	a := New(make(chan models.Tick))
 	// All ticks within a single 5m window so no candle closes.
 	t0 := time.Date(2026, 5, 6, 12, 0, 0, 0, time.UTC)
-	a.ProcessTick(fixtureTick(t0, 100.0))                      // open=100, h=100, l=100, c=100
-	a.ProcessTick(fixtureTick(t0.Add(1*time.Minute), 110.0))   // c=110, h=110
-	a.ProcessTick(fixtureTick(t0.Add(2*time.Minute), 95.0))    // c=95, l=95
-	a.ProcessTick(fixtureTick(t0.Add(3*time.Minute), 105.0))   // c=105
+	a.ProcessTick(fixtureTick(t0, 100.0))                    // open=100, h=100, l=100, c=100
+	a.ProcessTick(fixtureTick(t0.Add(1*time.Minute), 110.0)) // c=110, h=110
+	a.ProcessTick(fixtureTick(t0.Add(2*time.Minute), 95.0))  // c=95, l=95
+	a.ProcessTick(fixtureTick(t0.Add(3*time.Minute), 105.0)) // c=105
 
 	c5 := a.open[models.Timeframe5m]
 	if c5 == nil {

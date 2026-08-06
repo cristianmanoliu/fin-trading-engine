@@ -4,7 +4,8 @@
 // so you can verify that live paper behaviour matches backtest expectations.
 //
 // Usage:
-//   go run ./cmd/journal_report [--journal-dir ./logs/journal] [--config-dir ./configs]
+//
+//	go run ./cmd/journal_report [--journal-dir ./logs/journal] [--config-dir ./configs]
 package main
 
 import (

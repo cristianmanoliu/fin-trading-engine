@@ -19,23 +19,23 @@ import (
 )
 
 func main() {
-	cfgPath              := flag.String("config", "configs/default.yaml", "path to config file")
-	symbol               := flag.String("symbol", "", "override symbol from config (e.g. ETHUSDT)")
-	year                 := flag.String("year", "", "year for CSV path (e.g. 2024)")
-	month                := flag.String("month", "", "month for CSV path, zero-padded (e.g. 01)")
-	exactFills           := flag.Bool("exact-fills", false, "audit mode: exit at exact stop/target price (no wick overshoot)")
-	includeBoundary      := flag.Bool("include-boundary", false, "audit mode: fold boundary tick into closing candle OHLCV (matches live close semantics)")
+	cfgPath := flag.String("config", "configs/default.yaml", "path to config file")
+	symbol := flag.String("symbol", "", "override symbol from config (e.g. ETHUSDT)")
+	year := flag.String("year", "", "year for CSV path (e.g. 2024)")
+	month := flag.String("month", "", "month for CSV path, zero-padded (e.g. 01)")
+	exactFills := flag.Bool("exact-fills", false, "audit mode: exit at exact stop/target price (no wick overshoot)")
+	includeBoundary := flag.Bool("include-boundary", false, "audit mode: fold boundary tick into closing candle OHLCV (matches live close semantics)")
 	pessimisticAmbiguous := flag.Bool("pessimistic-ambiguous", false, "audit mode: force STOP for LONG wins on 1m bars that also breach the stop (corrects synthetic-tick same-bar bias)")
-	feeBps               := flag.Float64("fee-bps", 0, "round-trip taker fee in basis points charged on entry notional (e.g. 10 = 0.10% Binance Futures Regular)")
-	stopSlippageBps      := flag.Float64("stop-slippage-bps", 0, "additional adverse slippage on losing trades in basis points (e.g. 5 = 0.05% on stop-market fills past trigger)")
-	fundingBpsPerDay     := flag.Float64("funding-bps-per-day", 0, "average daily funding rate drag in bps on entry notional (e.g. 3 = 0.03%/day average Binance perpetual funding)")
-	taxRatePct           := flag.Float64("tax-rate-pct", 0, "effective tax rate applied to portfolio-level net positive PnL at end of run (e.g. 30 = 30%)")
-	signalTF             := flag.String("signal-tf", "5m", "timeframe driving signal evaluation: 5m | 30m | 1H | 2H | 4H | 1D")
-	atrStopMult          := flag.Float64("atr-stop-mult", 0, "EMA-mode stop placement: when > 0, stop = entry ± ATR(period) × mult; 0 = legacy wick-based stop")
-	atrPeriod            := flag.Int("atr-period", 14, "ATR period in candles (only used when --atr-stop-mult > 0)")
-	sideFilter           := flag.String("side-filter", "both", "filter signals by direction: both | long | short")
-	maxHoldHours         := flag.Float64("max-hold-hours", 0, "force-close any open position older than this many hours; 0 = no cap (default). Useful to trim funding-eaten tails.")
-	fundingCSVDir        := flag.String("funding-csv-dir", "", "directory of per-symbol funding CSVs (e.g. data/funding/). When set, replaces --funding-bps-per-day with actual historical Binance funding rates accrued per 8h event with correct per-side sign.")
+	feeBps := flag.Float64("fee-bps", 0, "round-trip taker fee in basis points charged on entry notional (e.g. 10 = 0.10% Binance Futures Regular)")
+	stopSlippageBps := flag.Float64("stop-slippage-bps", 0, "additional adverse slippage on losing trades in basis points (e.g. 5 = 0.05% on stop-market fills past trigger)")
+	fundingBpsPerDay := flag.Float64("funding-bps-per-day", 0, "average daily funding rate drag in bps on entry notional (e.g. 3 = 0.03%/day average Binance perpetual funding)")
+	taxRatePct := flag.Float64("tax-rate-pct", 0, "effective tax rate applied to portfolio-level net positive PnL at end of run (e.g. 30 = 30%)")
+	signalTF := flag.String("signal-tf", "5m", "timeframe driving signal evaluation: 5m | 30m | 1H | 2H | 4H | 1D")
+	atrStopMult := flag.Float64("atr-stop-mult", 0, "EMA-mode stop placement: when > 0, stop = entry ± ATR(period) × mult; 0 = legacy wick-based stop")
+	atrPeriod := flag.Int("atr-period", 14, "ATR period in candles (only used when --atr-stop-mult > 0)")
+	sideFilter := flag.String("side-filter", "both", "filter signals by direction: both | long | short")
+	maxHoldHours := flag.Float64("max-hold-hours", 0, "force-close any open position older than this many hours; 0 = no cap (default). Useful to trim funding-eaten tails.")
+	fundingCSVDir := flag.String("funding-csv-dir", "", "directory of per-symbol funding CSVs (e.g. data/funding/). When set, replaces --funding-bps-per-day with actual historical Binance funding rates accrued per 8h event with correct per-side sign.")
 	fundingFilterMaxBpsPerDay := flag.Float64("funding-filter-max-bps-per-day", 0, "skip SHORT signals when current funding rate × 3 (per-day in bps) exceeds this threshold; 0 = disabled. Requires --funding-csv-dir. e.g. 5 = exclude only extreme bull regimes; 0.1 = exclude all positive funding.")
 	emaFastPeriod := flag.Int("ema-fast-period", 0, "fast EMA period for EMA-cross signal (default 9 when EMAMode is true)")
 	emaSlowPeriod := flag.Int("ema-slow-period", 0, "slow EMA period for EMA-cross signal (default 21 when EMAMode is true)")
@@ -167,31 +167,36 @@ func main() {
 		MomentumMode:      cfg.Strategy.MomentumMode || *momentumMode,
 		PurgatoryMode:     *purgatoryMode,
 		VWAPDeviationMode: cfg.Strategy.VWAPDeviationMode || *vwapDevMode,
-		VWAPDeviationPct:  func() float64 { if *vwapDevPct > 0 { return *vwapDevPct }; return cfg.Strategy.VWAPDeviationPct }(),
-		EMAMode:           cfg.Strategy.EMAMode && !(*momentumMode) && !(*purgatoryMode) && !(*vwapDevMode) && !(*rsiMode) && !(*pdhPdlMode) && !(*macdMode) && !(*bollingerMode),
-		EMAFastPeriod:     *emaFastPeriod,
-		EMASlowPeriod:     *emaSlowPeriod,
-		RSIMode:           *rsiMode,
-		RSIPeriod:         *rsiPeriod,
-		PDHPDLBreakMode:   *pdhPdlMode,
-		MACDMode:          *macdMode,
-		MACDFast:          *macdFast,
-		MACDSlow:          *macdSlow,
-		MACDSignal:        *macdSignal,
-		BollingerMode:        *bollingerMode,
-		BollingerPeriod:      *bollingerPeriod,
-		BollingerStdMult:     *bollingerStdMult,
-		Confluence1DMode:     *confluence1DMode,
-		ConfluenceFastPeriod: *confluenceFastPeriod,
-		ConfluenceSlowPeriod: *confluenceSlowPeriod,
-		VolFilterMode:        *volFilterMode,
-		MaxVolAnnualized:     *maxVolAnnualized,
+		VWAPDeviationPct: func() float64 {
+			if *vwapDevPct > 0 {
+				return *vwapDevPct
+			}
+			return cfg.Strategy.VWAPDeviationPct
+		}(),
+		EMAMode:                   cfg.Strategy.EMAMode && !(*momentumMode) && !(*purgatoryMode) && !(*vwapDevMode) && !(*rsiMode) && !(*pdhPdlMode) && !(*macdMode) && !(*bollingerMode),
+		EMAFastPeriod:             *emaFastPeriod,
+		EMASlowPeriod:             *emaSlowPeriod,
+		RSIMode:                   *rsiMode,
+		RSIPeriod:                 *rsiPeriod,
+		PDHPDLBreakMode:           *pdhPdlMode,
+		MACDMode:                  *macdMode,
+		MACDFast:                  *macdFast,
+		MACDSlow:                  *macdSlow,
+		MACDSignal:                *macdSignal,
+		BollingerMode:             *bollingerMode,
+		BollingerPeriod:           *bollingerPeriod,
+		BollingerStdMult:          *bollingerStdMult,
+		Confluence1DMode:          *confluence1DMode,
+		ConfluenceFastPeriod:      *confluenceFastPeriod,
+		ConfluenceSlowPeriod:      *confluenceSlowPeriod,
+		VolFilterMode:             *volFilterMode,
+		MaxVolAnnualized:          *maxVolAnnualized,
 		FundingCrossMode:          *fundingCrossMode,
 		FundingThresholdBpsPerDay: *fundingThresholdBpsPerDay,
-		ATRStopMult:       *atrStopMult,
-		ATRPeriod:         *atrPeriod,
-		SignalTimeframe:   tf,
-		SideFilter:        sideDir,
+		ATRStopMult:               *atrStopMult,
+		ATRPeriod:                 *atrPeriod,
+		SignalTimeframe:           tf,
+		SideFilter:                sideDir,
 	}
 
 	exec := &execution.Stub{
@@ -256,7 +261,8 @@ func main() {
 	// cmd/engine 2nd-pass fix at fe4bf21 (--funding-filter-max-bps-per-day
 	// silently disabled when provider isn't Historical). Now: exit 1.
 	if *fundingFilterMaxBpsPerDay > 0 {
-		hist, ok := exec.FundingProvider.(*funding.Historical); if !ok {
+		hist, ok := exec.FundingProvider.(*funding.Historical)
+		if !ok {
 			slog.Error("--funding-filter-max-bps-per-day requires --funding-csv-dir to load Historical provider — refusing silent disable",
 				"max_bps_per_day", *fundingFilterMaxBpsPerDay,
 				"funding_csv_dir", *fundingCSVDir,

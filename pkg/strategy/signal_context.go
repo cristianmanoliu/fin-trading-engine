@@ -19,10 +19,10 @@ import (
 // Schema mirrors the existing Stub journal style (event-tagged JSONL) so
 // downstream tools can read both stream types with the same parser.
 type SignalContext struct {
-	Event  string `json:"event"`  // always "signal_context"
+	Event  string `json:"event"` // always "signal_context"
 	Symbol string `json:"symbol"`
-	TS     string `json:"ts"`     // RFC3339 UTC, signal entry time (== sig.Timestamp)
-	Label  string `json:"label"`  // "live" | shadow label (e.g. "bb20", "alt5-15-504")
+	TS     string `json:"ts"`    // RFC3339 UTC, signal entry time (== sig.Timestamp)
+	Label  string `json:"label"` // "live" | shadow label (e.g. "bb20", "alt5-15-504")
 
 	// Trade fundamentals (mirrors what executor.OnSignal will see).
 	Side   string  `json:"side"`

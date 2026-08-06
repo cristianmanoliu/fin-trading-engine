@@ -251,7 +251,7 @@ func TestBinanceLive_OnSignal_SafetyGateBlocks(t *testing.T) {
 	// Gate B: pre-load 24h losses past the cap.
 	bl.SafetyGates.DailyLossUSDCap = 100
 	bl.results = []tradeResult{{
-		signal:  &models.Signal{Symbol: "BTCUSDT", Side: models.Short},
+		signal:   &models.Signal{Symbol: "BTCUSDT", Side: models.Short},
 		exitTime: time.Now(), pnlUSDT: -500,
 	}}
 
@@ -360,8 +360,8 @@ func TestBinanceLive_OnTick_StopHit_Long_FullPath(t *testing.T) {
 	// Exit fill at 49899 (1bp adverse beyond modeled stop).
 	dir := t.TempDir()
 	srv := httptest.NewServer(orderHandler(t, []orderFill{
-		{qty: 1, price: 50000},  // entry
-		{qty: 1, price: 49899},  // stop fill
+		{qty: 1, price: 50000}, // entry
+		{qty: 1, price: 49899}, // stop fill
 	}))
 	defer srv.Close()
 	bl := newBinanceLiveWithMock(t, srv, dir)
@@ -886,7 +886,7 @@ func TestBinanceLive_appendJournal_WriteFailureClearsHandleForRetry(t *testing.T
 	// First call — Write fails on the closed handle.
 	bl.appendJournal(journalEntry{
 		Event: "open", Symbol: "BTCUSDT",
-		TS:    time.Now().UTC().Format(time.RFC3339),
+		TS: time.Now().UTC().Format(time.RFC3339),
 	})
 
 	// Critical assertion: handle MUST be cleared so next call reopens.
@@ -902,8 +902,8 @@ func TestBinanceLive_appendJournal_WriteFailureClearsHandleForRetry(t *testing.T
 	// is a writable temp dir, so the recovery path runs cleanly.
 	bl.appendJournal(journalEntry{
 		Event: "open", Symbol: "BTCUSDT",
-		TS:    time.Now().UTC().Format(time.RFC3339),
-		Side:  "LONG", Entry: 50000, Stop: 49500, Target: 53000,
+		TS:   time.Now().UTC().Format(time.RFC3339),
+		Side: "LONG", Entry: 50000, Stop: 49500, Target: 53000,
 	})
 
 	if bl.journalFile == nil {
@@ -937,9 +937,9 @@ func TestBinanceLive_Recover_RepopulatesGateBLossesAcrossRestart(t *testing.T) {
 	// Two closes within 24h (must be loaded), one outside (must NOT be).
 	// All have notional > 0 so they reflect post-cost-decomp closes.
 	now := time.Now().UTC()
-	old := now.Add(-30 * time.Hour).Format(time.RFC3339)   // OUTSIDE 24h
-	mid := now.Add(-12 * time.Hour).Format(time.RFC3339)   // inside
-	rec := now.Add(-2 * time.Hour).Format(time.RFC3339)    // inside
+	old := now.Add(-30 * time.Hour).Format(time.RFC3339) // OUTSIDE 24h
+	mid := now.Add(-12 * time.Hour).Format(time.RFC3339) // inside
+	rec := now.Add(-2 * time.Hour).Format(time.RFC3339)  // inside
 	// Each close must follow an open (state machine), but the open ts is
 	// not consulted by recent24hLossUSD — only the close ts matters.
 	openLine := func(ts string) string {
@@ -1065,9 +1065,9 @@ func TestBinanceLive_Recover_AfterRecovery_OnTick_StopHit_ClosesNormally(t *test
 	// (2026-05-08T08:00:00Z) since the OnTick pre-open guard skips earlier
 	// ticks.
 	bl.OnTick(models.Tick{
-		Symbol: "BTCUSDT",
+		Symbol:    "BTCUSDT",
 		Timestamp: time.Date(2026, 5, 8, 9, 0, 0, 0, time.UTC),
-		Price: 49899,
+		Price:     49899,
 	})
 	bl.Wait()
 
@@ -2158,7 +2158,7 @@ func TestKillSwitch_KillAll_RateLimit_DoesNotCascadeToOtherPositions(t *testing.
 	}
 	for i, o := range res.Outcomes {
 		if o.Status != "CLOSED" {
-			t.Errorf("outcome[%d] status = %q, want CLOSED (rate-limit must " +
+			t.Errorf("outcome[%d] status = %q, want CLOSED (rate-limit must "+
 				"NOT cascade to subsequent positions)", i, o.Status)
 		}
 	}
@@ -2328,7 +2328,6 @@ func TestKillSwitch_KillAll_CtxCancelDuringBackoff_RecordsFailedAndContinues(t *
 		t.Errorf("ETHUSDT status = %q, want FAILED (batch ctx canceled → NETWORK error); the point is the outcome EXISTS, proving iteration continued", eth.Status)
 	}
 }
-
 
 // ── Audit-pass regression tests (2026-05-09 PM Go-side audit) ────────────────
 

@@ -1056,19 +1056,19 @@ type OrderRouter struct {
 // OrderIntent is the input to SendOrder. Captures what the strategy wants
 // without prescribing the wire format (deferred to implementation).
 type OrderIntent struct {
-	Symbol      string
-	Side        models.Direction
-	Quantity    float64 // contracts
-	Type        string  // "MARKET" at STAGE_1-2; "LIMIT_IOC" considered at STAGE_3+
-	LimitPrice  float64 // only used when Type == "LIMIT_IOC"
-	ReduceOnly  bool    // true for closing orders
+	Symbol     string
+	Side       models.Direction
+	Quantity   float64 // contracts
+	Type       string  // "MARKET" at STAGE_1-2; "LIMIT_IOC" considered at STAGE_3+
+	LimitPrice float64 // only used when Type == "LIMIT_IOC"
+	ReduceOnly bool    // true for closing orders
 }
 
 // OrderResult is the outcome of SendOrder. Always populated even on partial
 // fills or rejections; the FilledQty field disambiguates.
 type OrderResult struct {
 	OrderID    string
-	Status     string  // "FILLED" | "PARTIAL" | "REJECTED" | "ERROR"
+	Status     string // "FILLED" | "PARTIAL" | "REJECTED" | "ERROR"
 	FilledQty  float64
 	AvgPrice   float64
 	FeeUSD     float64 // exchange-reported actual fee
@@ -1672,16 +1672,19 @@ func (r *PositionReconciler) sleepBackoff(ctx context.Context, symbol string) bo
 // blocks an order before it reaches the exchange.
 //
 // Gate A: per-trade $-risk (qty × |entry − stop|) must be ≤ MaxPositionMultiple
-//         × stake. Risk — not notional — is the basis: qty is sized as
-//         stake/stop-distance, so notional runs 20-50× stake by construction
-//         and a notional cap at 1× stake blocks every realistic order (the
-//         2026-06-10 KAVAUSDT Layer 3 block). Position CONCURRENCY (one open
-//         position per symbol) is enforced upstream by handleSignalSync's
-//         position-already-open guard; Gate A bounds the dollar risk a single
-//         order can carry, catching sizing-math blowups before the exchange.
+//
+//	× stake. Risk — not notional — is the basis: qty is sized as
+//	stake/stop-distance, so notional runs 20-50× stake by construction
+//	and a notional cap at 1× stake blocks every realistic order (the
+//	2026-06-10 KAVAUSDT Layer 3 block). Position CONCURRENCY (one open
+//	position per symbol) is enforced upstream by handleSignalSync's
+//	position-already-open guard; Gate A bounds the dollar risk a single
+//	order can carry, catching sizing-math blowups before the exchange.
+//
 // Gate B: rolling 24h realized losses must be ≤ DailyLossUSDCap.
 // Gate C: signal entry price must be within MaxEntrySpreadBps of current
-//         best-bid/best-ask at order time.
+//
+//	best-bid/best-ask at order time.
 type SafetyGates struct {
 	MaxPositionMultiple float64 // Gate A: 1 at STAGE_1-4 per pre-reg
 	DailyLossUSDCap     float64 // Gate B: 10× stake (= $1000 at STAGE_1's $100 stake)

@@ -56,7 +56,7 @@ type Runner struct {
 	// JSONL sidecars for forward-paper pattern-matching analysis. Nil = disabled.
 	// See SignalContext / SignalContextWriter in signal_context.go.
 	signalContext        *SignalContextWriter
-	contextLabel         string // "live" | shadow label, embedded in each record
+	contextLabel         string            // "live" | shadow label, embedded in each record
 	fundingContextReader FundingRateReader // for sidecar only; separate from fundingFilter
 
 	// output

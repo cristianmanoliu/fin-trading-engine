@@ -15,12 +15,12 @@ import "math"
 // Mirrors the EMA struct's lifecycle: Primed() reports readiness; Value()
 // returns 0 until enough data has been observed.
 type RSI struct {
-	period   int
+	period    int
 	prevPrice float64
-	avgGain  float64 // Wilder-smoothed average gain
-	avgLoss  float64 // Wilder-smoothed average loss
-	count    int
-	primed   bool
+	avgGain   float64 // Wilder-smoothed average gain
+	avgLoss   float64 // Wilder-smoothed average loss
+	count     int
+	primed    bool
 }
 
 // NewRSI creates an RSI with the given period (typically 14).

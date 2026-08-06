@@ -108,10 +108,10 @@ func handleCohorts(w http.ResponseWriter, r *http.Request) {
 	svg := template.HTML(EquityCurveSVG(all))
 
 	type pageData struct {
-		State   *State
+		State    *State
 		CurveSVG template.HTML
-		Now     string
-		Stale   bool
+		Now      string
+		Stale    bool
 	}
 	renderTemplate(w, tmplCohorts, pageData{State: st, CurveSVG: svg, Now: time.Now().UTC().Format("2006-01-02 15:04 UTC"), Stale: isStale(st)})
 }

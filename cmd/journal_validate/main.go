@@ -61,10 +61,10 @@ import (
 // because the JSONL surface IS the locked contract; the validator should
 // not break if pkg/execution adds new optional fields.
 type entry struct {
-	Event   string  `json:"event"`
-	Symbol  string  `json:"symbol"`
-	TS      string  `json:"ts"`
-	Outcome string  `json:"outcome,omitempty"`
+	Event   string `json:"event"`
+	Symbol  string `json:"symbol"`
+	TS      string `json:"ts"`
+	Outcome string `json:"outcome,omitempty"`
 
 	// Cost-decomposition fields (close events only, schema from commit
 	// 7939786). Invariant per pkg/execution/stub.go:718:

@@ -15,7 +15,8 @@ import (
 //   - BB shadow (Cat A):    "label:bb:bb_period-bb_std-max_hold_hours"
 //
 // Multiple specs comma-separated. Example:
-//   "alt5-15-504:5-15-504,bb20:bb:20-2.0-504"
+//
+//	"alt5-15-504:5-15-504,bb20:bb:20-2.0-504"
 //
 // Use cases:
 //   - Test parameter variants without changing live deploy

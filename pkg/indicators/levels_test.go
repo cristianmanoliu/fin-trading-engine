@@ -22,7 +22,7 @@ func TestDailyLevelsTracksCurrentDayHighLow(t *testing.T) {
 	d := &DailyLevels{}
 	day := time.Date(2026, 5, 6, 1, 0, 0, 0, time.UTC)
 	d.Update(models.Tick{Timestamp: day, Price: 100.0})
-	d.Update(models.Tick{Timestamp: day.Add(time.Hour), Price: 150.0}) // new high
+	d.Update(models.Tick{Timestamp: day.Add(time.Hour), Price: 150.0})    // new high
 	d.Update(models.Tick{Timestamp: day.Add(2 * time.Hour), Price: 50.0}) // new low
 	d.Update(models.Tick{Timestamp: day.Add(3 * time.Hour), Price: 110.0})
 
@@ -70,7 +70,7 @@ func TestDailyLevelsCurrentDayContinuesAfterRoll(t *testing.T) {
 
 	day2 := time.Date(2026, 5, 7, 1, 0, 0, 0, time.UTC)
 	d.Update(models.Tick{Timestamp: day2, Price: 150.0})
-	d.Update(models.Tick{Timestamp: day2.Add(time.Hour), Price: 250.0}) // new day-2 high
+	d.Update(models.Tick{Timestamp: day2.Add(time.Hour), Price: 250.0})     // new day-2 high
 	d.Update(models.Tick{Timestamp: day2.Add(2 * time.Hour), Price: 130.0}) // new day-2 low
 
 	// PDH/PDL remain day 1 values; day 2 currentHigh/Low track separately.

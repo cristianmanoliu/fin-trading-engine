@@ -18,8 +18,8 @@ import (
 )
 
 const (
-	wsReadDeadline   = 90 * time.Second
-	wsMaxStalls      = 2 // consecutive i/o timeouts before falling back to REST polling
+	wsReadDeadline = 90 * time.Second
+	wsMaxStalls    = 2 // consecutive i/o timeouts before falling back to REST polling
 	// 16 symbols × (60/10) polls/min × 20 weight/call = 1920 weight/min (Binance limit: 2400/min).
 	// Do NOT lower this without recomputing: at 6s × 16 the fleet sat in 50% rate-limit backoff.
 	restPollInterval = 10 * time.Second

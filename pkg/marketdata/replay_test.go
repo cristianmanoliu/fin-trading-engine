@@ -194,7 +194,7 @@ func TestCSVReplay_FieldCountMismatch_TerminatesStream(t *testing.T) {
 	// effectively dead code — the reader-level FPR check fires first.
 	rows := []string{
 		"1000,100,105,95,102,500,60999",     // 7 cols, valid → 4 ticks; sets FPR=7
-		"61000,102,108,101,107",              // 5 cols → reader err → stream terminates
+		"61000,102,108,101,107",             // 5 cols → reader err → stream terminates
 		"121000,107,110,103,108,700,180999", // unreachable
 	}
 	path := writeCSV(t, rows...)

@@ -326,10 +326,10 @@ func TestSummaryAggregation_MixedTrades(t *testing.T) {
 		stub.OnTick(models.Tick{Symbol: "X", Timestamp: now.Add(time.Hour), Price: exit})
 	}
 
-	runTrade(models.Long, 100, 99, 110, 110)   // long win
-	runTrade(models.Long, 100, 99, 110, 99)    // long loss
-	runTrade(models.Short, 100, 101, 90, 90)   // short win
-	runTrade(models.Short, 100, 101, 90, 101)  // short loss
+	runTrade(models.Long, 100, 99, 110, 110)  // long win
+	runTrade(models.Long, 100, 99, 110, 99)   // long loss
+	runTrade(models.Short, 100, 101, 90, 90)  // short win
+	runTrade(models.Short, 100, 101, 90, 101) // short loss
 
 	if len(stub.results) != 4 {
 		t.Fatalf("expected 4 trades, got %d", len(stub.results))
@@ -581,7 +581,7 @@ func TestTrailingStop_AppliesSlipOnWinner(t *testing.T) {
 		EntryPrice: 100, StopLoss: 99, TakeProfit: 110,
 		Timestamp: openTime,
 	})
-	stub.OnTick(models.Tick{Symbol: "X", Timestamp: openTime.Add(time.Hour), Price: 102})  // ratchets
+	stub.OnTick(models.Tick{Symbol: "X", Timestamp: openTime.Add(time.Hour), Price: 102})       // ratchets
 	stub.OnTick(models.Tick{Symbol: "X", Timestamp: openTime.Add(2 * time.Hour), Price: 100.9}) // exits at 101
 
 	r := stub.results[0]
@@ -912,8 +912,8 @@ func writeJournal(t *testing.T, dir, symbol, month string, lines []string) {
 	}
 }
 
-func currentMonthStr() string  { return time.Now().UTC().Format("2006-01") }
-func priorMonthStr() string    { return time.Now().UTC().AddDate(0, -1, 0).Format("2006-01") }
+func currentMonthStr() string { return time.Now().UTC().Format("2006-01") }
+func priorMonthStr() string   { return time.Now().UTC().AddDate(0, -1, 0).Format("2006-01") }
 
 func TestRecover_NoJournalDir_NoOp(t *testing.T) {
 	stub := &Stub{StakeUSDT: 1000, Symbol: "X"} // JournalPath empty
@@ -1166,9 +1166,9 @@ func TestRecover_PreOpenTickGuard_DoesNotCloseRecovered(t *testing.T) {
 
 	// Pre-open tick at a price that would hit target — must be ignored.
 	stub.OnTick(models.Tick{
-		Symbol: "X",
+		Symbol:    "X",
 		Timestamp: time.Date(2026, 5, 7, 7, 0, 0, 0, time.UTC), // 1h BEFORE open
-		Price: 110,
+		Price:     110,
 	})
 	if stub.position == nil {
 		t.Fatal("pre-open tick at target price closed the recovered position — guard failed")
@@ -1176,9 +1176,9 @@ func TestRecover_PreOpenTickGuard_DoesNotCloseRecovered(t *testing.T) {
 
 	// Post-open tick at target price — should close normally.
 	stub.OnTick(models.Tick{
-		Symbol: "X",
+		Symbol:    "X",
 		Timestamp: time.Date(2026, 5, 7, 9, 0, 0, 0, time.UTC), // 1h AFTER open
-		Price: 110,
+		Price:     110,
 	})
 	if stub.position != nil {
 		t.Fatal("post-open tick at target price should have closed the recovered position")

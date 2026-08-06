@@ -6,7 +6,7 @@ import "github.com/cristianmanoliu/fin-trading-engine/pkg/models"
 // Bias gates breakout entries: only signals aligned with bias are emitted.
 // Absorption (reversal) entries are allowed regardless of bias.
 type BiasTracker struct {
-	current  models.Direction
+	current   models.Direction
 	prevClose float64
 }
 

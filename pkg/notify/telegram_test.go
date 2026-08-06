@@ -29,8 +29,8 @@ func TestSend(t *testing.T) {
 	defer srv.Close()
 
 	n := &Notifier{
-		BotToken: "testtoken",
-		ChatID:   "12345",
+		BotToken:   "testtoken",
+		ChatID:     "12345",
 		HTTPClient: &http.Client{Timeout: 5 * time.Second},
 	}
 
@@ -348,10 +348,10 @@ func TestParseMuteHours_Empty_Disabled(t *testing.T) {
 func TestParseMuteHours_Invalid(t *testing.T) {
 	cases := []string{
 		"garbage",
-		"25:00-08:00",      // hour out of range
-		"22:00",            // missing range
-		"22-08",            // missing minutes
-		"abc:def-ghi:jkl",  // non-numeric
+		"25:00-08:00",     // hour out of range
+		"22:00",           // missing range
+		"22-08",           // missing minutes
+		"abc:def-ghi:jkl", // non-numeric
 	}
 	for _, c := range cases {
 		if _, err := parseMuteHours(c, time.UTC); err == nil {
@@ -703,7 +703,6 @@ func TestRateLimiter_GoroutineSafe(t *testing.T) {
 		t.Errorf("concurrent WARN: got %d sent, want 5 (cap)", len(*bodies))
 	}
 }
-
 
 // TestTruncateTelegramText pins the T10 fix — Telegram's 4096-char text
 // limit. Pre-fix, an oversized body returned HTTP 400 on every retry

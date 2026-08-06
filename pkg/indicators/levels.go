@@ -68,4 +68,3 @@ func (d *DailyLevels) KeyLevels(zones []models.Zone) []float64 {
 func (d *DailyLevels) HasData() bool {
 	return d.PDH > 0 && d.PDL > 0
 }
-

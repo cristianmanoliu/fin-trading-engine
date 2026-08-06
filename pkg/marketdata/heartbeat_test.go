@@ -331,7 +331,7 @@ func TestHeartbeat_Run_WithNotifier_NoTelegramOnFeedStall(t *testing.T) {
 		BotToken: "tok",
 		ChatID:   "chat",
 		HTTPClient: &http.Client{
-			Timeout: 5 * time.Second,
+			Timeout:   5 * time.Second,
 			Transport: rewriteTransport{base: http.DefaultTransport, target: srv.URL},
 		},
 	}

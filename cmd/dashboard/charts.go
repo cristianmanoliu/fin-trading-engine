@@ -7,8 +7,8 @@ import (
 )
 
 const (
-	chartW = 700
-	chartH = 200
+	chartW    = 700
+	chartH    = 200
 	chartPadL = 55
 	chartPadR = 15
 	chartPadT = 15

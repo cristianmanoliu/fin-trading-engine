@@ -48,9 +48,9 @@ func truncateTelegramText(text string) string {
 // results/telegram_alert_design_decision_rule_2026-05-08.md). Each tier
 // has different rate limits and mute-hour behavior:
 //
-//   SeverityInfo     ℹ  10/hour   fully muted during mute hours
-//   SeverityWarn     ⚠   5/hour   sent with [QUIET] prefix during mute hours
-//   SeverityCritical 🚨  unlimited never muted
+//	SeverityInfo     ℹ  10/hour   fully muted during mute hours
+//	SeverityWarn     ⚠   5/hour   sent with [QUIET] prefix during mute hours
+//	SeverityCritical 🚨  unlimited never muted
 type Severity int
 
 const (
@@ -360,9 +360,9 @@ func (n *Notifier) redactErr(err error) error {
 // goroutine-safe — the engine has multiple Stub instances + watchdogs that
 // may emit alerts concurrently.
 type rateLimiter struct {
-	mu          sync.Mutex
-	history     map[Severity][]time.Time // timestamps of sends in the last hour
-	suppressed  map[Severity]int         // suppressed events since the last aggregation
+	mu         sync.Mutex
+	history    map[Severity][]time.Time // timestamps of sends in the last hour
+	suppressed map[Severity]int         // suppressed events since the last aggregation
 }
 
 func newRateLimiter() *rateLimiter {

@@ -3,11 +3,11 @@ package indicators
 // EMA is an exponential moving average calculator.
 // Not goroutine-safe — owned exclusively by the strategy runner goroutine.
 type EMA struct {
-	period  int
-	k       float64 // smoothing factor = 2/(period+1)
-	value   float64
-	count   int
-	primed  bool
+	period int
+	k      float64 // smoothing factor = 2/(period+1)
+	value  float64
+	count  int
+	primed bool
 }
 
 // NewEMA creates an EMA with the given period.

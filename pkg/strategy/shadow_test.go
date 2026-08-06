@@ -63,16 +63,16 @@ func TestParseShadowSpecs_MaxHoldZero(t *testing.T) {
 
 func TestParseShadowSpecs_MalformedRejected(t *testing.T) {
 	cases := []string{
-		"missing-colon",                   // no label separator
-		"label:5-15",                      // only 2 params, need 3
-		"label:5-15-336-extra",            // 4 params
-		"label:abc-15-336",                // non-numeric ema_fast
-		"label:5-xyz-336",                 // non-numeric ema_slow
-		"label:5-15-abc",                  // non-numeric max_hold
-		"label:0-15-336",                  // zero ema_fast (must be positive)
-		"label:5-0-336",                   // zero ema_slow
-		"label:-5-15-336",                 // negative ema_fast
-		"label:5-15--336",                 // negative max_hold
+		"missing-colon",        // no label separator
+		"label:5-15",           // only 2 params, need 3
+		"label:5-15-336-extra", // 4 params
+		"label:abc-15-336",     // non-numeric ema_fast
+		"label:5-xyz-336",      // non-numeric ema_slow
+		"label:5-15-abc",       // non-numeric max_hold
+		"label:0-15-336",       // zero ema_fast (must be positive)
+		"label:5-0-336",        // zero ema_slow
+		"label:-5-15-336",      // negative ema_fast
+		"label:5-15--336",      // negative max_hold
 	}
 	for _, c := range cases {
 		_, err := ParseShadowSpecs(c)
@@ -135,12 +135,12 @@ func TestParseShadowSpecs_MixedEMAandBB(t *testing.T) {
 
 func TestParseShadowSpecs_BBMalformed(t *testing.T) {
 	cases := []string{
-		"label:bb:20-2.0",         // only 2 params
-		"label:bb:0-2.0-504",      // bb_period must be > 1
-		"label:bb:1-2.0-504",      // bb_period must be > 1 (1 not allowed)
-		"label:bb:20-0-504",       // bb_std must be positive
-		"label:bb:20-abc-504",     // non-numeric std
-		"label:unknown:20-2.0-504",// unknown type
+		"label:bb:20-2.0",          // only 2 params
+		"label:bb:0-2.0-504",       // bb_period must be > 1
+		"label:bb:1-2.0-504",       // bb_period must be > 1 (1 not allowed)
+		"label:bb:20-0-504",        // bb_std must be positive
+		"label:bb:20-abc-504",      // non-numeric std
+		"label:unknown:20-2.0-504", // unknown type
 	}
 	for _, c := range cases {
 		_, err := ParseShadowSpecs(c)

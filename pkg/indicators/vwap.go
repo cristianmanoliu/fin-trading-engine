@@ -10,9 +10,9 @@ import (
 // It resets at 00:00 UTC daily.
 // Not goroutine-safe — owned exclusively by the StrategyRunner goroutine.
 type VWAP struct {
-	cumPV    float64 // Σ(price × volume)
-	cumVol   float64 // Σ(volume)
-	sessionDay int   // UTC day of the current session
+	cumPV      float64 // Σ(price × volume)
+	cumVol     float64 // Σ(volume)
+	sessionDay int     // UTC day of the current session
 }
 
 // Update incorporates a new tick into the VWAP calculation.

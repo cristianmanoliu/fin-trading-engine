@@ -25,13 +25,13 @@ import (
 )
 
 func main() {
-	cfgPath          := flag.String("config", "configs/default.yaml", "path to config file")
-	feeBps           := flag.Float64("fee-bps", 0, "round-trip taker fee in basis points (e.g. 10 = 0.10% Binance Futures Regular)")
-	stopSlippageBps  := flag.Float64("stop-slippage-bps", 0, "additional adverse slippage on losing trades in basis points (e.g. 5 = 0.05% on stop-market fills past trigger)")
+	cfgPath := flag.String("config", "configs/default.yaml", "path to config file")
+	feeBps := flag.Float64("fee-bps", 0, "round-trip taker fee in basis points (e.g. 10 = 0.10% Binance Futures Regular)")
+	stopSlippageBps := flag.Float64("stop-slippage-bps", 0, "additional adverse slippage on losing trades in basis points (e.g. 5 = 0.05% on stop-market fills past trigger)")
 	fundingBpsPerDay := flag.Float64("funding-bps-per-day", 0, "constant daily funding rate drag in bps (overridden when --funding-csv-dir is set)")
-	sideFilter       := flag.String("side-filter", "both", "filter signals by direction: both | long | short")
-	maxHoldHours     := flag.Float64("max-hold-hours", 0, "force-close any open position older than this many hours; 0 = no cap")
-	fundingCSVDir    := flag.String("funding-csv-dir", "", "directory of per-symbol funding CSVs (e.g. data/funding/); replaces --funding-bps-per-day with historical Binance rates")
+	sideFilter := flag.String("side-filter", "both", "filter signals by direction: both | long | short")
+	maxHoldHours := flag.Float64("max-hold-hours", 0, "force-close any open position older than this many hours; 0 = no cap")
+	fundingCSVDir := flag.String("funding-csv-dir", "", "directory of per-symbol funding CSVs (e.g. data/funding/); replaces --funding-bps-per-day with historical Binance rates")
 	targetRROverride := flag.Float64("target-rr", 0, "override YAML target_rr when > 0")
 	signalTFOverride := flag.String("signal-tf", "", "override YAML signal_tf when set (5m | 30m | 4H)")
 	fundingFilterMaxBpsPerDay := flag.Float64("funding-filter-max-bps-per-day", 0, "skip SHORT signals when current funding rate × 3 (per-day in bps) exceeds this threshold; 0 = disabled. Requires --funding-csv-dir. e.g. 5 = exclude only extreme bull regimes; 0.1 = exclude all positive funding.")
@@ -661,8 +661,8 @@ func main() {
 	}
 
 	hb := marketdata.NewHeartbeat(cfg.Symbol)
-	hb.Notifier = notifier                              // wire Telegram WARN alerts on stale-feed detection
-	hb.StartupGrace = marketdata.DefaultStartupGrace    // suppress Warn alerts during the post-restart WS→REST fallback gap
+	hb.Notifier = notifier                           // wire Telegram WARN alerts on stale-feed detection
+	hb.StartupGrace = marketdata.DefaultStartupGrace // suppress Warn alerts during the post-restart WS→REST fallback gap
 
 	g, gctx := errgroup.WithContext(ctx)
 

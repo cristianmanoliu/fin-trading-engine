@@ -22,8 +22,8 @@ func mockKline(openMs int64, price string) []any {
 	return []any{
 		openMs,
 		price, price, price, price, // open / high / low / close
-		"1.0",               // volume
-		openMs + 60_000 - 1, // closeMs (1m bar)
+		"1.0",                     // volume
+		openMs + 60_000 - 1,       // closeMs (1m bar)
 		"100.0", 1, "0", "0", "0", // quote vol, trades, taker base/quote, ignore
 	}
 }
@@ -241,10 +241,10 @@ func TestBackfillStopsOnPartialPage(t *testing.T) {
 // returning a transient 5xx mid-pagination — the production path is "log warn,
 // proceed with whatever ticks landed" but the failure surface had zero coverage.
 type failingKlineHandler struct {
-	mu        sync.Mutex
-	calls     []url.Values
-	failPage  int  // 1-indexed page number to return 500 on; 0 = never fail
-	bodyOnce  bool // when true, return invalid JSON instead of klines
+	mu       sync.Mutex
+	calls    []url.Values
+	failPage int  // 1-indexed page number to return 500 on; 0 = never fail
+	bodyOnce bool // when true, return invalid JSON instead of klines
 }
 
 func (h *failingKlineHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {

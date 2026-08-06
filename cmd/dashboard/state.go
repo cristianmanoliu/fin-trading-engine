@@ -15,20 +15,20 @@ import (
 // journalEntry mirrors pkg/execution/stub.go:journalEntry exactly.
 // Dashboard is read-only so we replicate rather than export.
 type journalEntry struct {
-	Event   string  `json:"event"`
-	Symbol  string  `json:"symbol"`
-	TS      string  `json:"ts"`
-	Side    string  `json:"side"`
-	Entry   float64 `json:"entry"`
-	Exit    float64 `json:"exit,omitempty"`
-	Stop    float64 `json:"stop"`
-	Target  float64 `json:"target"`
-	PnlPts  float64 `json:"pnl_pts,omitempty"`
-	PnlUSD  float64 `json:"pnl_usd,omitempty"`
-	Outcome string  `json:"outcome,omitempty"`
-	Reason  string  `json:"reason"`
-	MFER    float64 `json:"mfe_r,omitempty"`
-	MAER    float64 `json:"mae_r,omitempty"`
+	Event      string  `json:"event"`
+	Symbol     string  `json:"symbol"`
+	TS         string  `json:"ts"`
+	Side       string  `json:"side"`
+	Entry      float64 `json:"entry"`
+	Exit       float64 `json:"exit,omitempty"`
+	Stop       float64 `json:"stop"`
+	Target     float64 `json:"target"`
+	PnlPts     float64 `json:"pnl_pts,omitempty"`
+	PnlUSD     float64 `json:"pnl_usd,omitempty"`
+	Outcome    string  `json:"outcome,omitempty"`
+	Reason     string  `json:"reason"`
+	MFER       float64 `json:"mfe_r,omitempty"`
+	MAER       float64 `json:"mae_r,omitempty"`
 	GrossUSD   float64 `json:"gross_usd,omitempty"`
 	FeeUSD     float64 `json:"fee_usd,omitempty"`
 	SlipUSD    float64 `json:"slip_usd,omitempty"`
@@ -38,12 +38,12 @@ type journalEntry struct {
 
 // OpenPos is a reconstructed open position (from journal — no live price).
 type OpenPos struct {
-	Symbol  string
-	Side    string
-	Entry   float64
-	Stop    float64
-	Target  float64
-	OpenTS  time.Time
+	Symbol string
+	Side   string
+	Entry  float64
+	Stop   float64
+	Target float64
+	OpenTS time.Time
 }
 
 func (p OpenPos) HoldHours() float64 {
@@ -52,22 +52,22 @@ func (p OpenPos) HoldHours() float64 {
 
 // tradeRecord is a single closed trade.
 type tradeRecord struct {
-	Symbol  string
-	TS      time.Time
-	Outcome string
-	PnlUSD  float64
-	FeeUSD  float64
-	SlipUSD float64
+	Symbol   string
+	TS       time.Time
+	Outcome  string
+	PnlUSD   float64
+	FeeUSD   float64
+	SlipUSD  float64
 	Notional float64
-	MFER    float64
-	MAER    float64
+	MFER     float64
+	MAER     float64
 }
 
 // Cohort holds aggregated stats for one journal directory (live or shadow/label).
 type Cohort struct {
-	Label   string
-	Trades  []tradeRecord
-	Opens   []OpenPos
+	Label  string
+	Trades []tradeRecord
+	Opens  []OpenPos
 
 	// Cached aggregates (populated by aggregate()).
 	TotalTrades    int
@@ -181,8 +181,8 @@ type symStat struct {
 
 // State is the full dashboard state loaded from journal cache.
 type State struct {
-	Live    *Cohort
-	Shadows []*Cohort // alt5-15-336, alt5-15-504, bb20 in directory order
+	Live     *Cohort
+	Shadows  []*Cohort // alt5-15-336, alt5-15-504, bb20 in directory order
 	LoadedAt time.Time
 	CacheDir string
 }
@@ -253,8 +253,8 @@ func loadCohort(label, dir string) (*Cohort, error) {
 	// Track opens per symbol: latest open event per symbol.
 	// An open without a subsequent close = currently open position.
 	type openState struct {
-		entry journalEntry
-		openCount int
+		entry      journalEntry
+		openCount  int
 		closeCount int
 	}
 	symState := make(map[string]*openState)
@@ -389,19 +389,19 @@ func readJSONL(path string, fn func(journalEntry)) {
 
 // GateStatus encodes CLAUDE.md forward-paper go/no-go gates.
 type GateStatus struct {
-	Label string
-	Value string
-	Pass  bool
+	Label   string
+	Value   string
+	Pass    bool
 	Pending bool // insufficient data
 }
 
 const (
-	minTrades   = 150
-	minDays     = 60
-	minWRPct    = 14.3
-	maxSymPct   = 40.0
-	maxFeeBps   = 12.0
-	maxSlipBps  = 20.0
+	minTrades  = 150
+	minDays    = 60
+	minWRPct   = 14.3
+	maxSymPct  = 40.0
+	maxFeeBps  = 12.0
+	maxSlipBps = 20.0
 )
 
 // Gates evaluates the forward-paper criteria for a cohort.
@@ -482,10 +482,10 @@ func (c *Cohort) OverallVerdict() string {
 
 // DriftStatus reads the last entry from drift_check_history.jsonl.
 type DriftStatus struct {
-	LastRunTS  time.Time
-	ExitCode   int
-	AgeDays    int
-	Missing    bool
+	LastRunTS time.Time
+	ExitCode  int
+	AgeDays   int
+	Missing   bool
 }
 
 func LoadDriftStatus(resultsDir string) DriftStatus {
