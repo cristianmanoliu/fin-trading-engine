@@ -211,12 +211,29 @@ locked rule outputs when allowed to fire).
   Verified restorable before the wipe: extracted clean, 417 files, reproduced
   the 134-trade / −$1,626.58 book exactly.
 
-  > **This tarball is now the ONLY copy of the raw trade data.** The VPS was
+  > **This tarball is the primary copy of the raw trade data.** The VPS was
   > destroyed and the local `results/journal_cache/` is gitignored and
-  > untracked. If both are lost, the per-trade record is unrecoverable and only
-  > this document plus the committed weekly snapshots in
+  > untracked. If all copies are lost, the per-trade record is unrecoverable
+  > and only this document plus the committed weekly snapshots in
   > `results/decision_snapshots/` and `results/forward_paper_snapshots/`
-  > survive. Consider a second copy if the raw stream has any future value.
+  > survive.
+
+  **Second copy — RESOLVED 2026-08-06.** The "consider a second copy" action
+  above is closed: the tarball lives in `~/Main/notes`, which is a git repo
+  with a GitHub remote, and it is **tracked, committed, and pushed to
+  `origin/main`** (not gitignored). Verified 2026-08-06:
+
+  - working file, committed blob (`git cat-file blob HEAD:<path>`), and the
+    sha256 recorded above are **all three identical** —
+    `46e2cb57…76a`, 151 KB;
+  - the commit containing it is present on `origin/main`;
+  - restore tested end-to-end: extracts clean, 417 `.jsonl` files, and the
+    flat non-recursive glob over `journal_cache/*.jsonl` (51 files) reproduces
+    **134 trades / WR 17.9% / NET −$1,626.58 / fees $9,176.84 / slip $3,869.84
+    / gross $11,420.10 / costs 114.2%** — every figure in §1 to the penny.
+
+  So the raw stream survives in two independent places (local disk + GitHub).
+  No further action needed.
 
 The strategy was falsified on cost grounds, with the mechanism understood and
 the gross edge confirmed real. That is a complete finding, arrived at without
