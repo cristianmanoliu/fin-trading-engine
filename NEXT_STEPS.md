@@ -90,6 +90,11 @@ plausible-looking task. Do **not**:
 
 ## Read instead
 
+0. **`docs/QUANT_METHOD.md` — start here if you are beginning a *different*
+   quant project.** The transferable method: the order of operations (cheapest
+   disqualifier first), the two checks that killed everything, the
+   pre-registration discipline, and the traps each paid for once. The portable
+   code is `scripts/quant_honesty.py` — one file, stdlib + numpy, `--selftest`.
 1. `results/INDEX.md` → `## Close-out 2026-08-04 → 08-05` — the five closing docs.
 2. `results/v2_lessons_and_design_2026-08-04.md` — **the transferable part.**
    Eight lessons; L1 (validate the fee assumption in an afternoon, before any

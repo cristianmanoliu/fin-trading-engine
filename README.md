@@ -15,7 +15,14 @@ are gone. **Zero real money was ever deployed, at any point.**
 - **Both revival routes closed negative 2026-08-05.** Maker entry: fill rate passes (77.3%, n=2,882) but winner-vs-loser fill gap is **−7.1pp, z=−3.74** — a resting short limit misses exactly the trades that win. Wider stops: real fee cut (−65%, 57/57 symbols) reaching only 0.86× breakeven, negative on the deployed book.
 - **Strategy-class search closed** at N≈85 trials, PBO 0.52.
 
-Start with [`NEXT_STEPS.md`](./NEXT_STEPS.md), then `results/INDEX.md` →
+**Starting a different quant project? Read
+[`docs/QUANT_METHOD.md`](./docs/QUANT_METHOD.md)** — the transferable method
+(order of operations, the two checks that killed every candidate,
+pre-registration discipline, traps). The portable code is one file:
+[`scripts/quant_honesty.py`](./scripts/quant_honesty.py), stdlib + numpy,
+`--selftest`.
+
+Otherwise start with [`NEXT_STEPS.md`](./NEXT_STEPS.md), then `results/INDEX.md` →
 `## Close-out 2026-08-04 → 08-05`. The transferable lessons are in
 `results/v2_lessons_and_design_2026-08-04.md`; the screening rule that
 retroactively rejects every candidate this project ran is
