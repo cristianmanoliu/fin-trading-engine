@@ -1,5 +1,14 @@
 # Candidate #15 — DVOL volatility-risk-premium — VERDICT: MARGINAL (standalone NO-GO; regime-gate suggestive, not deployable) (2026-06-10)
 
+> **RESOLVED NO-GO 2026-08-07.** The BTC/ETH sub-book follow-up flagged below
+> was pre-registered and run:
+> `results/btceth_regime_subbook_verdict_2026-08-07.md`. Combined with #16 the
+> gate reaches 20.2 bp (ETH) gross against a 45 bp requirement and inverts on
+> drop-top-5%. This verdict's numbers reproduce exactly (ETH t=+2.04,
+> complacency +19.64 bp). **Note for anyone citing the search synthesis: its
+> "short only when fear-high" phrasing is inverted relative to THIS document —
+> the favorable bucket is complacency, VRP-z < 0.** No further follow-up.
+
 **Type:** verdict (pre-registered design applied to data → reject standalone; gate flagged).
 **Candidate:** #15 of the 20-candidate search (`results/strategy_candidates_batch2_2026-06-10.md`).
 **Scripts:** `scripts/fetch_dvol.py` (Deribit DVOL) + `scripts/dvol_vrp_study.py`.

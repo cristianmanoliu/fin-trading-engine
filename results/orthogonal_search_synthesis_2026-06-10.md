@@ -1,6 +1,22 @@
 # 20-Candidate Orthogonal Strategy Search — SYNTHESIS (2026-06-10)
 
-**Status:** CLOSED. All 20 candidates resolved (18 tested, 2 data-blocked). Zero deployable survivors. Two independent marginal regime signals surfaced (BTC/ETH-only, not deployable to the alt-heavy live book).
+> **RESOLVED 2026-08-07 — the two MARGINAL signals are now NO-GO.** The
+> follow-up this document recorded as the one actionable lead (§"Recommendation"
+> item 2, the combined #15+#16 gate on a BTC/ETH-only short book) was
+> pre-registered and executed: `results/btceth_regime_subbook_verdict_2026-08-07.md`.
+> The gate is real — it opens on ~21% of days, both symbols positive and
+> same-sign, and stacking the two roughly doubles the conditional edge — but it
+> delivers **20 bp gross against a 45 bp requirement** and **inverts on
+> drop-top-5%** (−20.9 BTC / −23.8 ETH). Final tally: **17 NO-GO, 3
+> data-blocked, 0 survivors.**
+>
+> ⚠️ **SIGN ERROR BELOW.** §"The two real signals" and §"Recommendation" say
+> *"short only when fear-high"*. That is **inverted**: `dvol_vrp_verdict`
+> measures shorts at −16.5 bp under fear (VRP-z>0) and **+19.6 bp under
+> complacency (VRP-z<0)**. The correct gate is `VRP-z < 0`. Do not quote those
+> sentences without this correction.
+
+**Status:** CLOSED. All 20 candidates resolved (18 tested, 2 data-blocked). Zero deployable survivors. Two independent marginal regime signals surfaced (BTC/ETH-only, not deployable to the alt-heavy live book) — **both resolved NO-GO 2026-08-07, see banner.**
 
 **Specs:** `results/strategy_candidates_2026-06-10.md` (#1–#10), `results/strategy_candidates_batch2_2026-06-10.md` (#11–#20).
 **Plan:** `tasks/todo.md`. **Per-candidate verdicts:** see ledger below.

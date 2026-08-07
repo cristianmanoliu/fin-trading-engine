@@ -295,3 +295,39 @@ posture of every document above.
 **Net position after close-out.** The perp EMA class is exhausted. Both v2 routes are closed for independent reasons and do not compose into a rescue. The only remaining route to the missing 2bp is a **cheaper taker venue** (a market order always fills, so there is no adverse selection) — a venue-access problem, not a strategy problem, and blocked by the EEA region restriction (`venue_scouting_2026-06-10.md`, `docs/superpowers/specs/2026-07-13-venue-port-kraken-design.md`). The strategy-class search closed at **N≈85 trials, PBO 0.52**; the governing constraint is `viability_frontier_2026-07-27.md` ("THE LAW"), whose 30-second screening rule — require backtest gross ≥ 3× cost in R — retroactively rejects every candidate this project ever ran.
 
 **Do not re-run Option A or Option B.** Both are pre-registered and settled.
+
+---
+
+## C4 — the last lead, closed 2026-08-07
+
+After the close-out, one untested lead remained: the 20-candidate orthogonal
+search (`orthogonal_search_synthesis_2026-06-10.md`) had ended with two
+MARGINAL signals it explicitly flagged as actionable *if the project ever ran a
+BTC/ETH-only short sub-book*. The alt-heavy deployed book was the stated
+blocker; the book closed 2026-08-04, so the blocker was gone.
+
+- `btceth_regime_subbook_prereg_2026-08-07.md` — **pre-reg**, locked in its own
+  commit (`daa12c9`) before the study was written. One hypothesis, six accept
+  criteria, trial budget 1, no post-hoc parameter freedom. Records a **sign
+  correction**: the synthesis says *"short only when fear-high"*, which is
+  inverted relative to its own source verdict — shorts do worse under fear
+  (VRP-z>0, −16.5 bp) and better under **complacency** (VRP-z<0, +19.6 bp).
+  Also pre-registers the expected failure mode: *passes on t-stats, fails on
+  drop-top-5%.*
+
+- `btceth_regime_subbook_verdict_2026-08-07.md` — **NO-GO.** 6 of 11 criteria
+  fail. The gate is genuinely real: opens on ~21% of days, both symbols
+  positive and same-sign, and stacking two independent signals (corr −0.12)
+  roughly **doubles** the conditional edge (+8.1→+15.8 bp BTC, +12.2→+20.2 bp
+  ETH). It still misses by **~2.5×** — 45 bp gross required, 20 bp delivered —
+  and **inverts on drop-top-5%** (−20.9 / −23.8 bp), with 2026 alone carrying
+  +151/+263 bp. The pre-registered failure mode fired exactly as written. Both
+  source verdicts were re-run the same day and reproduce to the decimal.
+  Harness: `scripts/btceth_regime_subbook_study.py` (`--selftest`).
+
+**Final position.** The orthogonal search now tallies **17 NO-GO, 3
+data-blocked, 0 survivors**. Combined with the closed price-only search
+(DSR 0.001, PR≈1.9), the closed maker route, and the closed wider-stop route:
+**no untested lead remains in this project.** The tail-mirage pattern (positive
+mean and median, negative drop-top-5%) has now killed four candidates — #11,
+#12, #20 and C4. It is the single most reliable falsifier this project owns.

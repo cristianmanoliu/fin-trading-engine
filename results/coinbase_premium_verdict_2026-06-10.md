@@ -1,5 +1,13 @@
 # Candidate #16 — Coinbase-Binance premium — VERDICT: MARGINAL (strongest gate of the search; not deployable book-wide) (2026-06-10)
 
+> **RESOLVED NO-GO 2026-08-07.** The BTC/ETH-only sub-book follow-up this
+> verdict flags below was pre-registered and run:
+> `results/btceth_regime_subbook_verdict_2026-08-07.md`. Combined with #15 the
+> gate reaches 15.8 bp (BTC) / 20.2 bp (ETH) gross against a 45 bp requirement,
+> and inverts on drop-top-5%. This verdict's numbers reproduce exactly
+> (t=+2.39 / +2.29, 6/7 years) — the signal is real, the magnitude is not
+> enough. **No further follow-up; do not re-open.**
+
 **Type:** verdict (pre-registered; standalone reject, gate flagged as the strongest finding).
 **Candidate:** #16 of the 20-candidate search (`results/strategy_candidates_batch2_2026-06-10.md`).
 **Scripts:** `scripts/fetch_flow_data.py` (Coinbase candles) + `scripts/coinbase_premium_study.py`.
