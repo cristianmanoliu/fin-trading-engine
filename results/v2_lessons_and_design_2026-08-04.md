@@ -51,8 +51,26 @@ A venue at 8 bp or below, or maker execution anywhere, flips the sign.
 trades over 88 days, break-even fees buy a strategy that is statistically
 indistinguishable from zero, on a book whose top 5% of trades carry more than
 100% of the P&L. Fixing fees converts a clear loser into an unproven
-coin-flip. That is not a business — but it *is* a much better starting point
-than "the class is dead."
+coin-flip. That is not a business — ~~but it *is* a much better starting point
+than "the class is dead."~~
+
+> **CORRECTED 2026-08-09** (`closeout_addendum_2026-08-09.md` §3–§4). The
+> struck sentence is **wrong**. Fee reduction is *not* a better starting
+> point, because fees were never the binding constraint. Measured on the live
+> book at a **zero-cost** venue — free trading, physically impossible — the
+> edge is still only **t = +0.40**, with **P(mean ≤ 0) = 0.345** and
+> **3,337 trades ≈ 7.7 years** required to reach t = 2.0. At a realistic
+> 2bp maker-equivalent it is 15.6 years; at 4bp, 34 years. Removing *all*
+> cost leaves an edge that cannot be signed inside a decade.
+>
+> Root cause: **live gross realized 27% of backtest gross** (+0.085 R vs
+> +0.317 R, identical config; the 6.5y backtest shows t = +5.68 at maker
+> costs). An 8bp venue buys the same unprovable coin-flip with a positive
+> sign — not a better starting point.
+>
+> Everything above the struck sentence in this section — break-even 8bp, the
+> fee ladder, "statistically indistinguishable from zero", "not a business" —
+> **stands**, and the 8bp figure was independently reproduced.
 
 ---
 

@@ -296,6 +296,8 @@ posture of every document above.
 
 **Do not re-run Option A or Option B.** Both are pre-registered and settled.
 
+- `closeout_addendum_2026-08-09.md` — **POST-HOC re-analysis, not a verdict.** Written 4 days after close-out when the closure was questioned on the grounds that the book "is profitable, even a little, live/shadows." **The closure stands, on strengthened grounds.** (1) Premise rejected: live is −$1,626.58; all 8 shadows are positive but **0/9 pass the pre-registered anti-cluster gate** — profit is June 2026, 2-3 days, and the June leaders were the *worst* performers in the final 30 days. (2) **New finding never previously stated:** the class is a **short-volatility product** — r = **−0.588** vs BTC quarterly return, **9/9 positive in BTC-down quarters**, 4/10 in BTC-up; non-crash windows are weakly positive (34/53, p=0.027), so "only works in crashes" would be too strong. (3) **Corrects `v2_lessons_and_design_2026-08-04.md` §1's closing claim** that 8bp is "a much better starting point than 'the class is dead'" — at **zero** cost the live edge is still t=+0.40, P(mean≤0)=0.345, **7.7 years to significance**. Fees were never the binding constraint: live gross realized **27%** of backtest gross. Break-even 8bp reproduced independently by a different route. Basis: 2,887-trade full-history backtest (2020-2026) + recomputed live/shadow journals; regime classification from **BTC price only**. Maker/wider-stops **not** re-run.
+
 ---
 
 ## C4 — the last lead, closed 2026-08-07
