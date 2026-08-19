@@ -89,3 +89,4 @@ data/flow/
 data/spot/
 data/onchain/
 data/fullhist/
+.codegraph/
