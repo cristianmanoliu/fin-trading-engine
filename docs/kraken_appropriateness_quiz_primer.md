@@ -1,9 +1,12 @@
 # Kraken Futures appropriateness quiz — derivatives mechanics primer
 
-**Purpose:** review before the retake (~2026-08-06, 30d after the 2026-07-07 fail).
+**Purpose:** review before retaking the Kraken Futures appropriateness quiz.
+First attempt failed 2026-07-07 (30-day cooldown expired ~2026-08-06).
 Per `docs/venue_port_admin_checklist.md` step 3: "review derivatives mechanics
 (margin, leverage, liquidation, funding, max-loss scenarios) — answer honestly,
 do NOT inflate real-money trading history."
+
+**Updated 2026-09-19** with Kraken-specific details and a self-quiz section (§8).
 
 MiFID II appropriateness tests are pass/fail knowledge checks, not judgment calls.
 They're checking that you understand what can go wrong before letting you access
@@ -121,6 +124,99 @@ Don't conflate these (a common quiz trap):
 - If asked about experience with derivatives: you have ~2.5 months of paper
   (simulated) trading on a systematic strategy, testnet validation in
   progress, zero real-money derivatives trades to date. State that plainly.
+
+## 8. Kraken-specific details
+
+Kraken Futures operates under **Payward Europe (CySEC 342/17, MiFID II)**.
+The quiz is an EEA regulatory requirement, not a Kraken preference.
+
+**Kraken Futures product specifics:**
+- **Multi-collateral** ("flexible futures"): EUR, USD, crypto all accepted as margin.
+  This means your EUR deposit can serve as collateral directly (no forced conversion).
+- **Funding interval:** 8 hours (same as Binance). Funding is settled at 04:00, 12:00,
+  20:00 UTC.
+- **Fee tiers:** base tier is 5 bp taker / 2 bp maker per side = 10 bp round-trip
+  taker. Volume discounts exist but are irrelevant at our scale.
+- **Position modes:** Kraken offers both isolated and cross margin. Default is cross.
+  For the crash overlay, isolated margin is preferred (caps per-position risk).
+- **Leverage limits:** instrument maximum varies (50× on majors, 10-20× on alts).
+  EEA retail clients MAY receive lower limits after the appropriateness quiz,
+  depending on quiz outcome. Our strategy needs only ~18× implicit leverage
+  ($500 stake, ~$28k notional) so even a 20× cap works.
+
+**What the quiz is NOT:**
+- Not a test of trading skill or strategy knowledge.
+- Not checking whether you will be profitable.
+- It IS checking whether you understand the RISKS of leveraged derivatives:
+  how you can lose more than you intended, how liquidation works, and that
+  past performance (including your own simulations) does not guarantee future
+  results.
+
+## 9. Self-quiz (answer these before attempting the real quiz)
+
+Work through each question. If you cannot answer confidently, re-read the
+relevant section above.
+
+**Q1.** You open a SHORT perpetual position on PF_BCHUSD at $400 with 10× leverage
+and $1,000 margin (isolated). BCH price rises to $500 (25% adverse move).
+What happens to your position?
+
+> Your position is liquidated. At 10× leverage, a ~10% adverse move wipes
+> out your margin. A 25% move means you were liquidated well before $500,
+> and the exchange force-closed your position. Your loss is approximately
+> your entire $1,000 margin (possibly slightly more due to liquidation fee
+> and slippage in a fast market).
+
+**Q2.** What is the maximum you can lose on a single isolated-margin position?
+
+> In normal conditions: the margin you posted to that position. In extreme
+> conditions (gap, thin order book, liquidation engine slippage): potentially
+> slightly more than posted margin. This is a tail risk that exchanges
+> disclose but cannot eliminate.
+
+**Q3.** You hold a SHORT perp and the funding rate is negative (perp trading
+below spot). Who pays whom?
+
+> When funding is negative (perp < spot), shorts pay longs. You would pay
+> the funding rate. This is a cost of holding the position, separate from
+> trading fees and from how the trade eventually closes.
+
+**Q4.** What is the difference between margin and a trading fee?
+
+> Margin is collateral. You get it back (minus any trading losses) when the
+> position closes. A trading fee is a cost charged by the exchange on every
+> order execution. Margin is not a fee, not a rent, and not a loss by itself.
+
+**Q5.** Can you lose more than your initial deposit on Kraken Futures?
+
+> Under cross margin: yes, your entire account balance is at risk from any
+> single position. Under isolated margin: in normal conditions, no (capped
+> at the margin posted to that position). In extreme gap/slippage scenarios,
+> losses can slightly exceed posted margin even in isolated mode.
+
+**Q6.** You have 2.5 months of paper (simulated) trading experience with
+a systematic strategy, testnet validation, and zero real-money derivatives
+trades. If the quiz asks about your trading experience, what do you say?
+
+> State exactly that: simulated/paper trading experience only, zero real-money
+> derivatives trades. Do not inflate. The quiz cross-checks answers against
+> each other, so claiming deep experience while getting mechanics wrong
+> is a more likely fail pattern than stating limited experience honestly.
+
+**Q7.** Why does a perpetual future need a funding rate mechanism?
+
+> Because it has no expiry date. Traditional futures converge to spot at
+> expiry. Without that, there is nothing to anchor the perp price to the
+> underlying. The funding rate does this: when the perp trades above spot,
+> longs pay shorts (incentivizing shorts to push price down). When below
+> spot, shorts pay longs. This pulls the perp price toward the spot price.
+
+**Q8.** What happens if you use higher leverage?
+
+> Higher leverage means your liquidation price is closer to your entry price.
+> The position can survive less adverse price movement before being
+> force-closed. Leverage does not change your expected return; it changes
+> how much price movement you can survive.
 
 ---
 

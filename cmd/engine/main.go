@@ -39,7 +39,7 @@ func main() {
 	emaFastPeriod := flag.Int("ema-fast-period", 0, "fast EMA period for live strategy (default 9 when EMAMode is true)")
 	emaSlowPeriod := flag.Int("ema-slow-period", 0, "slow EMA period for live strategy (default 21 when EMAMode is true)")
 	signalContextDir := flag.String("signal-context-dir", "", "directory for signal-context JSONL sidecars; written per-runner under <dir>/<label>/<symbol>-<month>.jsonl. Off by default; when unset and PAPER_LIVE_SIGNAL_CONTEXT_DIR env is set, that env value is used.")
-	executorMode := flag.String("executor", "stub", "executor mode: stub (paper-money default — current paper-live deploy) | binance_live_testnet (Layer 2 integration gate; orders go to testnet.binancefuture.com, prices stay on production fapi) | binance_live (real money, STAGE_1+ promotion). binance_live and binance_live_testnet both require BINANCE_API_KEY and BINANCE_API_SECRET env vars (testnet uses SEPARATE credentials from mainnet) and only govern the LIVE runner — shadow runners always use stub by design.")
+	executorMode := flag.String("executor", "stub", "executor mode: stub (paper-money default — current paper-live deploy) | binance_live_testnet (Layer 2 integration gate; orders go to testnet.binancefuture.com, prices stay on production fapi) | binance_live (real money, STAGE_1+ promotion) | kraken_live (Kraken Futures real orders) | kraken_demo (Kraken Futures demo env). Binance modes require BINANCE_API_KEY/BINANCE_API_SECRET; Kraken modes require KRAKEN_API_KEY/KRAKEN_API_SECRET. Shadow runners always use stub.")
 	layer3TestnetJournalDir := flag.String("layer3-binance-testnet-journal-dir", "", "Layer 3 shadow-parity gate (per real_money_executor_architecture_decision_rule_2026-05-08.md): when set, the LIVE runner is wrapped in a TeeExecutor that fans signals/ticks to BOTH the configured Stub primary AND a BinanceLiveTestnet shadow whose journals land in this directory. Both executors see identical ticks (single-engine, single-subscription) — exactly the 'same input ticks' the locked rule requires. Diff via cmd/journal_diff after ≥7d. Requires --executor=stub (real-money primary forbidden) and BINANCE_API_KEY/BINANCE_API_SECRET (testnet credentials).")
 	flag.Parse()
 
@@ -411,8 +411,53 @@ func main() {
 			fmt.Sprintf("TESTNET engine started on %s\nstake: $%.0f / trade (paper)\nhost: %s",
 				cfg.Symbol, cfg.Strategy.StakeUSDT, hostname))
 
+	case "kraken_live", "kraken_demo":
+		apiKey := os.Getenv("KRAKEN_API_KEY")
+		apiSecret := os.Getenv("KRAKEN_API_SECRET")
+		if apiKey == "" || apiSecret == "" {
+			slog.Error("--executor="+*executorMode+" requires KRAKEN_API_KEY and KRAKEN_API_SECRET env vars",
+				"symbol", cfg.Symbol)
+			_ = notifier.SendStructured(ctx, notify.SeverityCritical,
+				fmt.Sprintf("STARTUP FAILED on %s — --executor=%s without KRAKEN_API_KEY/KRAKEN_API_SECRET",
+					cfg.Symbol, *executorMode))
+			os.Exit(1)
+		}
+		var kl *execution.KrakenLive
+		if *executorMode == "kraken_demo" {
+			kl = execution.NewKrakenDemo(cfg.Symbol, cfg.Strategy.StakeUSDT, apiKey, apiSecret)
+		} else {
+			kl = execution.NewKrakenLive(cfg.Symbol, cfg.Strategy.StakeUSDT, apiKey, apiSecret)
+		}
+		kl.JournalPath = journalDir
+		kl.FeeBps = *feeBps
+		kl.StopSlippageBps = *stopSlippageBps
+		kl.MaxHoldHours = *maxHoldHours
+		kl.FundingBpsPerDay = *fundingBpsPerDay
+		kl.FundingProvider = fundingProvider
+		kl.Notifier = notifier
+		if fundingProvider != nil {
+			kl.FundingBpsPerDay = 0
+		}
+		if recovered, err := kl.RecoverFromJournal(); err != nil {
+			slog.Warn("kraken position recovery failed", "err", err, "symbol", cfg.Symbol)
+		} else if recovered {
+			slog.Info("kraken position recovered from journal", "symbol", cfg.Symbol)
+		}
+		exec = &kl.Stub
+
+		label := "KRAKEN"
+		if *executorMode == "kraken_demo" {
+			label = "KRAKEN DEMO"
+		}
+		slog.Warn(label+" EXECUTOR ACTIVE",
+			"symbol", cfg.Symbol, "kraken_symbol", kl.KrakenSymbol,
+			"stake_usd", cfg.Strategy.StakeUSDT, "api_base", kl.Router.APIBaseURL)
+		_ = notifier.SendStructured(ctx, notify.SeverityWarn,
+			fmt.Sprintf("%s engine started on %s (%s)\nstake: $%.0f / trade\nhost: %s",
+				label, cfg.Symbol, kl.KrakenSymbol, cfg.Strategy.StakeUSDT, hostname))
+
 	default:
-		slog.Error("invalid --executor; must be 'stub', 'binance_live_testnet', or 'binance_live'", "got", *executorMode)
+		slog.Error("invalid --executor; must be 'stub', 'binance_live_testnet', 'binance_live', 'kraken_live', or 'kraken_demo'", "got", *executorMode)
 		os.Exit(1)
 	}
 
@@ -760,8 +805,12 @@ func validateExecutorArgs(executorMode, layer3JournalDir string) error {
 		if os.Getenv("BINANCE_API_KEY") == "" || os.Getenv("BINANCE_API_SECRET") == "" {
 			return fmt.Errorf("--executor=%s requires BINANCE_API_KEY and BINANCE_API_SECRET env vars (testnet mode uses SEPARATE credentials from mainnet)", executorMode)
 		}
+	case "kraken_live", "kraken_demo":
+		if os.Getenv("KRAKEN_API_KEY") == "" || os.Getenv("KRAKEN_API_SECRET") == "" {
+			return fmt.Errorf("--executor=%s requires KRAKEN_API_KEY and KRAKEN_API_SECRET env vars", executorMode)
+		}
 	default:
-		return fmt.Errorf("invalid --executor=%q; must be 'stub', 'binance_live_testnet', or 'binance_live'", executorMode)
+		return fmt.Errorf("invalid --executor=%q; must be 'stub', 'binance_live_testnet', 'binance_live', 'kraken_live', or 'kraken_demo'", executorMode)
 	}
 
 	if layer3JournalDir != "" {
