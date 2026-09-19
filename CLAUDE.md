@@ -35,7 +35,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 > a coordinated decision. Documented and accepted, not fixed — see
 > [`SECURITY_NOTE.md`](./SECURITY_NOTE.md).
 
-**Operator-facing reference:** see `docs/OPERATOR_HANDBOOK.md` for daily/weekly cadence, Telegram tier guide, scenario playbook (drift fires, kill protocol, promotion ready, recovery drift, real-money emergency kill), and tool map. CLAUDE.md is project-history dense; the handbook is the focused operational reference. **Both are historical as of 2026-08-05 — see the banner above.**
+## Current use (post-closure)
+
+This repo is now a **research archive and method library**. The engine code still builds and backtests run against Binance's public API, but nothing is deployed.
+
+- **Transferable method:** `docs/QUANT_METHOD.md` + `scripts/quant_honesty.py` (stdlib + numpy, `--selftest`). Copy into any new quant project.
+- **Research spikes** happen here occasionally (see `results/INDEX.md` for the full catalog). Recent: broad instrument screen (27 tested, VIX calls sole survivor), crash overlay revival (4/4 pass, venue pending).
+- **Build/test still works:** `go build ./...` and `go test ./...` pass. Backtests run via `go run ./cmd/backtest --config configs/btcusdt.yaml`.
+- **Everything below is historical.** Operational commands (deploy, drift check, VPS SSH) target infrastructure that no longer exists.
+
+**Operator-facing reference (HISTORICAL):** see `docs/OPERATOR_HANDBOOK.md` for the daily/weekly cadence, Telegram tier guide, and scenario playbook as they were when the run was live. **Both are historical as of 2026-08-05 — see the banner above.**
 
 ## Strategy status (2026-05-10 — HISTORICAL, see banner)
 
