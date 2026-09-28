@@ -36,7 +36,7 @@ A Telegram bot token was hardcoded in the initial snapshot commit.
 ## Blast radius — this is a SHARED bot
 
 The leaked token does **not** belong to this project's dedicated bot. It
-belongs to a general-purpose bot (id `8549573378`) that also appears in, at
+belongs to a general-purpose bot that also appears in, at
 minimum:
 
 - `fin-reddit-mention-spike`

@@ -1,49 +1,36 @@
 # fin-trading-engine
 
-A Go-based algorithmic trading engine for Binance USDT-M Futures. Backtesting + paper-live engine + (gated) real-money executor.
+A Go trading engine for Binance USDT-M Futures. It has a backtest harness, a paper-live trading mode, and a real-money executor.
 
-> **Operational source of truth: [`CLAUDE.md`](./CLAUDE.md).** It tracks the strategy, deployment state, locked decision rules, known bugs, the forward-paper validation plan, and the staged real-money promotion protocol. This README covers the project surface — code layout, build/test commands, and operational tooling. **Both are historical as of 2026-08-05 — see Status below.**
+> **Source of truth: [`CLAUDE.md`](./CLAUDE.md).** `CLAUDE.md` tracks the strategy, the deployment condition, the locked decision rules, the known bugs, the forward-paper validation plan, and the real-money promotion protocol. This README covers the code layout, the assemble and test commands, and the operate tooling. The two files are historical as of 2026-08-05.
 
-## Status — CLOSED (2026-08-05)
+## Status: closed (2026-08-05)
 
-**This project is finished and nothing is running.** The Hetzner VPS was
-destroyed 2026-08-04; all 16 engines, every cron, and the local launchd timers
-are gone. **Zero real money was ever deployed, at any point.**
+The project is closed. Nothing is active. The Hetzner VPS was removed on 2026-08-04. All 16 engines, all crons, and the local launchd timers are gone. The operator did not deploy money at all.
 
-- **Outcome:** forward-paper terminated early at day 88 of ~112 — **134 trades, WR 17.9%, NET −$1,626.58**, costs **114.2% of gross** (gross +$11,420, fees $9,177, slip $3,870).
-- **Why:** break-even was **8 bp**; the run paid **10 bp**. It failed by two basis points — structural, but narrow.
-- **Both revival routes closed negative 2026-08-05.** Maker entry: fill rate passes (77.3%, n=2,882) but winner-vs-loser fill gap is **−7.1pp, z=−3.74** — a resting short limit misses exactly the trades that win. Wider stops: real fee cut (−65%, 57/57 symbols) reaching only 0.86× breakeven, negative on the deployed book.
-- **Strategy-class search closed** at N≈85 trials, PBO 0.52.
+- **Outcome:** The forward-paper run stopped short at day 88 of approximately 112. The results: 134 trades, WR 17.9%, NET −$1,626.58. Costs were 114.2% of gross (gross +$11,420, fees $9,177, slip $3,870).
+- **Why it closed:** Break-even was 8 bp. The run paid 10 bp. The run missed break-even by two basis points. This is a structural problem.
+- **Revival paths:** The two paths closed negative on 2026-08-05. Maker entry: the fill rate passes (77.3%, n=2,882), but the fill distance between winners and losers is −7.1pp, z=−3.74. A pending short limit misses the trades that win. Wider stops: the actual fee cut is −65% (57/57 symbols), but this reaches only 0.86× break-even, which is negative on the deployed book.
+- **Strategy-class search:** The search closed at N≈85 trials, PBO 0.52.
 
-**Starting a different quant project? Read
-[`docs/QUANT_METHOD.md`](./docs/QUANT_METHOD.md)** — the transferable method
-(order of operations, the two checks that killed every candidate,
-pre-registration discipline, traps). The portable code is one file:
-[`scripts/quant_honesty.py`](./scripts/quant_honesty.py), stdlib + numpy,
-`--selftest`.
+**To start a different quant project:** Read [`docs/QUANT_METHOD.md`](./docs/QUANT_METHOD.md). It gives the sequence of operations, the two checks that killed each candidate, the pre-registration discipline, and the traps. The portable code is [`scripts/quant_honesty.py`](./scripts/quant_honesty.py) (stdlib + numpy, `--selftest`).
 
-Otherwise start with [`NEXT_STEPS.md`](./NEXT_STEPS.md), then `results/INDEX.md` →
-`## Close-out 2026-08-04 → 08-05`. The transferable lessons are in
-`results/v2_lessons_and_design_2026-08-04.md`; the screening rule that
-retroactively rejects every candidate this project ran is
-`results/viability_frontier_2026-07-27.md`.
+To read the close-out results, start with [`NEXT_STEPS.md`](./NEXT_STEPS.md), then read `results/INDEX.md` → `## Close-out 2026-08-04 → 08-05`. The transferable lessons are in `results/v2_lessons_and_design_2026-08-04.md`. The screening rule that rejects each candidate this project ran is in `results/viability_frontier_2026-07-27.md`.
 
-The run commands below still work against Binance's public API for backtests,
-but every deployment/monitoring instruction in this repo targets infrastructure
-that no longer exists. **`scripts/run_drift_check.sh` should not be run at all**
-— it mutates `drift_check_history.jsonl` and can fabricate a phantom auto-kill
-against a closed book.
+The run commands below continue to work against the Binance public API for backtests. But all deployment and monitoring instructions target infrastructure that no longer exists.
 
-## Build & test
+Caution: Do not use `scripts/run_drift_check.sh`. It writes to `drift_check_history.jsonl` and can make an incorrect auto-kill result against a closed book.
 
-Prerequisites: Go 1.26.2 (or any version with toolchain auto-download), `jq`, `curl`, `unzip`.
+## Assemble and test
+
+Prerequisites: Go 1.26.2 (or a version with toolchain auto-download), `jq`, `curl`, `unzip`.
 
 ```bash
 go build ./...
 go test ./...
 ```
 
-Test suite covers strategy entry detection, executor (Stub paper + BinanceLive real-money mocked), indicators, market-data ingestion, funding accrual, notifications, and the journal-diff / journal-validate operator tools.
+The test suite includes strategy entry detection and the Stub paper executor. It also includes the BinanceLive real-money executor (mocked), the indicators, market-data ingestion, and funding accrual. It includes tests for notifications and the `journal_diff` and `journal_validate` operator tools.
 
 ## Run
 
@@ -63,11 +50,11 @@ BINANCE_API_KEY=... BINANCE_API_SECRET=... \
   go run ./cmd/engine --config configs/btcusdt.yaml --executor binance_live
 ```
 
-See `CLAUDE.md` for the full set of locked CLI flags expected on the paper-live deploy and the canonical strategy parameters.
+Read `CLAUDE.md` for the full set of locked CLI flags and the canonical strategy parameters.
 
 ## Architecture
 
-Event-driven pipeline. A single goroutine owns all mutable strategy state — no mutexes anywhere downstream of the tick fan-out.
+The engine uses an event-driven pipeline. A single goroutine owns all mutable strategy data. There are no mutexes downstream of the tick fan-out.
 
 ```
 Tick source (CSV replay or Binance WebSocket)
@@ -87,7 +74,7 @@ Tick source (CSV replay or Binance WebSocket)
                           Executor (Stub paper-money | BinanceLive real-money | TeeExecutor for Layer 3)
 ```
 
-`DataSource` is the only seam between backtest and live. Both `CSVReplay` and `BinanceFutures` produce the same `Tick` stream — everything downstream is identical.
+`DataSource` is the only boundary between backtest and live. The two components, `CSVReplay` and `BinanceFutures`, give the same `Tick` stream. All downstream steps are the same.
 
 ## Project layout
 
@@ -116,13 +103,9 @@ results/            Pre-registration catalog (decision rules + verdicts), drift-
 docs/               findings/, plans/, DATA_RECOVERY.md
 ```
 
-## Operational tooling
+## Operate tooling
 
-> **Historical — none of this works.** The VPS these target was destroyed
-> 2026-08-04, so every `deploy/` and monitoring command below fails at the SSH.
-> `run_drift_check.sh` is worse than non-functional: it appends to
-> `drift_check_history.jsonl` and can fabricate a phantom auto-kill. Listed as
-> a record of how the run was operated.
+> **Historical. None of this works.** The VPS was removed on 2026-08-04. All `deploy/` and monitoring commands below do not work at the SSH step. Do not use `run_drift_check.sh`: it writes to `drift_check_history.jsonl` and can make an incorrect auto-kill result. This section is a record of how the operator used this tooling.
 
 For the paper-live deploy:
 
@@ -160,9 +143,16 @@ python3 scripts/stage_promotion_check.py --from-stage STAGE_1 --stage-1-start <i
 python3 scripts/kill_protocol_check.py
 ```
 
-`post_deploy_check.sh` runs 13 audit sections (engines active / watchdog armed / code in sync / tick freshness / errors / rate-limit / recovery events / executor mode / funding staleness / disk space / drift cron freshness / restart-loop / live-config compliance) and surfaces Telegram WARN on STRICT-mode failures.
+`post_deploy_check.sh` runs 13 audit sections. The sections check:
 
-`forward_paper_status.sh` includes a drift-detector heartbeat section so a silently-stopped weekly cron surfaces at every status check (operator's most frequent natural touchpoint), not just at deploy time.
+- engines active, watchdog armed, code in sync
+- tick freshness, errors, rate-limit, recovery occurrences
+- executor mode, funding staleness, disk space
+- drift cron freshness, restart-loop, live-config compliance
+
+It sends a Telegram WARN on STRICT-mode problems.
+
+`forward_paper_status.sh` includes a drift-detector heartbeat. You can see a stopped weekly cron at each status check, not only at deploy time.
 
 ## Testing
 
@@ -181,17 +171,12 @@ BINANCE_TESTNET_API_KEY=... BINANCE_TESTNET_API_SECRET=... \
   go test ./pkg/execution -run Testnet_ReadOnly -v
 ```
 
-**CI** (`.github/workflows/test.yml`) runs Go test, Python test, plus
-shellcheck (operational scripts strict at warning severity; whole repo
-at error severity) and ruff `--select F` (pyflakes ruleset) on every
-push/PR. Multiplicative payoff — the same patterns that catch about
-half of the historical fail-open bug class are now blocking on every
-future change.
+CI (`.github/workflows/test.yml`) runs Go tests, Python tests, shellcheck (operate scripts at warning level, the full repo at error level), and ruff `--select F` on each push and PR. The same patterns that catch approximately half the historical fail-open bug class must complete on each future change.
 
 ## Known unmodeled risks
 
-See `CLAUDE.md` § "Known unmodeled risks" for the current list. The forward-paper window is the test that resolves the remaining ones.
+See `CLAUDE.md` section "Known unmodeled risks".
 
 ## License
 
-See `LICENSE` (if present) or contact the repo owner.
+See `LICENSE` or contact the repo owner.
