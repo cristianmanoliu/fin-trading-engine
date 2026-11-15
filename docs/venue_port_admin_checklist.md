@@ -62,7 +62,7 @@ Do in order; each step gates the next.
 - [ ] **2. KYC to Intermediate, then Pro** — ID document + proof of residence +
   occupation/funding questionnaire. Pro is the tier futures wants; Intermediate
   unlocks SEPA. Expect hours-to-days.
-- [ ] **3. Activate Kraken Futures** — sign in at futures.kraken.com with the same
+- [x] **3. Activate Kraken Futures** — sign in at futures.kraken.com with the same
   account; complete the EEA derivatives **appropriateness questionnaire** (MiFID II).
   Record the leverage limits actually granted (see caveat above).
 
@@ -77,6 +77,10 @@ Do in order; each step gates the next.
   has the same MiFID gate; Hyperliquid has no appropriateness gate (DEX,
   different risk profile — needs its own scouting pass). Support cannot
   override MiFID eligibility; don't burn time there.
+
+  **Status 2026-09-28: PASSED the retake.** Futures trading is enabled
+  ("You're all set"). Steps 4, 5 (collateral half), 6 and 8 are now unblocked.
+  Leverage limits granted: not yet recorded.
 - [ ] **4. Verify the fee schedule on YOUR account** — expect base tier
   5bp taker / 2bp maker (10bp RT = the exact `--fee-bps 10` backtest assumption).
   Screenshot/record the EEA fee page for the port pre-reg.
@@ -141,6 +145,15 @@ Do in order; each step gates the next.
   decision, NOT sanctioned now. The manual demo retry continues only as
   a low-effort session-start habit until either SMOKE PASS or prod
   smoke passes (whichever first closes step 7's intent).
+
+  **Status 2026-11-15: demo RETIRED by Kraken on 2026-07-14.** The demo
+  host now redirects (301) to a Kraken product page, and the smoke fails
+  with 403 / Cloudflare 1010. Kraken lists no replacement. A restricted
+  test environment exists for "qualified clients" through the API team.
+  Consequence: paper trading cannot use demo fills. The paper method needs
+  a dated revision of the paper pre-reg (stub on Kraken prices, or prod
+  micro-orders). Sources: support.kraken.com/articles/360024809011,
+  github.com/sieblyio/kraken-api/releases/tag/v1.1.7.
 - [ ] **8. Record everything** in a short note (account tier granted, leverage
   limits, fee tier, collateral behavior, demo creds location) — input to the
   port pre-registration.

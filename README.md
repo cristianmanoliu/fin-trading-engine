@@ -11,6 +11,7 @@ The project is closed. Nothing is active. The Hetzner VPS was removed on 2026-08
 - **Outcome:** The forward-paper run stopped short at day 88 of approximately 112. The results: 134 trades, WR 17.9%, NET −$1,626.58. Costs were 114.2% of gross (gross +$11,420, fees $9,177, slip $3,870).
 - **Why it closed:** Break-even was 8 bp. The run paid 10 bp. The run missed break-even by two basis points. This is a structural problem.
 - **Revival paths:** The two paths closed negative on 2026-08-05. Maker entry: the fill rate passes (77.3%, n=2,882), but the fill distance between winners and losers is −7.1pp, z=−3.74. A pending short limit misses the trades that win. Wider stops: the actual fee cut is −65% (57/57 symbols), but this reaches only 0.86× break-even, which is negative on the deployed book.
+- **Crash overlay revival:** closed 2026-11-15. At real Kraken book costs (about 9.5bp entry and stop slip, not in the backtest) it makes about $3k a year at $500, with a worst 2 years of −$69k. See `results/kraken_book_screen_2026-11-15.md`.
 - **Strategy-class search:** The search closed at N≈85 trials, PBO 0.52.
 
 **To start a different quant project:** Read [`docs/QUANT_METHOD.md`](./docs/QUANT_METHOD.md). It gives the sequence of operations, the two checks that killed each candidate, the pre-registration discipline, and the traps. The portable code is [`scripts/quant_honesty.py`](./scripts/quant_honesty.py) (stdlib + numpy, `--selftest`).
