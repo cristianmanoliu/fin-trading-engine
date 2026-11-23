@@ -20,7 +20,7 @@ Costs: fee 10bp RT + slip 5bp = 15bp, per prereg §3. No maker assumption.
 Exit: 0 = ran clean (verdict in stdout), 2 = data/precondition failure.
 Self-check: `--selftest` (synthetic, asserts gate logic + look-ahead exclusion).
 """
-import sys, math, datetime
+import sys, math
 from collections import defaultdict
 import numpy as np
 

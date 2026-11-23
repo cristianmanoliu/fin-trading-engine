@@ -26,7 +26,7 @@ import json
 import os
 import sys
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime
 
 CSV_DIR = os.environ.get(
     "TRADING_ENGINE_CSV_DIR", os.path.expanduser("~/Main/data/trading-engine/csvs")
@@ -229,7 +229,6 @@ def main():
 
 def _selftest():
     """Fill logic + pairing. Run: python3 scripts/maker_fill_replay.py --selftest"""
-    import datetime as _dt
 
     # Chronological stack pairing beats count pairing when opens interleave.
     evs = {"S": [

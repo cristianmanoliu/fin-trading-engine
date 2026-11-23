@@ -1,6 +1,6 @@
 """Kraken Futures book screen: market-order impact vs mid at given USD notionals.
 Method of crash_overlay_revival_prereg_2026-09-19.md §5 (bid side gates), median of N snapshots."""
-import json, sys, time, statistics, urllib.request
+import json, time, statistics, urllib.request
 BOOK = "1000SHIB AAVE ARB BCH CRV HBAR INJ LTC NEAR SUI UNI WLD XLM".split()
 EXCL = ("APT AXS CHZ DOT DYDX ENJ ENS ETC FIL GALA GMX GRT ICP IMX IOTA KAVA LDO MANA MKR OP "
         "PYTH ROSE RUNE SAND SEI SNX TIA VET ZIL 1INCH APE ATOM BLUR FTM").split()
@@ -38,7 +38,7 @@ if __name__ == "__main__":
         for s in syms:
             try:
                 r = screen(s)
-            except Exception as e:
+            except Exception:
                 r = None
             if r: snaps[s].append(r)
         if i < SNAPS - 1: time.sleep(20)
