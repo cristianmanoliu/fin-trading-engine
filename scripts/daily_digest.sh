@@ -437,7 +437,7 @@ trades_remaining=$(( MIN_TRADES - live_trades ))
 (( trades_remaining < 0 )) && trades_remaining=0
 
 if [[ "$live_days" -gt 0 ]] && [[ "$live_trades" -gt 0 ]]; then
-    rate=$(awk -v t="$live_trades" -v d="$live_days" 'BEGIN{r=t/d; if(r<=0) r=0.01; printf "%.2f", r}')
+    rate=$(awk -v t="$live_trades" -v d="$live_days" 'BEGIN{r=t/d; if(r<0.01) r=0.01; printf "%.2f", r}')
     days_for_trades=$(awk -v tr="$trades_remaining" -v r="$rate" 'BEGIN{printf "%.0f", tr/r}')
 else
     rate="0.00"
